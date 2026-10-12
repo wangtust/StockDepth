@@ -1,4 +1,5 @@
 import 'server-only';
+import { readModelConfig, maskedModelKey } from '@/lib/security/model-key';
 
 import { and, asc, desc, eq, isNull } from 'drizzle-orm';
 import { db } from '@/lib/db/drizzle';
@@ -21,7 +22,7 @@ export async function getActiveModelConfigs() {
 }
 
 export async function getModelConfigsForAdmin() {
-  return db
+  const configs = await db
     .select({
       id: llmModelConfigs.id,
       name: llmModelConfigs.name,
@@ -40,6 +41,7 @@ export async function getModelConfigsForAdmin() {
     .from(llmModelConfigs)
     .where(isNull(llmModelConfigs.retiredAt))
     .orderBy(desc(llmModelConfigs.isDefault), asc(llmModelConfigs.id));
+  return configs.map(config => ({ ...config, apiKey: maskedModelKey(config.apiKey) }));
 }
 
 export async function getDefaultModelConfig() {
@@ -50,17 +52,9 @@ export async function getDefaultModelConfig() {
     .orderBy(desc(llmModelConfigs.isDefault), asc(llmModelConfigs.id))
     .limit(1);
 
-  return configs[0] ?? null;
+  return configs[0] ? readModelConfig(configs[0]) : null;
 }
 
 export function maskApiKey(apiKey: string) {
-  if (!apiKey) {
-    return 'not set';
-  }
-
-  if (apiKey.length <= 10) {
-    return 'configured';
-  }
-
-  return `${apiKey.slice(0, 4)}...${apiKey.slice(-4)}`;
+  return maskedModelKey(apiKey);
 }

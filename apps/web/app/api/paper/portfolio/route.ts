@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { db } from '@/lib/db/drizzle';
 import { getUser } from '@/lib/db/queries';
 import { users, paperPortfolios, paperPositions, paperTrades } from '@/lib/db/schema';
+import { centsFromDecimal } from '@/lib/paper/amount';
 import { integerAmount } from '@/lib/paper/trading';
 
 const createPortfolioSchema = z.object({
@@ -12,7 +13,7 @@ const createPortfolioSchema = z.object({
 });
 
 function toCents(value: number) {
-  return Math.round(value * 100);
+  return centsFromDecimal(String(value));
 }
 
 export async function POST(request: NextRequest) {

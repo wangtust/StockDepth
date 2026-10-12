@@ -171,7 +171,7 @@ tail -f var/api.log var/web.log var/analysis.log var/paper.log
 组合缺失、过期、未验证或异币种报价时显示估值不完整，不按零求和。
 手动价格是显式模拟输入；AI 建议价不是成交价，执行在原事务锁内重新读取
 同币种、本交易时段内35分钟有效共享快照并保存不可变引用；休市或无有效报价
-跳过，原持久幂等重放不重新成交。原 int4 cents 保留，亚分价格精确四舍五入到分，
+跳过，原持久幂等重放不重新成交。第五轮 cents 使用 bigint 存储，亚分价格精确四舍五入到分，
 原始快照 decimal 单独保存。分析/财报/新闻工具仍保留原路径。
 
 第四轮验收与部署范围见 [结果文档](docs/optimization-results-round4-2026-10-12.md)。
@@ -180,3 +180,34 @@ tail -f var/api.log var/web.log var/analysis.log var/paper.log
 `round4-backend-regression.cjs` 保留第三轮24项安全断言，迁移/初始化/浏览器
 mock/实际私有服务会话另有独立测试。行情快照和批次审计随实际更新增长，
 空轮询不写审计；本轮没有历史自动删除策略，长期磁盘容量需运维监测。
+
+
+## 金额、归属与模型密钥
+
+第五轮将10个资产 cents 字段扩为 PostgreSQL bigint，中间乘加使用 BigInt；
+现有 API 仍返回 number，每个金额必须在 ±9007199254740991 分内，超界明确拒绝，
+不把 bigint 或静默舍入值发给客户端。数量/ID仍受 int4 限制，Token/费用 numeric 未改。
+复合归属外键和安全范围 CHECK 使用 NOT VALID，保护新写入且保留历史异常；
+审计不修复、不删除历史，不自动 VALIDATE。原锁顺序、成交报价引用和持久幂等保留。
+
+模型 API Key 使用版本化 AES-256-GCM 信封；管理员只显示配置状态。
+新机器须在根 `.env` 安全生成独立 `STOCKDEPTH_MODEL_KEY_ID` 和
+`STOCKDEPTH_MODEL_KEYRING`（ID→随机32字节base64url密钥的JSON），权限600，
+不打印、提交或覆盖已有材料。缺key时旧明文可兼容读，密文读取/新增保存明确失败；
+保存失败发生在原连接探测之前。只读浏览不验证真实key或调用模型。
+先让 web/analysis/paper 全部加载兼容reader与环境，确认付费任务安全空闲再重启；
+原停用服务保持停用。最后在已有运行环境中显式执行
+`scripts/model-key-migrate.ts`：默认dry-run，核实reader后仅该调用设置
+`STOCKDEPTH_MODEL_READERS_READY=true` 才可 `--apply`。空key配置保持未设置；
+工具仅输出数量、事务原子、可重复。轮换先分发新材料并保留旧key，再切换写ID；
+`--rotate --apply` 不删除任何解密材料。数据库备份须另行安全保管对应keyring，
+不要导出明文或把key与密文放在同一份数据库dump。
+
+详见 [密钥设计与部署](docs/model-key-security-round5.md) 和
+[第五轮验收](docs/optimization-results-round5-2026-10-12.md)。
+`round5-backend*` 只接受55483新隔离库；`round5-market.cjs` 为第四轮断言的
+bigint适配版，仍使用市场mock限定的 `stockdepth_round4_backend_*` 名称。
+加密/轮换/损坏测试仅使用合成key和独立55485库，不访问收费模型。
+HTTP与HTTPS的显式模拟交易重试流程保持。生产历史清理默认且强制dry-run：
+`scripts/market-retention.ts --apply` 拒绝，保留成交引用、最新报价、活动租约、
+全部幂等结果与日线。容量继续需要监测，不能承诺历史存储恒定。

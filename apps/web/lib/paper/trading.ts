@@ -1,5 +1,6 @@
 import { and, asc, eq } from 'drizzle-orm';
 import { z } from 'zod';
+import { safeCents, centsFromDecimal } from './amount';
 import { db } from '@/lib/db/drizzle';
 import { users, paperPortfolios, paperPositions, paperTrades, paperTradeRequests } from '@/lib/db/schema';
 import { ensureInstrument } from '../market/catalogue';
@@ -12,14 +13,23 @@ export type PaperTx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 export type Portfolio = typeof paperPortfolios.$inferSelect;
 export type Position = typeof paperPositions.$inferSelect;
 const INT_MAX = 2_147_483_647;
-const INT_MIN = -2_147_483_648;
+const MIN_CENTS = -Number.MAX_SAFE_INTEGER;
 export function integerAmount(value: number, label: string, min = 0): number {
-  if (!Number.isSafeInteger(value) || value < min || value > INT_MAX) {
+  if (!Number.isSafeInteger(value) || value < min || value > Number.MAX_SAFE_INTEGER) {
     throw new PaperTradeError(`${label} is outside the supported integer range.`);
   }
   return value;
 }
-function signedAmount(value: number, label: string) { return integerAmount(value, label, INT_MIN); }
+function signedAmount(value: number, label: string) { return integerAmount(value, label, MIN_CENTS); }
+function exactAmount(value: bigint, label: string, min = 0) {
+  try { return integerAmount(safeCents(value, label), label, min); }
+  catch (error) { throw new PaperTradeError(error instanceof Error ? error.message : 'Unsafe amount.'); }
+}
+function quantityAmount(value: number, label: string, min = 0) {
+  integerAmount(value,label,min);
+  if (value > INT_MAX) throw new PaperTradeError(`${label} is outside the supported integer range.`);
+  return value;
+}
 
 export const manualTradeSchema = z.object({
   portfolioId: z.coerce.number().int().positive().max(INT_MAX),
@@ -40,7 +50,7 @@ export function parseIdempotencyKey(key: string | null): string | undefined {
 // (AI only) -> positions UPDATE ordered by id. The portfolio is the serialization
 // boundary, including absent positions and idempotency records. Never use caller snapshots.
 export async function lockPortfolio(tx: PaperTx, portfolioId: number, userId: number): Promise<Portfolio> {
-  integerAmount(portfolioId, 'Portfolio ID', 1); integerAmount(userId, 'User ID', 1);
+  quantityAmount(portfolioId, 'Portfolio ID', 1); quantityAmount(userId, 'User ID', 1);
   const [user] = await tx.select({ id: users.id, status: users.status, deletedAt: users.deletedAt })
     .from(users).where(eq(users.id, userId)).for('share');
   if (!user || user.status !== 'active' || user.deletedAt) throw new PaperTradeError('Unauthorized', 403);
@@ -55,7 +65,7 @@ export async function lockPositions(tx: PaperTx, portfolio: Portfolio) {
     .where(eq(paperPositions.portfolioId, portfolio.id)).orderBy(asc(paperPositions.id)).for('update');
   for (const p of positions) {
     if (p.userId !== portfolio.userId) throw new PaperTradeError('Position ownership mismatch.');
-    integerAmount(p.quantity, 'Position quantity'); integerAmount(p.avgCostCents, 'Average cost');
+    quantityAmount(p.quantity, 'Position quantity'); integerAmount(p.avgCostCents, 'Average cost');
     integerAmount(p.lastPriceCents, 'Position price'); signedAmount(p.realizedPnlCents, 'Realized PnL');
   }
   return positions;
@@ -65,21 +75,21 @@ export async function applyTrade(tx: PaperTx, portfolio: Portfolio, position: Po
   ticker: string; side: 'buy' | 'sell'; quantity: number; priceCents: number; note: string | null; decisionId?: number; instrumentId?: number; priceSnapshotId?: number; executionPrice?: string;
 }) {
   const { quantity, priceCents } = input;
-  integerAmount(quantity, 'Quantity', 1); integerAmount(priceCents, 'Price', 1);
-  // Reject overflow before computing any writes. All persisted amounts are PostgreSQL int4.
-  const grossAmountCents = integerAmount(quantity * priceCents, 'Trade amount', 1);
+  quantityAmount(quantity, 'Quantity', 1); integerAmount(priceCents, 'Price', 1);
+  // Exact intermediates; reject unsafe JSON-number results before any writes.
+  const grossAmountCents = exactAmount(BigInt(quantity) * BigInt(priceCents), 'Trade amount', 1);
   const oldQuantity = position?.quantity ?? 0;
   if (input.side === 'buy' && portfolio.cashCents < grossAmountCents) throw new PaperTradeError('Not enough cash for this trade.');
   if (input.side === 'sell' && (!position || oldQuantity < quantity)) throw new PaperTradeError('Not enough shares for this sale.');
-  const newQuantity = integerAmount(oldQuantity + (input.side === 'buy' ? quantity : -quantity), 'Position quantity');
-  const newCash = integerAmount(portfolio.cashCents + (input.side === 'buy' ? -grossAmountCents : grossAmountCents), 'Portfolio cash');
-  // The cost numerator can exceed safe JS integers even when the final int4 value fits.
+  const newQuantity = quantityAmount(oldQuantity + (input.side === 'buy' ? quantity : -quantity), 'Position quantity');
+  const newCash = exactAmount(BigInt(portfolio.cashCents) + (input.side === 'buy' ? -BigInt(grossAmountCents) : BigInt(grossAmountCents)), 'Portfolio cash');
+  // The cost numerator can exceed safe JS integers even when the final safe integer value fits.
   const cost = BigInt(oldQuantity) * BigInt(position?.avgCostCents ?? 0) + BigInt(grossAmountCents);
   const avgCostCents = input.side === 'buy'
-    ? integerAmount(Number((2n * cost + BigInt(newQuantity)) / (2n * BigInt(newQuantity))), 'Average cost')
+    ? exactAmount((2n * cost + BigInt(newQuantity)) / (2n * BigInt(newQuantity)), 'Average cost')
     : position!.avgCostCents;
-  const realizedPnlCents = input.side === 'sell' ? signedAmount((priceCents - position!.avgCostCents) * quantity, 'Trade PnL') : 0;
-  const totalPnl = signedAmount((position?.realizedPnlCents ?? 0) + realizedPnlCents, 'Position PnL');
+  const realizedPnlCents = input.side === 'sell' ? exactAmount((BigInt(priceCents) - BigInt(position!.avgCostCents)) * BigInt(quantity), 'Trade PnL', MIN_CENTS) : 0;
+  const totalPnl = exactAmount(BigInt(position?.realizedPnlCents ?? 0) + BigInt(realizedPnlCents), 'Position PnL', MIN_CENTS);
   const values = { ...(input.instrumentId ? {instrumentId:input.instrumentId}:{}), quantity: newQuantity, avgCostCents, lastPriceCents: priceCents, realizedPnlCents: totalPnl, updatedAt: new Date() };
   const [updatedPosition] = position
     ? await tx.update(paperPositions).set(values).where(eq(paperPositions.id, position.id)).returning()
@@ -98,8 +108,8 @@ export async function executeManualTrade(userId: number, raw: ManualTradeInput, 
   const data = manualTradeSchema.parse(raw);
   const ticker = normalizeTicker(data.ticker);
   if (!ticker || ticker.length > 40) throw new PaperTradeError('Invalid ticker.');
-  const priceCents = integerAmount(Math.round(data.price * 100), 'Price', 1);
-  integerAmount(data.quantity * priceCents, 'Trade amount', 1);
+  const priceCents = integerAmount(centsFromDecimal(String(data.price)), 'Price', 1);
+  exactAmount(BigInt(data.quantity) * BigInt(priceCents), 'Trade amount', 1);
   if (key !== undefined) key = parseIdempotencyKey(key);
   // Canonical request identity is stable under JSON property order, but includes the
   // submitted price (not only rounded cents), so changing price cannot reuse a key.

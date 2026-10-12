@@ -1,4 +1,5 @@
 import '../env';
+import { decryptModelKey } from '@/lib/security/model-key';
 import { readFile, readdir } from 'node:fs/promises';
 import { fetchWithBackoff } from './request';
 import { asc, eq, sql } from 'drizzle-orm';
@@ -266,7 +267,7 @@ async function startStockDepth(job: ClaimedJob) {
       model_prices: {
         [modelConfig.modelName]: modelConfig.inputPrice == null ? null : { currency: 'CNY', unit: 'million_tokens', input: modelConfig.inputPrice, cache: modelConfig.cachePrice, output: modelConfig.outputPrice },
       },
-      api_key: modelConfig.apiKey
+      api_key: decryptModelKey(modelConfig.apiKey)
     })
   });
 

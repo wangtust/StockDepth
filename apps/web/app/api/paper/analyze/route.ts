@@ -1,3 +1,5 @@
+import { AmountRangeError } from '@/lib/paper/amount';
+import { buildPortfolioContext } from '@/lib/paper/portfolio-context';
 import { ensureInstrument } from '@/lib/market/catalogue';
 import { and, eq, gte, inArray, sql } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
@@ -41,6 +43,16 @@ function today() {
 }
 
 export async function POST(request: NextRequest) {
+  try { return await enqueueAnalysis(request); }
+  catch (error) {
+    if (error instanceof AmountRangeError) return NextResponse.json(
+      { error: 'Monetary valuation exceeds the supported safe integer range.' }, { status: 422 }
+    );
+    throw error;
+  }
+}
+
+async function enqueueAnalysis(request: NextRequest) {
   const currentUser = await getUser();
   if (!currentUser) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -108,6 +120,11 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  const contexts = new Map(items.map(item => [item.id, buildPortfolioContext({
+    portfolio, positions, targetTicker: normalizeTicker(item.ticker),
+    watchlist: items.map(watchlistItem => watchlistItem.ticker),
+  })]));
+
   const jobs = await db.transaction(async (tx) => {
     const [updatedUser] = await tx
       .update(users)
@@ -130,12 +147,7 @@ export async function POST(request: NextRequest) {
     const createdJobs = [];
     for (const item of items) {
       const ticker = normalizeTicker(item.ticker);
-      const context = buildPortfolioContext({
-        portfolio,
-        positions,
-        targetTicker: ticker,
-        watchlist: items.map((watchlistItem) => watchlistItem.ticker)
-      });
+      const context = contexts.get(item.id)!;
 
       const instrument = await ensureInstrument(ticker, tx);
       const [createdJob] = await tx
@@ -194,58 +206,4 @@ export async function POST(request: NextRequest) {
   }
 
   return NextResponse.json(jobs, { status: 201 });
-}
-
-function buildPortfolioContext({
-  portfolio,
-  positions,
-  targetTicker,
-  watchlist
-}: {
-  portfolio: typeof paperPortfolios.$inferSelect;
-  positions: (typeof paperPositions.$inferSelect)[];
-  targetTicker: string;
-  watchlist: string[];
-}) {
-  const positionValueCents = positions.reduce(
-    (sum, position) => sum + position.quantity * position.lastPriceCents,
-    0
-  );
-  const totalValueCents = portfolio.cashCents + positionValueCents;
-  const targetPosition = positions.find((position) => position.ticker === targetTicker);
-
-  return JSON.stringify({
-    targetTicker,
-    portfolio: {
-      id: portfolio.id,
-      name: portfolio.name,
-      currency: portfolio.currency,
-      cashCents: portfolio.cashCents,
-      initialCashCents: portfolio.initialCashCents,
-      totalValueCents
-    },
-    targetPosition: targetPosition
-      ? {
-          ticker: targetPosition.ticker,
-          quantity: targetPosition.quantity,
-          avgCostCents: targetPosition.avgCostCents,
-          lastPriceCents: targetPosition.lastPriceCents,
-          realizedPnlCents: targetPosition.realizedPnlCents,
-          marketValueCents: targetPosition.quantity * targetPosition.lastPriceCents,
-          weight:
-            totalValueCents > 0
-              ? (targetPosition.quantity * targetPosition.lastPriceCents) / totalValueCents
-              : 0
-        }
-      : null,
-    positions: positions.map((position) => ({
-      ticker: position.ticker,
-      quantity: position.quantity,
-      avgCostCents: position.avgCostCents,
-      lastPriceCents: position.lastPriceCents,
-      marketValueCents: position.quantity * position.lastPriceCents,
-      realizedPnlCents: position.realizedPnlCents
-    })),
-    watchlist
-  });
 }

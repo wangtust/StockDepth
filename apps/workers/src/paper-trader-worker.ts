@@ -1,4 +1,5 @@
 import '../env';
+import { readModelConfig } from '@/lib/security/model-key';
 import { and, asc, eq, isNull, or, sql } from 'drizzle-orm';
 import { db } from '@/lib/db/drizzle';
 import {
@@ -10,6 +11,7 @@ import {
   paperPositions,
   paperTradeDecisions,
 } from '@/lib/db/schema';
+import { centsFromDecimal } from '@/lib/paper/amount';
 import { paperMarketContext } from '@/lib/paper/market-context';
 import { executePaperDecision } from '@/lib/paper/execution';
 
@@ -54,7 +56,7 @@ async function getDefaultModelConfig() {
     .where(and(eq(llmModelConfigs.isActive, true), isNull(llmModelConfigs.retiredAt)))
     .orderBy(sql`${llmModelConfigs.isDefault} desc`, asc(llmModelConfigs.id))
     .limit(1);
-  return config ?? null;
+  return config ? readModelConfig(config) : null;
 }
 
 async function claimNextRun(): Promise<ClaimedRun | null> {
@@ -285,7 +287,7 @@ async function saveDecision({
       confidenceBps: bps(decision.confidence),
       targetWeightBps: bps(decision.target_weight),
       quantity: decision.quantity,
-      priceCents: Math.round(decision.suggested_price * 100),
+      priceCents: centsFromDecimal(String(decision.suggested_price)),
       reason: decision.reason || null,
       riskNotes: decision.risk_notes || null,
       rawResponse: raw,

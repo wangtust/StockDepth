@@ -57,6 +57,6 @@ export function decimalCents(value:string): number {
   const [whole,fraction='']=value.split('.');
   const digits=fraction.padEnd(8,'0');
   const cents=BigInt(whole)*100n+BigInt(digits.slice(0,2))+(digits[2]>='5'?1n:0n);
-  if (cents<=0n || cents>2147483647n) throw new Error('unsupported_price_range');
+  if (cents<=0n || cents>9007199254740991n) throw new Error('unsupported_price_range');
   return Number(cents);
 }

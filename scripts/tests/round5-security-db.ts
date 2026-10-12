@@ -1,0 +1,59 @@
+import assert from 'node:assert/strict';
+import path from 'node:path';
+import { spawnSync } from 'node:child_process';
+import { randomBytes } from 'node:crypto';
+import postgres from '../../apps/web/node_modules/postgres';
+import { decryptModelKey } from '../../apps/web/lib/security/model-key';
+const root = path.resolve(__dirname, '../..');
+const name = 'stockdepth_round5_security_' + Date.now();
+assert.match(name, /^stockdepth_round5_security_[0-9]+$/);
+const url = `postgres://ubuntu@127.0.0.1:55485/${name}`;
+const admin = postgres('postgres://ubuntu@127.0.0.1:55485/postgres', { max: 1, onnotice() {} });
+const db = postgres(url, { max: 1, onnotice() {} });
+const env = { ...process.env, POSTGRES_URL: url, STOCKDEPTH_MODEL_READERS_READY: 'true',
+ STOCKDEPTH_MODEL_KEY_ID: 'old', STOCKDEPTH_MODEL_KEYRING: JSON.stringify({old: randomBytes(32).toString('base64url'), next: randomBytes(32).toString('base64url')}) };
+function run(script: string, args: string[] = [], testEnv = env, expected = 0) {
+ const r = spawnSync(process.execPath, ['--import', 'tsx', path.join(root, script), ...args], { cwd: path.join(root,'apps/workers'), env: testEnv, encoding: 'utf8' });
+ assert.equal(r.status, expected, 'isolated script exit mismatch');
+ assert(!r.stdout.includes('synthetic') && !r.stdout.includes(env.STOCKDEPTH_MODEL_KEYRING));
+ return r.stdout.trim() ? JSON.parse(r.stdout.trim()) : null;
+}
+async function main() {
+ const [server] = await admin`select inet_server_addr()::text host,inet_server_port() port`;
+ assert.equal(server.host,'127.0.0.1/32'); assert.equal(server.port,55485);
+ await admin.unsafe(`create database "${name}"`);
+ const [identity] = await db`select current_database() name, inet_server_port() port`;
+ assert.equal(identity.name,name);assert.equal(identity.port,55485);
+ await db`create table llm_model_configs(id serial primary key,api_key text not null)`;
+ await db`insert into llm_model_configs(api_key) values('synthetic-old')`;
+ let result=run('scripts/model-key-migrate.ts');assert.equal(result.candidates,1);
+ assert.equal((await db`select api_key from llm_model_configs`)[0].api_key,'synthetic-old');
+ run('scripts/model-key-migrate.ts',['--apply'],{...env,STOCKDEPTH_MODEL_READERS_READY:'false'},1);
+ run('scripts/model-key-migrate.ts',['--apply']);
+ const encrypted=(await db`select api_key from llm_model_configs`)[0].api_key;
+ assert.equal(decryptModelKey(encrypted,env),'synthetic-old');
+ assert.equal(run('scripts/model-key-migrate.ts',['--apply']).candidates,0);
+ assert.equal((await db`select api_key from llm_model_configs`)[0].api_key,encrypted);
+ const nextEnv={...env,STOCKDEPTH_MODEL_KEY_ID:'next'};
+ run('scripts/model-key-migrate.ts',['--apply','--rotate'],nextEnv);
+ assert.equal(run('scripts/model-key-migrate.ts',['--apply','--rotate'],nextEnv).candidates,0);
+ await db`insert into llm_model_configs(api_key) values('synthetic-rollback'),('sdkey:v2:broken')`;
+ run('scripts/model-key-migrate.ts',['--apply'],nextEnv,1);
+ assert.equal((await db`select api_key from llm_model_configs where id=2`)[0].api_key,'synthetic-rollback');
+ await db`create table price_snapshots(id integer primary key,instrument_id integer,quoted_at timestamptz,fetched_at timestamptz)`;
+ await db`create table paper_trades(price_snapshot_id integer references price_snapshots(id))`;
+ await db`create table market_sync_state(instrument_id integer,lease_until timestamptz,owner uuid)`;
+ await db`create table market_sync_runs(id integer,owner uuid,ended_at timestamptz)`;
+ await db`create table paper_trade_requests(id integer)`;
+ await db`create table daily_prices(id integer)`;
+ await db`insert into price_snapshots values(1,1,now()-interval '100 days',now()-interval '100 days'),(2,1,now(),now()),(3,1,now()-interval '101 days',now()-interval '101 days'),(4,2,now()-interval '100 days',now()-interval '100 days'),(5,2,now(),now()),(6,3,now()-interval '100 days',now()-interval '100 days')`;
+ await db`insert into paper_trades values(3)`;
+ await db`insert into market_sync_state values(2,now()+interval '1 hour','00000000-0000-0000-0000-000000000001')`;
+ await db`insert into market_sync_runs values(1,'00000000-0000-0000-0000-000000000001',now()-interval '100 days'),(2,'00000000-0000-0000-0000-000000000002',now()-interval '100 days'),(3,'00000000-0000-0000-0000-000000000003',null)`;
+ await db`insert into paper_trade_requests values(1)`;
+ result=run('scripts/market-retention.ts');assert.equal(result.quote_candidates,'1');assert.equal(result.run_candidates,'1');assert.equal(result.replay_retained,'1');
+ run('scripts/market-retention.ts',['--apply'],env,1);
+ assert.equal((await db`select count(*) from price_snapshots`)[0].count,'6');
+ console.log('PASS isolated DB migration dryrun/apply/idempotency/rotation/rollback and retention latest/reference/lease/replay guards; no production access');
+}
+main().catch(() => { console.error('isolated_security_db_failed');process.exitCode=1; }).finally(async()=>{await db.end();await admin.end();});

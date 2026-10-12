@@ -1,16 +1,24 @@
 import 'server-only';
+import { decryptModelKey } from '@/lib/security/model-key';
 import { spawn } from 'node:child_process';
 import path from 'node:path';
 
 export async function testModelConnection(config: {
   provider: string; modelName: string; baseUrl: string; apiKey: string;
 }): Promise<{ success?: boolean; error?: string }> {
+  let apiKey: string;
+  try { apiKey = decryptModelKey(config.apiKey); }
+  catch { return { error: '模型密钥不可用，请联系管理员检查加密配置。' }; }
+  const childEnv = { ...process.env };
+  delete childEnv.STOCKDEPTH_MODEL_KEYRING;
+  delete childEnv.STOCKDEPTH_MODEL_KEY_ID;
   return new Promise((resolve) => {
     const runtimeBin = process.env.STOCKDEPTH_RUNTIME_BIN;
     const child = spawn(runtimeBin ? path.join(runtimeBin, 'python') : 'python',
       ['-m', 'stockdepth.api.model_probe'], {
         cwd: path.resolve(process.cwd(), '../api'),
-        stdio: ['pipe', 'pipe', 'ignore']
+        stdio: ['pipe', 'pipe', 'ignore'],
+        env: childEnv
       });
     let output = '';
     const timeout = setTimeout(() => {
@@ -32,6 +40,6 @@ export async function testModelConnection(config: {
         resolve({ error: '模型测试无法完成，请检查 Provider 和服务器环境。' });
       }
     });
-    child.stdin.end(JSON.stringify(config));
+    child.stdin.end(JSON.stringify({ ...config, apiKey }));
   });
 }

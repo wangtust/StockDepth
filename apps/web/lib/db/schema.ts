@@ -14,8 +14,22 @@ import {
   uuid,
   jsonb,
   check,
+  customType,
+  foreignKey,
 } from 'drizzle-orm/pg-core';
 import { relations, sql } from 'drizzle-orm';
+
+import { safeCents, AmountRangeError } from '../paper/amount';
+
+// Safe JSON-number contract, with exact driver decoding for every cents reader.
+const cents = customType<{ data: number; driverData: string }>({
+  dataType: () => 'bigint',
+  fromDriver: value => safeCents(BigInt(value)),
+  toDriver: value => {
+    if (!Number.isSafeInteger(value)) throw new AmountRangeError('Unsafe cents value.');
+    return BigInt(value).toString();
+  },
+});
 
 export const users = pgTable('users', {
   id: serial('id').primaryKey(),
@@ -152,6 +166,7 @@ export const analysisJobs = pgTable(
     updatedAt: timestamp('updated_at').notNull().defaultNow(),
   },
   (table) => [
+    uniqueIndex('analysis_jobs_id_owner_idx').on(table.id,table.userId),
     index('analysis_jobs_status_created_at_idx').on(table.status, table.createdAt),
     index('analysis_jobs_user_created_at_idx').on(table.userId, table.createdAt),
     index('analysis_jobs_user_visible_id_idx').on(table.userId, table.id).where(sql`hidden_at is null`),
@@ -231,6 +246,7 @@ export const watchlistItems = pgTable(
     updatedAt: timestamp('updated_at').notNull().defaultNow(),
   },
   (table) => [
+    uniqueIndex('watchlist_items_id_owner_idx').on(table.id,table.userId),
     uniqueIndex('watchlist_items_user_ticker_idx').on(table.userId, table.ticker),
     index('watchlist_items_user_active_idx').on(table.userId, table.isActive),
   ]
@@ -244,8 +260,8 @@ export const paperPortfolios = pgTable(
       .notNull()
       .references(() => users.id),
     name: varchar('name', { length: 120 }).notNull().default('Paper Portfolio'),
-    initialCashCents: integer('initial_cash_cents').notNull(),
-    cashCents: integer('cash_cents').notNull(),
+    initialCashCents: cents('initial_cash_cents').notNull(),
+    cashCents: cents('cash_cents').notNull(),
     currency: varchar('currency', { length: 12 }).notNull().default('USD'),
     status: varchar('status', { length: 30 }).notNull().default('active'),
     autoTradeEnabled: boolean('auto_trade_enabled').notNull().default(false),
@@ -253,6 +269,10 @@ export const paperPortfolios = pgTable(
     updatedAt: timestamp('updated_at').notNull().defaultNow(),
   },
   (table) => [
+    uniqueIndex('paper_portfolios_id_owner_idx').on(table.id, table.userId),
+    check('paper_portfolios_initialCashCents_safe', sql`${table.initialCashCents} BETWEEN -9007199254740991 AND 9007199254740991`),
+    check('paper_portfolios_cashCents_safe', sql`${table.cashCents} BETWEEN -9007199254740991 AND 9007199254740991`),
+
     index('paper_portfolios_user_status_idx').on(table.userId, table.status),
     check('paper_portfolios_cash_nonnegative', sql`${table.cashCents} >= 0`),
   ]
@@ -271,13 +291,19 @@ export const paperPositions = pgTable(
     instrumentId: integer('instrument_id').references(() => instruments.id),
     ticker: varchar('ticker', { length: 40 }).notNull(),
     quantity: integer('quantity').notNull().default(0),
-    avgCostCents: integer('avg_cost_cents').notNull().default(0),
-    lastPriceCents: integer('last_price_cents').notNull().default(0),
-    realizedPnlCents: integer('realized_pnl_cents').notNull().default(0),
+    avgCostCents: cents('avg_cost_cents').notNull().default(0),
+    lastPriceCents: cents('last_price_cents').notNull().default(0),
+    realizedPnlCents: cents('realized_pnl_cents').notNull().default(0),
     createdAt: timestamp('created_at').notNull().defaultNow(),
     updatedAt: timestamp('updated_at').notNull().defaultNow(),
   },
   (table) => [
+    uniqueIndex('paper_positions_id_scope_idx').on(table.id, table.portfolioId, table.userId),
+    foreignKey({name:'paper_positions_portfolio_owner_fk', columns:[table.portfolioId,table.userId], foreignColumns:[paperPortfolios.id,paperPortfolios.userId]}),
+    check('paper_positions_avgCostCents_safe', sql`${table.avgCostCents} BETWEEN -9007199254740991 AND 9007199254740991`),
+    check('paper_positions_lastPriceCents_safe', sql`${table.lastPriceCents} BETWEEN -9007199254740991 AND 9007199254740991`),
+    check('paper_positions_realizedPnlCents_safe', sql`${table.realizedPnlCents} BETWEEN -9007199254740991 AND 9007199254740991`),
+
     uniqueIndex('paper_positions_portfolio_ticker_idx').on(table.portfolioId, table.ticker),
     index('paper_positions_user_idx').on(table.userId),
     check('paper_positions_amounts_nonnegative', sql`${table.quantity} >= 0 AND ${table.avgCostCents} >= 0 AND ${table.lastPriceCents} >= 0`),
@@ -302,14 +328,22 @@ export const paperTrades = pgTable(
     ticker: varchar('ticker', { length: 40 }).notNull(),
     side: varchar('side', { length: 12 }).notNull(),
     quantity: integer('quantity').notNull(),
-    priceCents: integer('price_cents').notNull(),
-    grossAmountCents: integer('gross_amount_cents').notNull(),
-    feeCents: integer('fee_cents').notNull().default(0),
-    realizedPnlCents: integer('realized_pnl_cents').notNull().default(0),
+    priceCents: cents('price_cents').notNull(),
+    grossAmountCents: cents('gross_amount_cents').notNull(),
+    feeCents: cents('fee_cents').notNull().default(0),
+    realizedPnlCents: cents('realized_pnl_cents').notNull().default(0),
     note: text('note'),
     createdAt: timestamp('created_at').notNull().defaultNow(),
   },
   (table) => [
+    foreignKey({name:'paper_trades_portfolio_owner_fk',columns:[table.portfolioId,table.userId],foreignColumns:[paperPortfolios.id,paperPortfolios.userId]}),
+    foreignKey({name:'paper_trades_position_scope_fk',columns:[table.positionId,table.portfolioId,table.userId],foreignColumns:[paperPositions.id,paperPositions.portfolioId,paperPositions.userId]}),
+    foreignKey({name:'paper_trades_decision_scope_fk',columns:[table.decisionId,table.portfolioId,table.userId],foreignColumns:[paperTradeDecisions.id,paperTradeDecisions.portfolioId,paperTradeDecisions.userId]}),
+    check('paper_trades_priceCents_safe', sql`${table.priceCents} BETWEEN -9007199254740991 AND 9007199254740991`),
+    check('paper_trades_grossAmountCents_safe', sql`${table.grossAmountCents} BETWEEN -9007199254740991 AND 9007199254740991`),
+    check('paper_trades_feeCents_safe', sql`${table.feeCents} BETWEEN -9007199254740991 AND 9007199254740991`),
+    check('paper_trades_realizedPnlCents_safe', sql`${table.realizedPnlCents} BETWEEN -9007199254740991 AND 9007199254740991`),
+
     index('paper_trades_portfolio_created_idx').on(table.portfolioId, table.createdAt),
     index('paper_trades_user_created_idx').on(table.userId, table.createdAt),
     uniqueIndex('paper_trades_decision_idx').on(table.decisionId),
@@ -327,6 +361,7 @@ export const paperTradeRequests = pgTable('paper_trade_requests', {
   result: jsonb('result').notNull(),
   createdAt: timestamp('created_at').notNull().defaultNow(),
 }, (table) => [
+    foreignKey({name:'paper_requests_portfolio_owner_fk',columns:[table.portfolioId,table.userId],foreignColumns:[paperPortfolios.id,paperPortfolios.userId]}),
   uniqueIndex('paper_trade_requests_scope_key_idx').on(table.userId, table.portfolioId, table.key),
 ]);
 
@@ -349,6 +384,10 @@ export const paperAnalysisRuns = pgTable(
     createdAt: timestamp('created_at').notNull().defaultNow(),
   },
   (table) => [
+    uniqueIndex('paper_analysis_runs_id_scope_job_idx').on(table.id,table.portfolioId,table.userId,table.analysisJobId),
+    foreignKey({name:'paper_runs_portfolio_owner_fk',columns:[table.portfolioId,table.userId],foreignColumns:[paperPortfolios.id,paperPortfolios.userId]}),
+    foreignKey({name:'paper_runs_job_owner_fk',columns:[table.analysisJobId,table.userId],foreignColumns:[analysisJobs.id,analysisJobs.userId]}),
+    foreignKey({name:'paper_runs_watchlist_owner_fk',columns:[table.watchlistItemId,table.userId],foreignColumns:[watchlistItems.id,watchlistItems.userId]}),
     uniqueIndex('paper_analysis_runs_job_idx').on(table.analysisJobId),
     index('paper_analysis_runs_portfolio_created_idx').on(table.portfolioId, table.createdAt),
     index('paper_analysis_runs_user_created_idx').on(table.userId, table.createdAt),
@@ -376,7 +415,7 @@ export const paperTradeDecisions = pgTable(
     confidenceBps: integer('confidence_bps').notNull().default(0),
     targetWeightBps: integer('target_weight_bps').notNull().default(0),
     quantity: integer('quantity').notNull().default(0),
-    priceCents: integer('price_cents').notNull().default(0),
+    priceCents: cents('price_cents').notNull().default(0),
     reason: text('reason'),
     riskNotes: text('risk_notes'),
     rawResponse: text('raw_response'),
@@ -386,6 +425,11 @@ export const paperTradeDecisions = pgTable(
     executedAt: timestamp('executed_at'),
   },
   (table) => [
+    uniqueIndex('paper_decisions_id_scope_idx').on(table.id,table.portfolioId,table.userId),
+    foreignKey({name:'paper_decisions_portfolio_owner_fk',columns:[table.portfolioId,table.userId],foreignColumns:[paperPortfolios.id,paperPortfolios.userId]}),
+    foreignKey({name:'paper_decisions_run_scope_job_fk',columns:[table.paperAnalysisRunId,table.portfolioId,table.userId,table.analysisJobId],foreignColumns:[paperAnalysisRuns.id,paperAnalysisRuns.portfolioId,paperAnalysisRuns.userId,paperAnalysisRuns.analysisJobId]}),
+    check('paper_trade_decisions_priceCents_safe', sql`${table.priceCents} BETWEEN -9007199254740991 AND 9007199254740991`),
+
     uniqueIndex('paper_trade_decisions_analysis_run_idx').on(table.paperAnalysisRunId),
     index('paper_trade_decisions_portfolio_created_idx').on(table.portfolioId, table.createdAt),
     index('paper_trade_decisions_user_created_idx').on(table.userId, table.createdAt),

@@ -1,5 +1,7 @@
 'use server';
 
+import { modelConfigWrite, encryptModelKey } from '@/lib/security/model-key';
+
 import { testModelConnection } from '@/lib/analysis/test-model-server';
 import { revalidatePath } from 'next/cache';
 import { and, eq, inArray, isNull, sql } from 'drizzle-orm';
@@ -88,9 +90,12 @@ export async function createModelConfig(formData: FormData) {
     });
 
   validateModelPrices(data);
+  let storedData: typeof data;
+  try { storedData = modelConfigWrite(data); }
+  catch { return { error: '模型密钥加密配置不可用，配置未保存。' }; }
   const probe = await testModelConnection(data);
   if (!probe.success) return { error: probe.error || '模型测试失败，配置未保存。' };
-  const [created] = await db.insert(llmModelConfigs).values(data).returning();
+  const [created] = await db.insert(llmModelConfigs).values(storedData).returning();
   if (data.isDefault) {
     await clearOtherDefaultModelConfigs(created.id);
   }
@@ -130,6 +135,9 @@ export async function updateModelConfig(formData: FormData) {
   });
 
   validateModelPrices(data);
+  let storedApiKey: string | undefined;
+  try { storedApiKey = data.apiKey ? encryptModelKey(data.apiKey) : undefined; }
+  catch { return { error: '模型密钥加密配置不可用，配置未保存。' }; }
   const updateValues = {
     inputPrice: data.inputPrice,
     cachePrice: data.cachePrice,
@@ -142,7 +150,7 @@ export async function updateModelConfig(formData: FormData) {
     isDefault: !!data.isDefault,
     isActive: !!data.isActive,
     updatedAt: new Date(),
-    ...(data.apiKey ? { apiKey: data.apiKey } : {})
+    ...(storedApiKey ? { apiKey: storedApiKey } : {})
   };
 
   const [updated] = await db

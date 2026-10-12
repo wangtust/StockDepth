@@ -4,7 +4,7 @@ StockDepth 是股票分析与模拟交易平台，支持多智能体分析、分
 
 ## 项目架构
 
-项目由四个独立服务组成，统一读取根目录 `.env`：
+项目由五个独立服务组成，统一读取根目录 `.env`：
 
 | 服务 | 目录 | 职责 |
 | --- | --- | --- |
@@ -12,6 +12,7 @@ StockDepth 是股票分析与模拟交易平台，支持多智能体分析、分
 | 分析 API | `apps/api` | Python 多智能体分析，负责模型调用、行情与新闻数据、报告和检查点 |
 | 分析 worker | `apps/workers` | 从数据库领取分析任务，调用 API 并同步结果 |
 | 模拟交易 worker | `apps/workers` | 处理模拟交易任务与决策 |
+| 行情 worker | `apps/workers` | 共享股票目录的身份、报价和日线同步（显式启动） |
 
 PostgreSQL 保存用户、模型、任务、报告与模拟交易数据，并作为 worker 的持久任务队列。分析文件和检查点默认保存在 `~/.stockdepth`。服务启停由 `bin/stockdepth` 统一管理，详细架构见 [架构说明](docs/architecture.md)。
 
@@ -140,3 +141,42 @@ tail -f var/api.log var/web.log var/analysis.log var/paper.log
 分析并发配置保存在数据库 `analysis_worker_settings` 中，默认全系统 200 个任务、每用户 5 个任务。管理员可在 `/admin/system` 修改，保存后自动影响后续任务调度；超过限制的任务排队。并发数量不再读取 `.env`。
 
 性能测试与本次优化结果见 [性能诊断](docs/performance-2026-10-12.md)，可运行 `node scripts/diagnostics/latency.cjs` 复测页面、接口和数据库延迟。
+
+
+## 共享股票目录与行情
+
+`/dashboard/stocks` 提供已登录用户共享的股票搜索、报价来源/时间及有限日线。
+关注、组合、交易和报告仍按用户隔离。新增关注、分析或手动模拟交易通过
+`ensureInstrument` 幂等建立 unresolved 目录、来源映射和三个同步状态；页面请求
+不访问外部行情，不猜交易所。Worker 只领取目录中启用股票的到期状态；删除关注
+不会删除目录或停更。管理员可向 `/api/market/instruments/{id}/sync` 发
+`PATCH {"enabled": false}` 暂停（true 恢复），普通成员无写权限。原只读 DTO 不变。
+
+旧股票目录初始化是显式一次性、有界操作，在已配置运行环境的 `apps/workers`
+目录执行 `tsx src/market-worker.ts --initialize-catalog`，每次最多
+`MARKET_CATALOG_INIT_LIMIT` 个（默认100、上限500），可重复直到 initialized=0；
+轮询不扫描用户表发现股票。确认迁移和有界源验证后运行
+`./bin/stockdepth start market`；默认 start 仍只启动 api/web/analysis。
+`tsx src/market-worker.ts --once` 仅运行一批。每批默认10只、供应商并发2，
+生产初次可配置 batch3/concurrency1；启动管理器读取 `.env`，应核对实际设置。
+
+身份每周、日线每天、常规交易时段报价每30分钟；休市延后至下一时段/盘后。
+失败保留成功数据并有界退避，租约支持多 Worker 去重、心跳和过期恢复。
+日线首次最近一年，随后回补7天；普通未复权价格不会与复权数据混合。
+复用已有 Yahoo/yfinance，有限实测 AAPL、600519.SS、0700.HK 的身份，AAPL 日线。
+只接受已验证 EQUITY 的指定美股/沪深/港股交易所；其他代码保持 unresolved，
+不保证每只股票的数据可用。交易日历是星期/时区/DST/午休的保守近似，
+没有完整节假日或提前收盘日历，也没有实时流、FX、全市场抓取。
+
+组合缺失、过期、未验证或异币种报价时显示估值不完整，不按零求和。
+手动价格是显式模拟输入；AI 建议价不是成交价，执行在原事务锁内重新读取
+同币种、本交易时段内35分钟有效共享快照并保存不可变引用；休市或无有效报价
+跳过，原持久幂等重放不重新成交。原 int4 cents 保留，亚分价格精确四舍五入到分，
+原始快照 decimal 单独保存。分析/财报/新闻工具仍保留原路径。
+
+第四轮验收与部署范围见 [结果文档](docs/optimization-results-round4-2026-10-12.md)。
+写入回归仅使用 `127.0.0.1:55483` 的 `stockdepth_round4_backend_*` 新隔离库；
+禁止给测试传生产 URL。`round4-market.cjs` 覆盖目录/租约/报价/AI，
+`round4-backend-regression.cjs` 保留第三轮24项安全断言，迁移/初始化/浏览器
+mock/实际私有服务会话另有独立测试。行情快照和批次审计随实际更新增长，
+空轮询不写审计；本轮没有历史自动删除策略，长期磁盘容量需运维监测。

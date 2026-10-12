@@ -4,7 +4,8 @@
   "scripts": {
     "analysis": "tsx src/analysis-worker.ts",
     "paper": "tsx src/paper-trader-worker.ts",
-    "check": "tsc --noEmit"
+    "check": "tsc --noEmit",
+    "market": "tsx src/market-worker.ts"
   },
   "dependencies": {
     "dotenv": "16.6.1",

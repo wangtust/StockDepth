@@ -1,5 +1,6 @@
 import { and, eq } from 'drizzle-orm';
 import { db } from '@/lib/db/drizzle';
+import { executionQuote } from '../market/service';
 import { paperTradeDecisions } from '@/lib/db/schema';
 import { applyTrade, integerAmount, lockPortfolio, lockPositions, PaperTradeError, Portfolio, Position } from './trading';
 
@@ -55,13 +56,22 @@ async function executeLockedDecision({ decisionId, portfolioId, userId, maxPosit
     if (!['buy','sell'].includes(decision.action)) return skip(`Unsupported action: ${decision.action}`);
     const positions = await lockPositions(tx, currentPortfolio);
     const position = positions.find(p=>p.ticker===decision.ticker);
-    integerAmount(decision.quantity, 'Decision quantity'); integerAmount(decision.priceCents, 'Decision price');
+    integerAmount(decision.quantity, 'Decision quantity');
     if (!Number.isSafeInteger(decision.targetWeightBps) || decision.targetWeightBps<0 || decision.targetWeightBps>10000) throw new PaperTradeError('Invalid target weight.');
-    const priceCents = decision.priceCents || position?.lastPriceCents || 0;
-    if (!priceCents) return skip('No usable price for simulated execution.');
+    // Re-read shared snapshots inside the existing asset locks. Model suggested price is never a fill.
+    const market = await executionQuote(decision.ticker,currentPortfolio.currency,tx);
+    if ('error' in market) return skip(`Market quote unavailable: ${market.error}`);
+    const priceCents = market.priceCents;
+    const marks = new Map<number,number>();
+    for (const p of positions.filter(p=>p.quantity>0)) {
+      const mark=p.ticker===decision.ticker?market:await executionQuote(p.ticker,currentPortfolio.currency,tx);
+      if ('error' in mark) return skip(`Portfolio valuation unavailable: ${mark.error}`);
+      if (p.instrumentId!==null && p.instrumentId!==mark.instrument.id) return skip('Portfolio instrument reference mismatch.');
+      marks.set(p.id,mark.priceCents);
+    }
     // Exact arithmetic for valuation and percentage floors; no unsafe products in Number.
-    const total = BigInt(currentPortfolio.cashCents) + positions.reduce((sum,p)=>sum+BigInt(p.quantity)*BigInt(p.lastPriceCents),0n);
-    const current = position ? BigInt(position.quantity)*BigInt(position.lastPriceCents) : 0n;
+    const total = BigInt(currentPortfolio.cashCents) + positions.reduce((sum,p)=>sum+BigInt(p.quantity)*BigInt(marks.get(p.id)??0),0n);
+    const current = position ? BigInt(position.quantity)*BigInt(marks.get(position.id)??priceCents) : 0n;
     const target = total*BigInt(Math.min(decision.targetWeightBps,maxPositionBps))/10000n;
     const maxTrade = total*BigInt(maxTradeBps)/10000n;
     const min = (...values: bigint[])=>values.reduce((a,b)=>a<b?a:b);
@@ -80,9 +90,10 @@ async function executeLockedDecision({ decisionId, portfolioId, userId, maxPosit
     }
     await applyTrade(tx,currentPortfolio,position,{
       ticker:decision.ticker,side:decision.action as 'buy'|'sell',quantity,priceCents,
-      note:`Paper trade from decision #${decision.id}`,decisionId:decision.id
+      note:`Paper trade from decision #${decision.id}`,decisionId:decision.id,
+      instrumentId:market.instrument.id,priceSnapshotId:market.quote.id,executionPrice:market.quote.price
     });
-    await tx.update(paperTradeDecisions).set({status:'executed',quantity,priceCents,executedAt:new Date(),errorMessage:null}).where(eq(paperTradeDecisions.id,decision.id));
+    await tx.update(paperTradeDecisions).set({status:'executed',quantity,executedAt:new Date(),errorMessage:null}).where(eq(paperTradeDecisions.id,decision.id));
     return {status:'executed'};
   });
 }

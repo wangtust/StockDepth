@@ -1,0 +1,1 @@
+const Module=require('module');const original=Module._load;Module._load=function(name,...args){if(name==='dotenv'||/(?:^|\/)dotenv(?:\/|$)/.test(name))return {config(){return {}},default:{config(){return {}}}};return original.call(this,name,...args)};

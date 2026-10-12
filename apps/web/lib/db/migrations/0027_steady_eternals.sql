@@ -1,0 +1,1 @@
+ALTER TABLE "market_sync_runs" ADD COLUMN "error_summary" varchar(160);

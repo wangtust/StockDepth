@@ -1,4 +1,5 @@
 import 'server-only';
+import { enrichPositions } from '../market/service';
 
 import { and, asc, desc, eq, isNull, sql } from 'drizzle-orm';
 import { db } from '@/lib/db/drizzle';
@@ -30,6 +31,7 @@ const portfolioFields = {
 const watchlistFields = {
   id: watchlistItems.id,
   userId: watchlistItems.userId,
+  instrumentId: watchlistItems.instrumentId,
   ticker: watchlistItems.ticker,
   market: watchlistItems.market,
   name: watchlistItems.name,
@@ -42,6 +44,7 @@ const positionFields = {
   id: paperPositions.id,
   portfolioId: paperPositions.portfolioId,
   userId: paperPositions.userId,
+  instrumentId: paperPositions.instrumentId,
   ticker: paperPositions.ticker,
   quantity: paperPositions.quantity,
   avgCostCents: paperPositions.avgCostCents,
@@ -56,6 +59,9 @@ const tradeFields = {
   portfolioId: paperTrades.portfolioId,
   userId: paperTrades.userId,
   positionId: paperTrades.positionId,
+  instrumentId: paperTrades.instrumentId,
+  priceSnapshotId: paperTrades.priceSnapshotId,
+  executionPrice: paperTrades.executionPrice,
   ticker: paperTrades.ticker,
   side: paperTrades.side,
   quantity: paperTrades.quantity,
@@ -100,13 +106,13 @@ export async function readPaperOverview(userId: number) {
     watchlist, pricing, defaultModel: models[0] ?? null };
 }
 
-export async function readPaperDetails(portfolio: { id: number }) {
+export async function readPaperDetails(portfolio: { id: number; currency?: string }) {
   return Promise.all([
     db
       .select(positionFields)
       .from(paperPositions)
       .where(eq(paperPositions.portfolioId, portfolio.id))
-      .orderBy(desc(paperPositions.updatedAt)),
+      .orderBy(desc(paperPositions.updatedAt)).then(rows=>enrichPositions(rows,portfolio.currency??'USD')),
     db
       .select(tradeFields)
       .from(paperTrades)

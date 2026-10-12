@@ -2,6 +2,7 @@ import { and, asc, eq } from 'drizzle-orm';
 import { z } from 'zod';
 import { db } from '@/lib/db/drizzle';
 import { users, paperPortfolios, paperPositions, paperTrades, paperTradeRequests } from '@/lib/db/schema';
+import { ensureInstrument } from '../market/catalogue';
 import { normalizeTicker } from '@/lib/market/tickers';
 
 export class PaperTradeError extends Error {
@@ -61,7 +62,7 @@ export async function lockPositions(tx: PaperTx, portfolio: Portfolio) {
 }
 
 export async function applyTrade(tx: PaperTx, portfolio: Portfolio, position: Position | undefined, input: {
-  ticker: string; side: 'buy' | 'sell'; quantity: number; priceCents: number; note: string | null; decisionId?: number;
+  ticker: string; side: 'buy' | 'sell'; quantity: number; priceCents: number; note: string | null; decisionId?: number; instrumentId?: number; priceSnapshotId?: number; executionPrice?: string;
 }) {
   const { quantity, priceCents } = input;
   integerAmount(quantity, 'Quantity', 1); integerAmount(priceCents, 'Price', 1);
@@ -79,13 +80,14 @@ export async function applyTrade(tx: PaperTx, portfolio: Portfolio, position: Po
     : position!.avgCostCents;
   const realizedPnlCents = input.side === 'sell' ? signedAmount((priceCents - position!.avgCostCents) * quantity, 'Trade PnL') : 0;
   const totalPnl = signedAmount((position?.realizedPnlCents ?? 0) + realizedPnlCents, 'Position PnL');
-  const values = { quantity: newQuantity, avgCostCents, lastPriceCents: priceCents, realizedPnlCents: totalPnl, updatedAt: new Date() };
+  const values = { ...(input.instrumentId ? {instrumentId:input.instrumentId}:{}), quantity: newQuantity, avgCostCents, lastPriceCents: priceCents, realizedPnlCents: totalPnl, updatedAt: new Date() };
   const [updatedPosition] = position
     ? await tx.update(paperPositions).set(values).where(eq(paperPositions.id, position.id)).returning()
     : await tx.insert(paperPositions).values({ ...values, portfolioId: portfolio.id, userId: portfolio.userId, ticker: input.ticker }).returning();
   await tx.update(paperPortfolios).set({ cashCents: newCash, updatedAt: new Date() }).where(eq(paperPortfolios.id, portfolio.id));
   const [trade] = await tx.insert(paperTrades).values({
     portfolioId: portfolio.id, userId: portfolio.userId, positionId: updatedPosition.id,
+    instrumentId: input.instrumentId ?? position?.instrumentId, priceSnapshotId: input.priceSnapshotId, executionPrice: input.executionPrice,
     decisionId: input.decisionId, ticker: input.ticker, side: input.side, quantity, priceCents,
     grossAmountCents, realizedPnlCents, note: input.note
   }).returning();
@@ -114,8 +116,9 @@ export async function executeManualTrade(userId: number, raw: ManualTradeInput, 
       }
     }
     const positions = await lockPositions(tx, portfolio);
+    const instrument = await ensureInstrument(ticker,tx);
     const result = await applyTrade(tx, portfolio, positions.find(p=>p.ticker===ticker), {
-      ticker, side: data.side, quantity: data.quantity, priceCents, note: data.note || null
+      instrumentId:instrument?.id, ticker, side: data.side, quantity: data.quantity, priceCents, note: data.note || null
     });
     // Store the exact JSON response atomically with the trade; replay needs no new writes.
     const response = JSON.parse(JSON.stringify(result));

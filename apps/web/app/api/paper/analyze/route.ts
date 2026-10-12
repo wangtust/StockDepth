@@ -1,3 +1,4 @@
+import { ensureInstrument } from '@/lib/market/catalogue';
 import { and, eq, gte, inArray, sql } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
 import { NextRequest, NextResponse } from 'next/server';
@@ -136,12 +137,14 @@ export async function POST(request: NextRequest) {
         watchlist: items.map((watchlistItem) => watchlistItem.ticker)
       });
 
+      const instrument = await ensureInstrument(ticker, tx);
       const [createdJob] = await tx
         .insert(analysisJobs)
         .values({
           runId: `saas-job-${randomUUID()}`,
           userId: currentUser.id,
           ticker,
+          instrumentId: instrument.id,
           tradeDate,
           realtimeData: data.realtimeData,
           language: data.language,

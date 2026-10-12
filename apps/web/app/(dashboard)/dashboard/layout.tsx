@@ -28,6 +28,7 @@ export default function DashboardLayout({
 
   const navItems = [
     { href: '/dashboard/analysis', icon: BarChart3, label: 'Analysis' },
+    { href: '/dashboard/stocks', icon: BarChart3, label: 'Shared Stocks' },
     { href: '/dashboard/portfolio', icon: BriefcaseBusiness, label: 'Portfolio' },
     { href: '/dashboard', icon: UserCircle, label: 'Account' },
     { href: '/dashboard/general', icon: Settings, label: 'General' },
@@ -105,7 +106,7 @@ export default function DashboardLayout({
 
             <nav className="flex-1 overflow-y-auto p-3">
               {navItems.map((item) => {
-                const isActive = pathname === item.href;
+                const isActive = pathname === item.href || (item.href === '/dashboard/stocks' && pathname.startsWith('/dashboard/stocks/'));
 
                 return (
                   <Link key={item.href} href={item.href} passHref>

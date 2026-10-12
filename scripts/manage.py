@@ -16,6 +16,7 @@ SERVICES = {
     'api': (ROOT / 'apps/api', [str(RUNTIME / 'python'), '-m', 'stockdepth.api.server']),
     'web': (ROOT / 'apps/web', [str(RUNTIME / 'pnpm'), 'start', '--hostname', '0.0.0.0']),
     'analysis': (ROOT / 'apps/workers', [str(RUNTIME / 'tsx'), 'src/analysis-worker.ts']),
+    'market': (ROOT / 'apps/workers', [str(RUNTIME / 'tsx'), 'src/market-worker.ts']),
     'paper': (ROOT / 'apps/workers', [str(RUNTIME / 'tsx'), 'src/paper-trader-worker.ts']),
 }
 
@@ -36,7 +37,7 @@ def main():
     args = parser.parse_args()
     names = args.services or ['api', 'web', 'analysis']
     if any(name not in SERVICES for name in names):
-        parser.error('services must be api, web, analysis or paper')
+        parser.error('services must be api, web, analysis, paper or market')
     ROOT.joinpath('var').mkdir(exist_ok=True)
     records = json.loads(STATE.read_text()) if STATE.exists() else {}
     env = os.environ.copy()

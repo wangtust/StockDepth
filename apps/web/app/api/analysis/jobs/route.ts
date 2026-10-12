@@ -1,3 +1,4 @@
+import { ensureInstrument } from '@/lib/market/catalogue';
 import { getJobsPage } from '@/lib/analysis/jobs-page';
 import { RequestTiming } from '@/lib/http/request-timing';
 import { and, eq, gte, isNull, sql } from 'drizzle-orm';
@@ -97,12 +98,14 @@ export async function POST(request: NextRequest) {
       return null;
     }
 
+    const instrument = await ensureInstrument(ticker, tx);
     const [createdJob] = await tx
       .insert(analysisJobs)
       .values({
         runId: `saas-job-${randomUUID()}`,
         userId: currentUser.id,
         ticker,
+        instrumentId: instrument.id,
         tradeDate,
         realtimeData: data.realtimeData,
         language: data.language,

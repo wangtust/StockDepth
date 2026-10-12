@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { db } from '@/lib/db/drizzle';
 import { getUser } from '@/lib/db/queries';
 import { watchlistItems } from '@/lib/db/schema';
+import { ensureInstrument } from '@/lib/market/catalogue';
 import { normalizeTicker } from '@/lib/market/tickers';
 
 const watchlistSchema = z.object({
@@ -27,9 +28,11 @@ export async function POST(request: NextRequest) {
   }
 
   const ticker = normalizeTicker(parsed.data.ticker);
+  const instrument = await ensureInstrument(ticker);
   const [item] = await db
     .insert(watchlistItems)
     .values({
+      instrumentId: instrument?.id,
       userId: currentUser.id,
       ticker,
       market: parsed.data.market || null,
@@ -40,6 +43,7 @@ export async function POST(request: NextRequest) {
     .onConflictDoUpdate({
       target: [watchlistItems.userId, watchlistItems.ticker],
       set: {
+        instrumentId: instrument?.id ?? null,
         market: parsed.data.market || null,
         name: parsed.data.name || null,
         isActive: true,

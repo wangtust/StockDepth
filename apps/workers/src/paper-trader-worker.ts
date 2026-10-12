@@ -10,6 +10,7 @@ import {
   paperPositions,
   paperTradeDecisions,
 } from '@/lib/db/schema';
+import { paperMarketContext } from '@/lib/paper/market-context';
 import { executePaperDecision } from '@/lib/paper/execution';
 
 type ClaimedRun = typeof paperAnalysisRuns.$inferSelect & {
@@ -136,7 +137,7 @@ function formatReports(reports: (typeof analysisReports.$inferSelect)[]) {
   return text.length > maxReportsChars ? `${text.slice(0, maxReportsChars)}\n\n[truncated]` : text;
 }
 
-function buildPrompt({
+async function buildPrompt({
   run,
   portfolio,
   positions,
@@ -147,12 +148,8 @@ function buildPrompt({
   positions: Position[];
   reports: string;
 }) {
-  const positionValueCents = positions.reduce(
-    (sum, position) => sum + position.quantity * position.lastPriceCents,
-    0
-  );
-  const totalValueCents = portfolio.cashCents + positionValueCents;
-  const targetPosition = positions.find((position) => position.ticker === run.ticker);
+  const marketContext = await paperMarketContext(positions,portfolio.currency,portfolio.cashCents);
+  const targetPosition = marketContext.positions.find(position=>position.ticker===run.ticker);
 
   return `You are a paper-trading decision engine. You do not give financial advice. You convert research reports into a conservative simulated-trading proposal.
 
@@ -166,26 +163,18 @@ Hard constraints:
 - Never short. If uncertain, action must be hold.
 - Prefer hold unless the reports clearly support a change.
 - quantity may be 0 when action is hold or when there is insufficient price/cash context.
-- suggested_price should be the current or conservative execution price if inferable from the report/context; otherwise 0.
+- suggested_price is a model suggestion only, never a verified market quote or fill price. Use 0 when unavailable.
+- Only shared quotes with valid valuationStatus are market marks. Null totalValueCents means incomplete valuation; never treat missing assets as zero.
 
 Portfolio context:
 ${JSON.stringify({
   ticker: run.ticker,
-  cashCents: portfolio.cashCents,
   initialCashCents: portfolio.initialCashCents,
-  totalValueCents,
+  ...marketContext,
   maxPositionBps,
   maxTradeBps,
   minConfidenceBps,
   targetPosition,
-  positions: positions.map((position) => ({
-    ticker: position.ticker,
-    quantity: position.quantity,
-    avgCostCents: position.avgCostCents,
-    lastPriceCents: position.lastPriceCents,
-    marketValueCents: position.quantity * position.lastPriceCents,
-    realizedPnlCents: position.realizedPnlCents
-  })),
   storedPaperContext: run.context ? safeJsonParse(run.context) : null
 })}
 
@@ -339,7 +328,7 @@ async function processRun(run: ClaimedRun, modelConfig: ModelConfig) {
     return;
   }
 
-  const prompt = buildPrompt({
+  const prompt = await buildPrompt({
     run,
     portfolio,
     positions,

@@ -4,6 +4,7 @@ import {
   varchar,
   text,
   timestamp,
+  date,
   integer,
   bigint,
   numeric,
@@ -43,6 +44,79 @@ export const activityLogs = pgTable('activity_logs', {
   ipAddress: varchar('ip_address', { length: 45 }),
 });
 
+// Global market data: deliberately no user ownership columns.
+export const instruments = pgTable('instruments', {
+  id: serial('id').primaryKey(),
+  symbol: varchar('symbol', { length: 40 }).notNull(),
+  exchange: varchar('exchange', { length: 40 }).notNull(),
+  name: varchar('name', { length: 160 }),
+  currency: varchar('currency', { length: 12 }),
+  timezone: varchar('timezone', { length: 80 }),
+  status: varchar('status', { length: 20 }).notNull().default('unresolved'),
+  verifiedAt: timestamp('verified_at', { withTimezone: true }),
+  syncEnabled: boolean('sync_enabled').notNull().default(true),
+}, t => [uniqueIndex('instruments_exchange_symbol_idx').on(t.exchange, t.symbol),
+  check('instruments_status_valid', sql`${t.status} in ('verified','unresolved','inactive')`),
+  check('instruments_verified_identity', sql`${t.status} <> 'verified' OR (${t.currency} IS NOT NULL AND ${t.timezone} IS NOT NULL AND ${t.verifiedAt} IS NOT NULL AND ${t.exchange} <> 'UNRESOLVED')`)]);
+export const instrumentSources = pgTable('instrument_sources', {
+  id: serial('id').primaryKey(),
+  instrumentId: integer('instrument_id').notNull().references(() => instruments.id),
+  vendor: varchar('vendor', { length: 40 }).notNull(),
+  vendorSymbol: varchar('vendor_symbol', { length: 40 }).notNull(),
+  status: varchar('status', { length: 20 }).notNull().default('unresolved'),
+  verifiedAt: timestamp('verified_at', { withTimezone: true }),
+}, t => [uniqueIndex('instrument_sources_vendor_symbol_idx').on(t.vendor, t.vendorSymbol), index('instrument_sources_instrument_idx').on(t.instrumentId)]);
+export const priceSnapshots = pgTable('price_snapshots', {
+  id: serial('id').primaryKey(),
+  instrumentId: integer('instrument_id').notNull().references(() => instruments.id),
+  price: numeric('price', { precision: 24, scale: 8 }).notNull(),
+  currency: varchar('currency', { length: 12 }).notNull(),
+  quotedAt: timestamp('quoted_at', { withTimezone: true }).notNull(),
+  fetchedAt: timestamp('fetched_at', { withTimezone: true }).notNull().defaultNow(),
+  source: varchar('source', { length: 40 }).notNull(),
+  priceType: varchar('price_type', { length: 40 }).notNull(),
+  session: varchar('session', { length: 20 }).notNull(),
+}, t => [uniqueIndex('price_snapshots_identity_idx').on(t.instrumentId, t.source, t.quotedAt, t.priceType),
+  index('price_snapshots_latest_idx').on(t.instrumentId, t.quotedAt),
+  check('price_snapshots_price_valid', sql`${t.price} > 0 AND ${t.price} < 10000000000000000 AND ${t.priceType} = 'regular_unadjusted' AND ${t.session} = 'regular'`)]);
+export const dailyPrices = pgTable('daily_prices', {
+  id: serial('id').primaryKey(),
+  instrumentId: integer('instrument_id').notNull().references(() => instruments.id),
+  tradingDate: date('trading_date').notNull(),
+  open: numeric('open', { precision: 24, scale: 8 }).notNull(),
+  high: numeric('high', { precision: 24, scale: 8 }).notNull(),
+  low: numeric('low', { precision: 24, scale: 8 }).notNull(),
+  close: numeric('close', { precision: 24, scale: 8 }).notNull(),
+  volume: bigint('volume', { mode: 'bigint' }).notNull(),
+  source: varchar('source', { length: 40 }).notNull(),
+  adjusted: boolean('adjusted').notNull().default(false),
+  fetchedAt: timestamp('fetched_at', { withTimezone: true }).notNull().defaultNow(),
+}, t => [uniqueIndex('daily_prices_identity_idx').on(t.instrumentId, t.tradingDate, t.source, t.adjusted),
+  check('daily_prices_ohlcv_valid', sql`${t.low} > 0 AND ${t.high} >= ${t.low} AND ${t.open} BETWEEN ${t.low} AND ${t.high} AND ${t.close} BETWEEN ${t.low} AND ${t.high} AND ${t.high} < 10000000000000000 AND ${t.volume} >= 0`)]);
+export const marketSyncState = pgTable('market_sync_state', {
+  id: serial('id').primaryKey(),
+  instrumentId: integer('instrument_id').notNull().references(() => instruments.id),
+  category: varchar('category', { length: 20 }).notNull(),
+  lastSuccessAt: timestamp('last_success_at', { withTimezone: true }),
+  nextRunAt: timestamp('next_run_at', { withTimezone: true }).notNull().defaultNow(),
+  attempts: integer('attempts').notNull().default(0),
+  errorSummary: varchar('error_summary', { length: 160 }),
+  leaseUntil: timestamp('lease_until', { withTimezone: true }),
+  owner: uuid('owner'),
+}, t => [uniqueIndex('market_sync_state_instrument_category_idx').on(t.instrumentId, t.category),
+  index('market_sync_state_due_idx').on(t.nextRunAt),
+  check('market_sync_state_category_valid', sql`${t.category} in ('identity','quote','daily') AND ${t.attempts} >= 0`)]);
+export const marketSyncRuns = pgTable('market_sync_runs', {
+  id: serial('id').primaryKey(),
+  owner: uuid('owner').notNull(),
+  startedAt: timestamp('started_at', { withTimezone: true }).notNull().defaultNow(),
+  endedAt: timestamp('ended_at', { withTimezone: true }),
+  claimed: integer('claimed').notNull().default(0),
+  succeeded: integer('succeeded').notNull().default(0),
+  failed: integer('failed').notNull().default(0),
+  errorSummary: varchar('error_summary', { length: 160 }),
+});
+
 export const analysisJobs = pgTable(
   'analysis_jobs',
   {
@@ -51,6 +125,7 @@ export const analysisJobs = pgTable(
     userId: integer('user_id')
       .notNull()
       .references(() => users.id),
+    instrumentId: integer('instrument_id').references(() => instruments.id),
     ticker: varchar('ticker', { length: 40 }).notNull(),
     tradeDate: varchar('trade_date', { length: 20 }).notNull(),
     realtimeData: boolean('realtime_data').notNull().default(false),
@@ -147,6 +222,7 @@ export const watchlistItems = pgTable(
     userId: integer('user_id')
       .notNull()
       .references(() => users.id),
+    instrumentId: integer('instrument_id').references(() => instruments.id),
     ticker: varchar('ticker', { length: 40 }).notNull(),
     market: varchar('market', { length: 40 }),
     name: varchar('name', { length: 160 }),
@@ -192,6 +268,7 @@ export const paperPositions = pgTable(
     userId: integer('user_id')
       .notNull()
       .references(() => users.id),
+    instrumentId: integer('instrument_id').references(() => instruments.id),
     ticker: varchar('ticker', { length: 40 }).notNull(),
     quantity: integer('quantity').notNull().default(0),
     avgCostCents: integer('avg_cost_cents').notNull().default(0),
@@ -218,7 +295,10 @@ export const paperTrades = pgTable(
       .notNull()
       .references(() => users.id),
     positionId: integer('position_id').references(() => paperPositions.id),
+    priceSnapshotId: integer('price_snapshot_id').references(() => priceSnapshots.id),
+    executionPrice: numeric('execution_price', { precision: 24, scale: 8 }),
     decisionId: integer('decision_id').references(() => paperTradeDecisions.id),
+    instrumentId: integer('instrument_id').references(() => instruments.id),
     ticker: varchar('ticker', { length: 40 }).notNull(),
     side: varchar('side', { length: 12 }).notNull(),
     quantity: integer('quantity').notNull(),

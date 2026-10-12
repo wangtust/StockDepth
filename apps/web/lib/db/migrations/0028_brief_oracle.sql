@@ -1,0 +1,1 @@
+ALTER TABLE "instruments" ADD COLUMN "sync_enabled" boolean DEFAULT true NOT NULL;

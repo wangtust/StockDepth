@@ -30,6 +30,7 @@ import {
 } from '@/lib/analysis/pricing';
 import { cn } from '@/lib/utils';
 import useSWR from 'swr';
+import { QuoteDisplay, centsUnits, exactMoney, positionValue, type ValuedPosition } from '../stocks/market-display';
 import { jsonFetcher } from '@/lib/http/json-fetcher';
 import { pollingDefaults } from '@/lib/http/polling';
 import { createManualTradeOperation, isDefinitiveTradeRejection, type ManualTradeOperation } from '@/lib/paper/manual-trade-client';
@@ -52,7 +53,7 @@ type WatchlistItem = {
   name?: string | null;
 };
 
-type Position = {
+type Position = ValuedPosition & {
   id: number;
   ticker: string;
   quantity: number;
@@ -154,10 +155,10 @@ export default function PortfolioPage() {
     jsonFetcher,
     {
       ...pollingDefaults,
-      // Portfolio reads are relatively large; only live jobs need periodic updates.
+      // Live jobs poll faster; open holdings recheck stored quote freshness.
       refreshInterval: (current) => (current?.hasActiveAnalysisRuns || current?.analysisRuns?.some(
         (run) => run.status === 'queued' || run.status === 'running'
-      )) ? 10000 : 0,
+      )) ? 10000 : current?.positions?.some(position => position.quantity > 0) ? 30000 : 0,
       shouldRetryOnError: false
     }
   );
@@ -184,14 +185,11 @@ export default function PortfolioPage() {
   const portfolio = payload.portfolio;
   const currency = portfolio?.currency || 'USD';
   const openPositions = payload.positions.filter((position) => position.quantity > 0);
-  const positionsValueCents = openPositions.reduce(
-    (sum, position) => sum + position.quantity * position.lastPriceCents,
-    0
-  );
-  const totalValueCents = (portfolio?.cashCents || 0) + positionsValueCents;
-  const totalPnlCents = portfolio
-    ? totalValueCents - portfolio.initialCashCents
-    : 0;
+  const valuations = openPositions.map(position => positionValue(position, currency));
+  const completeValuation = !readError && valuations.every(value => value.value !== null);
+  const positionsValue = completeValuation ? valuations.reduce((sum, value) => sum + value.value!, 0n) : null;
+  const totalValue = portfolio && positionsValue !== null ? centsUnits(portfolio.cashCents) + positionsValue : null;
+  const totalPnl = portfolio && totalValue !== null ? totalValue - centsUnits(portfolio.initialCashCents) : null;
   const pricing = normalizePricingConfig(payload.pricing);
   const selectedAnalysisCost =
     getDepthCreditCostFromConfig(analysisDepth, pricing) *
@@ -503,7 +501,7 @@ export default function PortfolioPage() {
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
           <MetricCard
             title="Total Value"
-            value={portfolio ? formatMoney(totalValueCents, currency) : '-'}
+            value={totalValue !== null ? exactMoney(totalValue, currency) : portfolio ? 'Incomplete' : '-'}
             icon={<BriefcaseBusiness className="h-5 w-5 text-slate-700" />}
           />
           <MetricCard
@@ -513,17 +511,18 @@ export default function PortfolioPage() {
           />
           <MetricCard
             title="Positions"
-            value={formatMoney(positionsValueCents, currency)}
+            value={positionsValue !== null ? exactMoney(positionsValue, currency) : 'Incomplete'}
             icon={<Star className="h-5 w-5 text-amber-600" />}
           />
           <MetricCard
             title="Paper P&L"
-            value={portfolio ? formatMoney(totalPnlCents, currency) : '-'}
-            valueClassName={totalPnlCents >= 0 ? 'text-emerald-700' : 'text-red-700'}
+            value={totalPnl !== null ? exactMoney(totalPnl, currency) : portfolio ? 'Incomplete' : '-'}
+            valueClassName={totalPnl === null ? undefined : totalPnl >= 0n ? 'text-emerald-700' : 'text-red-700'}
             icon={<ArrowUpFromLine className="h-5 w-5 text-blue-700" />}
           />
         </div>
 
+        <p className="text-sm text-slate-600">Market value and unrealized P&amp;L require verified fresh ordinary quotes in {currency}. Missing, stale, future or different-currency quotes make totals incomplete; no FX conversion. Cash, cost and realized P&amp;L retain their original meanings. Quote timestamps below use UTC.</p>
         {portfolio && (
           <div className="rounded-lg border border-slate-200 bg-white px-4 py-3 shadow-sm">
             <label
@@ -780,6 +779,7 @@ export default function PortfolioPage() {
             <Card className="rounded-lg border-slate-200 py-5 shadow-sm">
               <CardHeader className="px-5">
                 <CardTitle className="text-base">Simulated Trade</CardTitle>
+                <p className="text-sm text-muted-foreground">Price is your explicit simulated input; shared quotes do not replace it.</p>
               </CardHeader>
               <CardContent className="px-5">
                 <form className="space-y-4" onSubmit={handleTrade}>
@@ -897,7 +897,7 @@ export default function PortfolioPage() {
                         <th className="py-2 pr-3 font-medium">Ticker</th>
                         <th className="py-2 pr-3 font-medium">Shares</th>
                         <th className="py-2 pr-3 font-medium">Avg Cost</th>
-                        <th className="py-2 pr-3 font-medium">Last Price</th>
+                        <th className="py-2 pr-3 font-medium">Shared Quote</th>
                         <th className="py-2 pr-3 font-medium">Value</th>
                         <th className="py-2 pr-3 font-medium">Unrealized</th>
                         <th className="py-2 pr-3 font-medium">Realized</th>
@@ -905,10 +905,7 @@ export default function PortfolioPage() {
                     </thead>
                     <tbody className="divide-y divide-slate-100">
                       {payload.positions.map((position) => {
-                        const valueCents = position.quantity * position.lastPriceCents;
-                        const unrealizedCents =
-                          (position.lastPriceCents - position.avgCostCents) *
-                          position.quantity;
+                        const valuation = positionValue(position, currency);
                         return (
                           <tr key={position.id}>
                             <td className="py-3 pr-3">
@@ -917,16 +914,12 @@ export default function PortfolioPage() {
                                 onClick={() => {
                                   setTradeTicker(position.ticker);
                                   setTradeSide(position.quantity > 0 ? 'sell' : 'buy');
-                                  setPrice(
-                                    position.lastPriceCents
-                                      ? String(position.lastPriceCents / 100)
-                                      : ''
-                                  );
                                 }}
                                 type="button"
                               >
                                 {position.ticker}
                               </button>
+                              {position.instrumentId && <a className="block text-xs underline" href={`/dashboard/stocks/${position.instrumentId}`}>Shared stock details</a>}
                             </td>
                             <td className="py-3 pr-3 text-slate-700">
                               {position.quantity}
@@ -935,20 +928,21 @@ export default function PortfolioPage() {
                               {formatMoney(position.avgCostCents, currency)}
                             </td>
                             <td className="py-3 pr-3 text-slate-700">
-                              {formatMoney(position.lastPriceCents, currency)}
+                              <QuoteDisplay quote={position.quote} />
+                              {valuation.issue && <p className="text-amber-800">{valuation.issue}</p>}
                             </td>
                             <td className="py-3 pr-3 text-slate-700">
-                              {formatMoney(valueCents, currency)}
+                              {valuation.value !== null ? exactMoney(valuation.value, currency) : 'Unavailable'}
                             </td>
                             <td
                               className={cn(
                                 'py-3 pr-3',
-                                unrealizedCents >= 0
+                                valuation.unrealized === null ? 'text-slate-500' : valuation.unrealized >= 0n
                                   ? 'text-emerald-700'
                                   : 'text-red-700'
                               )}
                             >
-                              {formatMoney(unrealizedCents, currency)}
+                              {valuation.unrealized !== null ? exactMoney(valuation.unrealized, currency) : 'Unavailable'}
                             </td>
                             <td
                               className={cn(

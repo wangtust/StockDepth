@@ -1,8 +1,6 @@
 import { readFile } from 'fs/promises';
-import { execFile } from 'child_process';
 import net from 'net';
 import os from 'os';
-import { promisify } from 'util';
 import { desc, eq, sql } from 'drizzle-orm';
 import { redirect } from 'next/navigation';
 import { Button } from '@/components/ui/button';
@@ -13,6 +11,7 @@ import { getAnalysisConcurrencySettings } from '@/lib/analysis/concurrency-setti
 import { updateAnalysisConcurrencySettings } from '@/app/admin/actions';
 import { db } from '@/lib/db/drizzle';
 import { analysisJobs } from '@/lib/db/schema';
+import { managedWorkerStatus } from '@/lib/service-health';
 import {
   formatAdminDate,
   formatAdminDateTime,
@@ -28,7 +27,6 @@ type PageProps = {
 };
 
 type MemInfo = Record<string, number>;
-const execFileAsync = promisify(execFile);
 
 async function readMemInfo(): Promise<MemInfo | null> {
   try {
@@ -94,18 +92,6 @@ async function updateAnalysisConcurrencyAction(formData: FormData) {
   redirect('/admin/system?saved=1');
 }
 
-async function systemdStatus(serviceName: string) {
-  try {
-    const { stdout } = await execFileAsync('systemctl', ['is-active', serviceName], {
-      timeout: 2000
-    });
-    const status = stdout.trim();
-    return status === 'active' ? 'healthy' : status || 'warning';
-  } catch {
-    return 'offline';
-  }
-}
-
 async function tcpStatus(host: string, port: number) {
   return new Promise<'healthy' | 'offline'>((resolve) => {
     const socket = net.createConnection({ host, port, timeout: 1200 });
@@ -124,6 +110,9 @@ async function tcpStatus(host: string, port: number) {
 export default async function AdminSystemPage({ searchParams }: PageProps) {
   await requirePlatformAdmin();
   const { saved } = await searchParams;
+  const apiUrl = new URL(envValue('STOCKDEPTH_API_URL', 'http://127.0.0.1:8008'));
+  const apiPort = Number(apiUrl.port || (apiUrl.protocol === 'https:' ? 443 : 80));
+  const webPort = positiveIntegerEnvValue('PORT', 3000);
 
   const [memInfo, jobStatusRows, recentRunningJobs, serviceStatuses, concurrencySettings] =
     await Promise.all([
@@ -152,9 +141,10 @@ export default async function AdminSystemPage({ searchParams }: PageProps) {
       .limit(10)
     ,
     Promise.all([
-      systemdStatus('saas-starter.service'),
-      systemdStatus('saas-analysis-worker.service'),
-      tcpStatus('127.0.0.1', 8008)
+      tcpStatus('127.0.0.1', webPort),
+      managedWorkerStatus('analysis'),
+      tcpStatus(apiUrl.hostname, apiPort),
+      managedWorkerStatus('paper')
     ]),
     getAnalysisConcurrencySettings()
   ]);
@@ -230,17 +220,22 @@ export default async function AdminSystemPage({ searchParams }: PageProps) {
     {
       label: 'StockDepth Web',
       status: serviceStatuses[0],
-      detail: 'systemd: saas-starter.service'
+      detail: `Listening on port ${webPort}`
     },
     {
       label: 'Analysis Worker',
       status: serviceStatuses[1],
-      detail: 'systemd: saas-analysis-worker.service'
+      detail: 'Managed worker process'
     },
     {
       label: 'Analysis API',
       status: serviceStatuses[2],
-      detail: 'tcp: 127.0.0.1:8008'
+      detail: `Connection to ${apiUrl.hostname}:${apiPort}`
+    },
+    {
+      label: 'Paper Trading Worker',
+      status: serviceStatuses[3],
+      detail: 'Managed worker process'
     }
   ];
 
@@ -344,7 +339,7 @@ export default async function AdminSystemPage({ searchParams }: PageProps) {
           <CardTitle>Service Health</CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="grid gap-3 md:grid-cols-3">
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
             {serviceCards.map((service) => (
               <div
                 key={service.label}

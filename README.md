@@ -1,128 +1,111 @@
 # StockDepth
 
-股票分析与模拟交易平台。网站、Python 分析 API、分析 worker 和模拟交易 worker 分开运行，统一使用根目录 `.env`。
+StockDepth 是股票分析与模拟交易平台，支持多智能体分析、分析任务与报告管理、模拟交易，以及管理员模型配置、用户管理和订阅支付。
 
-## 项目结构
+## 项目架构
 
-```text
-apps/web/       Next.js 网站、登录、支付、管理接口及数据库迁移
-apps/api/       Python 分析 API；stockdepth 下按 api、agents、workflows、data、providers 分层
-apps/workers/   分析任务队列与模拟交易 worker
-bin/stockdepth  统一启停入口
-scripts/        服务管理与集成测试
-docs/           架构说明
-var/            自动生成的服务日志及进程记录
-.env            唯一运行配置，不提交 Git
-```
+项目由四个独立服务组成，统一读取根目录 `.env`：
 
-API 的 `cli` 和测试目录属于开发工具，不参与网站服务启动；各应用的许可证保留。详细模块边界见 [架构说明](docs/architecture.md)。
+| 服务 | 目录 | 职责 |
+| --- | --- | --- |
+| Web | `apps/web` | Next.js 网站，负责登录、管理页面、任务与报告展示、支付 |
+| 分析 API | `apps/api` | Python 多智能体分析，负责模型调用、行情与新闻数据、报告和检查点 |
+| 分析 worker | `apps/workers` | 从数据库领取分析任务，调用 API 并同步结果 |
+| 模拟交易 worker | `apps/workers` | 处理模拟交易任务与决策 |
 
-## 当前机器运行
-
-当前环境和依赖已配置，PostgreSQL 已有 `saas_starter` 数据库。直接运行：
-
-```bash
-cd /root/StockDepth
-./bin/stockdepth start api web analysis paper
-./bin/stockdepth status api web analysis paper
-```
-
-浏览器访问 **http://localhost:3000**。分析 API 监听 `127.0.0.1:8008`。重复启动会跳过已运行服务。
-
-```bash
-# 停止全部服务
-./bin/stockdepth stop api web analysis paper
-
-# 重启全部服务，重新读取 .env
-./bin/stockdepth restart api web analysis paper
-
-# 查看日志
-tail -f var/api.log var/web.log var/analysis.log var/paper.log
-```
-
-不带服务名时默认操作 api、web、analysis；paper 需要显式指定。worker 会处理数据库中待执行的任务。停止分析 API 会结束其分析子进程，已有检查点会保留；重启后可在任务页面重试。修改配置前建议等待正在执行的任务结束。
-
-PostgreSQL 是独立系统服务，统一脚本不管理它。机器重启后若数据库未启动：
-
-```bash
-service postgresql start
-```
+PostgreSQL 保存用户、模型、任务、报告与模拟交易数据，并作为 worker 的持久任务队列。分析文件和检查点默认保存在 `~/.stockdepth`。服务启停由 `bin/stockdepth` 统一管理，详细架构见 [架构说明](docs/architecture.md)。
 
 ## 环境配置
 
-启动脚本读取根目录 `.env` 中的 `STOCKDEPTH_RUNTIME_BIN`，直接使用已安装的 Python、Node.js、pnpm 和 tsx，无需项目内的环境链接。当前配置指向 `/root/miniconda3/envs/tradingagents-saas/bin`，无需手动激活 Conda。
+以下步骤默认已准备好 PostgreSQL 数据库和数据库用户，且连接用户具有创建和修改项目表结构的权限。
 
-在新机器上创建环境并安装依赖：
+### 1. 创建运行环境并安装依赖
 
 ```bash
 conda create -n stockdepth -c conda-forge python=3.11 nodejs=22 -y
 conda activate stockdepth
 npm install -g pnpm tsx
-cd /path/to/StockDepth
+
+cd ./StockDepth
 pnpm install
 python -m pip install -e apps/api
 ```
 
-然后在根目录 `.env` 中设置 `STOCKDEPTH_RUNTIME_BIN` 为该环境的绝对 bin 路径，可通过 `echo "$CONDA_PREFIX/bin"` 查看。新机器另需安装并启动 PostgreSQL，创建 `.env` 中指定的数据库和有权限的数据库用户。
+如果环境和依赖已安装，可跳过这一步。
 
-## 唯一配置文件
+### 2. 配置根目录 `.env`
 
-新环境先执行以下命令；当前机器已有 `.env`，不要覆盖：
+首次配置时复制模板；已有 `.env` 不要覆盖：
 
 ```bash
 cp .env.example .env
 chmod 600 .env
 ```
 
-| 配置 | 用途 |
-| --- | --- |
-| STOCKDEPTH_RUNTIME_BIN | Python、Node、pnpm、tsx 所在环境的绝对 bin 路径 |
-| POSTGRES_URL | PostgreSQL 连接地址及凭据 |
-| BASE_URL | 网站地址，默认 http://localhost:3000 |
-| AUTH_SECRET | 登录会话签名密钥，可用 `openssl rand -base64 32` 生成 |
-| STOCKDEPTH_ADMIN_EMAIL / STOCKDEPTH_ADMIN_PASSWORD | 初始管理员邮箱和密码；没有管理员时自动创建，已有管理员时保留原账户和密码 |
-| STRIPE_SECRET_KEY / STRIPE_WEBHOOK_SECRET | 支付与 webhook 验证；无需支付时可保留模板占位值 |
-| STOCKDEPTH_API_URL | worker 调用分析 API 的地址 |
-| STOCKDEPTH_API_USERNAME / PASSWORD | worker 的内部 API 调用凭据 |
-| STOCKDEPTH_WEB_USERNAME / PASSWORD | API 验证凭据，须与上一项相同；不是网页登录账户 |
-| STOCKDEPTH_WEB_HOST / PORT | 分析 API 监听地址和端口 |
-| ANALYSIS_WORKER_* | 轮询、并发、模拟模式和任务超时参数 |
-| STOCKDEPTH_OUTPUT_LANGUAGE / MAX_DEBATE_ROUNDS / MAX_RISK_ROUNDS / CHECKPOINT_ENABLED | 可选分析默认值，任务参数会覆盖它们 |
+在激活的 Conda 环境中执行 `echo "$CONDA_PREFIX/bin"`，将输出的绝对路径填入 `STOCKDEPTH_RUNTIME_BIN`。启动脚本直接使用该目录中的 Python、Node.js、pnpm 和 tsx，后续启停无需手动激活环境。
 
-模型 Provider、Base URL、Quick/Deep Model 和 API Key 由管理员在模型管理页面保存到数据库，启用并设为默认后用户才能创建分析。worker 执行时读取对应模型记录，不使用 `.env` 中的模型兜底。API 与模型数据源需要可用网络。
+按实际环境修改以下配置：
 
-## 数据库初始化与迁移
+```dotenv
+STOCKDEPTH_RUNTIME_BIN=/home/ubuntu/miniforge3/envs/stockdepth/bin
+POSTGRES_URL=postgresql://user:password@127.0.0.1:5432/database_name
+BASE_URL=http://localhost:3000
+AUTH_SECRET=replace-with-random-secret
 
-统一启动命令会先连接数据库：空库自动创建全部项目表、索引和约束，已有数据库自动应用尚未执行的结构更新，并验证所需表完整。失败时不会继续启动或重启服务。重复启动不会清空数据。
+# 首次创建的网页登录管理员
+STOCKDEPTH_ADMIN_EMAIL=admin@example.com
+STOCKDEPTH_ADMIN_PASSWORD=replace-with-your-admin-password
 
-因此，新环境配置好数据库连接、安装依赖后，直接执行即可：
+# 分析 API 地址及服务之间的认证凭据
+STOCKDEPTH_API_URL=http://127.0.0.1:8008
+STOCKDEPTH_API_USERNAME=admin
+STOCKDEPTH_API_PASSWORD=replace-with-your-internal-api-password
+STOCKDEPTH_WEB_HOST=127.0.0.1
+STOCKDEPTH_WEB_PORT=8008
+STOCKDEPTH_WEB_USERNAME=admin
+STOCKDEPTH_WEB_PASSWORD=replace-with-your-internal-api-password
+```
+
+- `POSTGRES_URL` 指向已有数据库；密码中的 URL 特殊字符需要进行 URL 编码。
+- `BASE_URL` 使用实际网站地址，公网访问时填写 `http://服务器公网IP:3000` 或对应域名。
+- `AUTH_SECRET` 可通过 `openssl rand -base64 32` 生成。
+- `STOCKDEPTH_API_USERNAME / PASSWORD` 与 `STOCKDEPTH_WEB_USERNAME / PASSWORD` 必须分别一致；它们用于内部 API 认证，不是网页登录账户。
+- 初始管理员密码须为 8–100 个字符，UTF-8 长度不超过 72 字节。
+
+其他配置可保留 `.env.example` 中的默认值。无需支付时，Stripe 配置可保留模板占位值。模型供应商、模型名称、服务地址和 API Key 在登录后的模型管理页面配置，保存在数据库中。
+
+## 启动流程
+
+### 1. 启动服务
+
+在项目根目录执行：
 
 ```bash
 ./bin/stockdepth start api web analysis paper
+./bin/stockdepth status api web analysis paper
 ```
 
-这一步创建数据库内部结构，并在没有管理员时根据 `.env` 创建初始管理员；不创建 PostgreSQL 数据库本身或 Stripe 商品。建表依据版本控制中的项目 SQL 结构文件，避免每次启动直接修改 schema 造成不可追踪的变更。连接用户需具有创建 schema、表和修改结构的权限。
+启动命令会先连接数据库、自动执行迁移并检查项目表，然后初始化管理员并启动服务。初始化失败时会停止启动；重复执行会跳过已运行的服务，不会清空数据。
 
-需要单独执行结构更新时仍可使用：
+当数据库中没有未删除的管理员时，启动脚本根据 `STOCKDEPTH_ADMIN_EMAIL` 和 `STOCKDEPTH_ADMIN_PASSWORD` 创建 `super_admin`。已有管理员时保留原账户和密码，修改 `.env` 不会重置密码。两项均未配置时跳过创建；仅配置一项、配置无效或邮箱已被其他账户使用时会停止启动。无需手动执行 `db:seed`。
+
+### 2. 访问网站并配置模型
+
+本机访问 **http://localhost:3000**，云服务器访问 **http://服务器公网IP:3000**。网站监听 `0.0.0.0:3000`，公网访问需在实例安全组和系统防火墙放行 TCP 3000。分析 API 默认监听 `127.0.0.1:8008`，供内部服务调用。
+
+首次登录使用 `.env` 中配置的管理员邮箱和密码。进入模型管理页面，添加模型供应商、Base URL、Quick/Deep Model 和 API Key，启用并设为默认后即可创建分析任务。分析服务需要能访问相应模型服务和行情、新闻数据源。
+
+### 3. 查看日志与启停
 
 ```bash
-conda activate stockdepth  # 当前机器使用 tradingagents-saas
-pnpm --dir apps/web db:migrate
+# 查看服务日志
+tail -f var/api.log var/web.log var/analysis.log var/paper.log
+
+# 修改 .env 后重启并重新加载配置
+./bin/stockdepth restart api web analysis paper
+
+# 停止服务
+./bin/stockdepth stop api web analysis paper
 ```
 
-新环境首次启动前，在 `.env` 设置 `STOCKDEPTH_ADMIN_EMAIL` 和 `STOCKDEPTH_ADMIN_PASSWORD`，启动命令会自动创建 `super_admin` 账户。密码至少 8 个字符、最多 100 个字符，UTF-8 长度不超过 72 字节。重复启动或修改这两项不会覆盖已有管理员或重置密码。如果两项均未配置，则跳过账户创建；仅配置一项或配置无效时会停止启动。如果邮箱已被其他账户使用，也会停止启动，不会自动提升其权限。
-
-手动开发初始化命令 `pnpm --dir apps/web db:seed` 仍使用 `test@test.com` / `admin123`，且真实 Stripe Key 会触发远端商品创建；常规启动无需执行 seed，也不要运行 db:setup 覆盖配置。
-
-数据库保存用户、模型、任务、报告及模拟交易数据。分析文件和检查点在 `~/.stockdepth`。任务删除是软删除，可在 Account 的“最近删除”恢复，管理员仍可查看。
-
-## 验证
-
-```bash
-conda activate stockdepth  # 当前机器使用 tradingagents-saas
-pnpm --dir apps/web exec tsc --noEmit
-pnpm --dir apps/workers exec tsc --noEmit
-PYTHONPATH="$PWD/apps/api" python -m unittest discover -s apps/api/tests -p test_progress_reports.py -v
-```
-
-服务运行时，删除与恢复集成测试可执行 `node scripts/tests/job-visibility.cjs`。该测试使用临时任务，需要数据库已有至少两名普通用户和一名管理员，测试后清理临时数据。
+也可单独操作服务，例如 `./bin/stockdepth restart web`。不指定服务名时默认操作 `api web analysis`，模拟交易 `paper` 需要显式指定。PostgreSQL 由系统或外部数据库服务管理，启停脚本不管理它。

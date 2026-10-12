@@ -1,0 +1,2 @@
+CREATE INDEX "analysis_jobs_user_visible_id_idx" ON "analysis_jobs" USING btree ("user_id","id") WHERE hidden_at is null;--> statement-breakpoint
+CREATE INDEX "analysis_reports_job_user_idx" ON "analysis_reports" USING btree ("job_id","user_id");

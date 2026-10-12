@@ -1,3 +1,4 @@
+from .rate_limit import provider_runtime_options
 import os
 from typing import Any, Optional
 
@@ -45,6 +46,8 @@ class AzureOpenAIClient(BaseLLMClient):
             if key in self.kwargs:
                 llm_kwargs[key] = self.kwargs[key]
 
+        for key, value in provider_runtime_options('azure', llm_kwargs.get('base_url') or self.base_url).items():
+            llm_kwargs.setdefault(key, value)
         return NormalizedAzureChatOpenAI(**llm_kwargs)
 
     def validate_model(self) -> bool:

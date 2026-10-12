@@ -1,4 +1,6 @@
-import { and, desc, eq, gte, isNull, sql } from 'drizzle-orm';
+import { getJobsPage } from '@/lib/analysis/jobs-page';
+import { RequestTiming } from '@/lib/http/request-timing';
+import { and, eq, gte, isNull, sql } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
@@ -7,12 +9,10 @@ import { db } from '@/lib/db/drizzle';
 import {
   llmModelConfigs,
   analysisJobs,
-  analysisReports,
   creditTransactions,
   users
 } from '@/lib/db/schema';
-import { getAnalysisPricingConfig, getDepthCreditCostFromDb } from '@/lib/analysis/pricing-server';
-import { getActiveModelConfigs } from '@/lib/analysis/model-configs-server';
+import { getDepthCreditCostFromDb } from '@/lib/analysis/pricing-server';
 import { normalizeTicker } from '@/lib/market/tickers';
 
 const createJobSchema = z.object({
@@ -37,53 +37,17 @@ function today() {
   return `${value('year')}-${value('month')}-${value('day')}`;
 }
 
-export async function GET() {
-  const currentUser = await getCurrentUserFromSession();
-  if (currentUser instanceof NextResponse) {
-    return currentUser;
+export async function GET(request: NextRequest) {
+  const timing = new RequestTiming();
+  const currentUser = await timing.measure('auth', () => getCurrentUserFromSession());
+  if (currentUser instanceof NextResponse) return currentUser;
+  const raw = request.nextUrl.searchParams.get('before');
+  const before = raw === null ? undefined : Number(raw);
+  if (before !== undefined && (!Number.isSafeInteger(before) || before <= 0)) {
+    return NextResponse.json({ error: 'Invalid cursor' }, { status: 400 });
   }
-
-  const jobs = await db
-    .select({
-      id: analysisJobs.id,
-      runId: analysisJobs.runId,
-      ticker: analysisJobs.ticker,
-      tradeDate: analysisJobs.tradeDate,
-      realtimeData: analysisJobs.realtimeData,
-      language: analysisJobs.language,
-      depth: analysisJobs.depth,
-      analysts: analysisJobs.analysts,
-      status: analysisJobs.status,
-      externalStatus: analysisJobs.externalStatus,
-      errorMessage: analysisJobs.errorMessage,
-      inputTokens: analysisJobs.inputTokens,
-      outputTokens: analysisJobs.outputTokens,
-      totalTokens: analysisJobs.totalTokens,
-      tokenUsageComplete: analysisJobs.tokenUsageComplete,
-      startedAt: analysisJobs.startedAt,
-      completedAt: analysisJobs.completedAt,
-      createdAt: analysisJobs.createdAt,
-      updatedAt: analysisJobs.updatedAt,
-      reportCount: sql<number>`count(${analysisReports.id})::int`
-    })
-    .from(analysisJobs)
-    .leftJoin(analysisReports, eq(analysisReports.jobId, analysisJobs.id))
-    .where(and(eq(analysisJobs.userId, currentUser.id), isNull(analysisJobs.hiddenAt)))
-    .groupBy(analysisJobs.id)
-    .orderBy(desc(analysisJobs.id))
-    .limit(50);
-
-  const [pricing, models] = await Promise.all([
-    getAnalysisPricingConfig(),
-    getActiveModelConfigs()
-  ]);
-
-  return NextResponse.json({
-    credits: currentUser.analysisCredits ?? 0,
-    pricing,
-    models: models.map(model => ({ id: model.id, name: model.name, modelName: model.modelName, isDefault: model.isDefault })),
-    jobs
-  });
+  const payload = await timing.measure('jobs', () => getJobsPage(currentUser.id, before));
+  return NextResponse.json(payload, { headers: { ...timing.headers(), 'Cache-Control': 'private, no-store' } });
 }
 
 export async function POST(request: NextRequest) {

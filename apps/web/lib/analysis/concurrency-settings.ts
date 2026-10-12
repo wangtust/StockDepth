@@ -60,8 +60,6 @@ export async function ensureAnalysisConcurrencySettings() {
 
 export async function getAnalysisConcurrencySettings() {
   try {
-    await ensureAnalysisConcurrencySettings();
-
     const [row] = await db
       .select({
         key: analysisWorkerSettings.key,
@@ -73,6 +71,7 @@ export async function getAnalysisConcurrencySettings() {
       .where(eq(analysisWorkerSettings.key, ANALYSIS_WORKER_SETTINGS_KEY))
       .limit(1);
 
+    if (!row) await ensureAnalysisConcurrencySettings();
     return normalizeAnalysisConcurrencySettings(row ?? {});
   } catch {
     return normalizeAnalysisConcurrencySettings({});

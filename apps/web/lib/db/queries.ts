@@ -1,3 +1,4 @@
+import { cache } from 'react';
 import { desc, and, eq, isNull } from 'drizzle-orm';
 import { db } from './drizzle';
 import { activityLogs, analysisJobs, users } from './schema';
@@ -5,7 +6,7 @@ import { cookies } from 'next/headers';
 import { verifyToken } from '@/lib/auth/session';
 import { ensureUserInviteCode } from '@/lib/referrals/invite-codes';
 
-export async function getUser() {
+export const getUser = cache(async function getUser() {
   const sessionCookie = (await cookies()).get('session');
   if (!sessionCookie || !sessionCookie.value) {
     return null;
@@ -41,7 +42,7 @@ export async function getUser() {
   }
 
   return user[0];
-}
+});
 
 export async function getPublicUser() {
   const user = await getUser();

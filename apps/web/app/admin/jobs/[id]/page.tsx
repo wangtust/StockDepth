@@ -3,7 +3,7 @@ import { ModelCosts } from '@/app/admin/_components/model-costs';
 import { AnalysisUsage, AnalysisTimer } from '@/components/analysis-usage';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import { ArrowLeft, RefreshCcw, XCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -91,7 +91,11 @@ export default async function AdminJobDetailPage({ params, searchParams }: PageP
     notFound();
   }
 
-  const calls = await db.select().from(analysisModelCalls).where(eq(analysisModelCalls.jobId, jobId)).orderBy(analysisModelCalls.startedAt);
+  const [cost] = await db.select({
+    count: sql<number>`count(*)::int`, knownCount: sql<number>`count(${analysisModelCalls.estimatedCost})::int`,
+    total: sql<string>`coalesce(sum(${analysisModelCalls.estimatedCost}), 0)::text`,
+    complete: sql<boolean>`coalesce(bool_and(${analysisModelCalls.costComplete}), false)`
+  }).from(analysisModelCalls).where(eq(analysisModelCalls.jobId, jobId));
 
   const reports = await db
     .select({
@@ -99,7 +103,7 @@ export default async function AdminJobDetailPage({ params, searchParams }: PageP
       reportKey: analysisReports.reportKey,
       title: analysisReports.title,
       relativePath: analysisReports.relativePath,
-      content: analysisReports.content,
+      content: sql<string>`''`,
       updatedAt: analysisReports.updatedAt
     })
     .from(analysisReports)
@@ -122,6 +126,7 @@ export default async function AdminJobDetailPage({ params, searchParams }: PageP
 
   return (
     <div className="space-y-4">
+      <LiveAnalysisRefresh enabled={['running', 'queued'].includes(job.status)} />
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
         <div className="min-w-0">
           <Button asChild variant="ghost" className="-ml-3 mb-2">
@@ -164,9 +169,11 @@ export default async function AdminJobDetailPage({ params, searchParams }: PageP
         </div>
       </div>
 
-      <ModelCosts calls={calls} usageComplete={job.tokenUsageComplete} />
-      <AnalysisUsage job={job} calls={calls} />
+      <ModelCosts jobId={jobId} {...cost} complete={job.tokenUsageComplete && cost.count > 0 && cost.complete} version={job.updatedAt.toISOString()} />
+      <AnalysisUsage job={job} />
       <AdminReportViewer
+        jobId={jobId}
+        version={job.updatedAt.toISOString()}
         reports={reports.map((report) => ({
           id: report.id,
           reportKey: report.reportKey,

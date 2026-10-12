@@ -13,6 +13,22 @@ if (!process.env.POSTGRES_URL) {
 const databaseGlobal = globalThis as typeof globalThis & {
   stockdepthDatabaseClient?: ReturnType<typeof postgres>;
 };
-export const client = databaseGlobal.stockdepthDatabaseClient ?? postgres(process.env.POSTGRES_URL, { connection: { TimeZone: 'UTC' } });
-if (process.env.NODE_ENV !== 'production') databaseGlobal.stockdepthDatabaseClient = client;
+const poolSize = Number(process.env.STOCKDEPTH_DB_POOL_SIZE || 5);
+function createDatabaseClient() {
+  const pool = postgres(process.env.POSTGRES_URL!, {
+    max: Number.isInteger(poolSize) && poolSize > 0 ? poolSize : 5,
+    idle_timeout: 30,
+    connect_timeout: 10,
+    connection: { TimeZone: 'UTC', application_name: 'stockdepth' }
+  });
+  // Drizzle 0.43 calls unsafe(), whose postgres-js default disables preparation.
+  // Retain parameter types/plans on each connection to avoid a Describe round trip.
+  const unsafe = pool.unsafe.bind(pool);
+  pool.unsafe = ((query, parameters, options) => unsafe(query, parameters, {
+    prepare: process.env.STOCKDEPTH_DB_PREPARE !== 'false', ...options
+  })) as typeof pool.unsafe;
+  return pool;
+}
+export const client = databaseGlobal.stockdepthDatabaseClient ?? createDatabaseClient();
+databaseGlobal.stockdepthDatabaseClient = client;
 export const db = drizzle(client, { schema });

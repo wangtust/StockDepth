@@ -11,7 +11,7 @@ import {
   uniqueIndex,
   boolean,
 } from 'drizzle-orm/pg-core';
-import { relations } from 'drizzle-orm';
+import { relations, sql } from 'drizzle-orm';
 
 export const users = pgTable('users', {
   id: serial('id').primaryKey(),
@@ -76,6 +76,7 @@ export const analysisJobs = pgTable(
   (table) => [
     index('analysis_jobs_status_created_at_idx').on(table.status, table.createdAt),
     index('analysis_jobs_user_created_at_idx').on(table.userId, table.createdAt),
+    index('analysis_jobs_user_visible_id_idx').on(table.userId, table.id).where(sql`hidden_at is null`),
   ]
 );
 
@@ -117,7 +118,7 @@ export const analysisReports = pgTable('analysis_reports', {
   content: text('content').notNull(),
   createdAt: timestamp('created_at').notNull().defaultNow(),
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
-});
+}, (table) => [index('analysis_reports_job_user_idx').on(table.jobId, table.userId)]);
 
 export const creditTransactions = pgTable('credit_transactions', {
   id: serial('id').primaryKey(),

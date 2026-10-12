@@ -1,3 +1,4 @@
+from .rate_limit import provider_runtime_options
 import os
 from typing import Any, Optional
 
@@ -253,6 +254,8 @@ class OpenAIClient(BaseLLMClient):
             chat_cls = MinimaxChatOpenAI
         else:
             chat_cls = NormalizedChatOpenAI
+        for key, value in provider_runtime_options(self.provider, llm_kwargs.get('base_url') or self.base_url).items():
+            llm_kwargs.setdefault(key, value)
         return chat_cls(**llm_kwargs)
 
     def validate_model(self) -> bool:

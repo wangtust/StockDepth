@@ -169,6 +169,13 @@
       "when": 1791815123001,
       "tag": "0023_brief_wilson_fisk",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1791819482974,
+      "tag": "0024_daily_lilandra",
+      "breakpoints": true
     }
   ]
 }

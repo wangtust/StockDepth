@@ -1,14 +1,16 @@
+import { RequestTiming } from '@/lib/http/request-timing';
 import { and, eq, isNull, sql } from 'drizzle-orm';
 import { NextRequest, NextResponse } from 'next/server';
 import { getUser } from '@/lib/db/queries';
 import { db } from '@/lib/db/drizzle';
-import { analysisJobs, analysisReports, analysisModelCalls } from '@/lib/db/schema';
+import { analysisJobs, analysisReports } from '@/lib/db/schema';
 
 export async function GET(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const currentUser = await getUser();
+  const timing = new RequestTiming();
+  const currentUser = await timing.measure('auth', () => getUser());
   if (!currentUser) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
@@ -18,8 +20,39 @@ export async function GET(
     return NextResponse.json({ error: 'Not found' }, { status: 404 });
   }
 
-  const [job] = await db
-    .select()
+  const reportKey = request.nextUrl.searchParams.get('report');
+  if (reportKey !== null) {
+    if (!reportKey || reportKey.length > 80) return NextResponse.json({ error: 'Invalid report' }, { status: 400 });
+    const [report] = await timing.measure('report', () => db.select({
+      id: analysisReports.id, reportKey: analysisReports.reportKey,
+      title: analysisReports.title, content: analysisReports.content
+    }).from(analysisReports).innerJoin(analysisJobs, eq(analysisJobs.id, analysisReports.jobId))
+      .where(and(eq(analysisJobs.id, id), eq(analysisJobs.userId, currentUser.id),
+        isNull(analysisJobs.hiddenAt), eq(analysisReports.userId, currentUser.id),
+        eq(analysisReports.reportKey, reportKey))).limit(1));
+    return report ? NextResponse.json({ report }, { headers: timing.headers() })
+      : NextResponse.json({ error: 'Not found' }, { status: 404 });
+  }
+
+  const [job] = await timing.measure('job', () => db
+    .select({
+      id: analysisJobs.id, ticker: analysisJobs.ticker, status: analysisJobs.status,
+      externalStatus: analysisJobs.externalStatus, errorMessage: analysisJobs.errorMessage,
+      hiddenAt: analysisJobs.hiddenAt,
+      startedAt: analysisJobs.startedAt, completedAt: analysisJobs.completedAt,
+      updatedAt: analysisJobs.updatedAt, inputTokens: analysisJobs.inputTokens,
+      outputTokens: analysisJobs.outputTokens, totalTokens: analysisJobs.totalTokens,
+      tokenUsageComplete: analysisJobs.tokenUsageComplete,
+      reports: sql`coalesce((select json_agg(json_build_object('id', r.id, 'reportKey', r.report_key,
+        'title', r.title, 'updatedAt', r.updated_at at time zone 'UTC') order by r.id)
+        from analysis_reports r where r.job_id = analysis_jobs.id and r.user_id = ${currentUser.id}), '[]'::json)`,
+      calls: sql`coalesce((select json_agg(json_build_object('callId', c.call_id, 'agent', c.agent,
+        'model', c.model, 'status', c.status, 'startedAt', c.started_at at time zone 'UTC',
+        'endedAt', c.ended_at at time zone 'UTC', 'inputTokens', c.input_tokens,
+        'outputTokens', c.output_tokens, 'totalTokens', c.total_tokens,
+        'usageAvailable', c.usage_available, 'isRetry', c.is_retry, 'requestKind', c.request_kind)
+        order by c.started_at) from analysis_model_calls c where c.job_id = analysis_jobs.id), '[]'::json)`
+    })
     .from(analysisJobs)
     .where(
       and(
@@ -28,31 +61,14 @@ export async function GET(
         isNull(analysisJobs.hiddenAt)
       )
     )
-    .limit(1);
+    .limit(1));
 
   if (!job) {
     return NextResponse.json({ error: 'Not found' }, { status: 404 });
   }
 
-  const reports = await db
-    .select()
-    .from(analysisReports)
-    .where(
-      and(
-        eq(analysisReports.jobId, id),
-        eq(analysisReports.userId, currentUser.id)
-      )
-    )
-    .orderBy(analysisReports.id);
-
-  const calls = await db.select({
-    callId: analysisModelCalls.callId, agent: analysisModelCalls.agent, model: analysisModelCalls.model,
-    status: analysisModelCalls.status, startedAt: analysisModelCalls.startedAt, endedAt: analysisModelCalls.endedAt,
-    inputTokens: analysisModelCalls.inputTokens, outputTokens: analysisModelCalls.outputTokens, totalTokens: analysisModelCalls.totalTokens,
-    usageAvailable: analysisModelCalls.usageAvailable, isRetry: analysisModelCalls.isRetry, requestKind: analysisModelCalls.requestKind,
-  }).from(analysisModelCalls)
-    .where(eq(analysisModelCalls.jobId, id)).orderBy(analysisModelCalls.startedAt);
-  return NextResponse.json({ job, reports, calls });
+  const { reports, calls, ...summary } = job;
+  return NextResponse.json({ job: summary, reports, calls }, { headers: { ...timing.headers(), 'Cache-Control': 'private, no-store' } });
 }
 
 export async function DELETE(

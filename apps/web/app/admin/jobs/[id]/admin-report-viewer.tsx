@@ -2,8 +2,11 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { Maximize2, Minimize2 } from 'lucide-react';
-import { AnalysisProgress } from '@/components/analysis-progress';
-import { MarkdownRenderer } from '@/components/markdown-renderer';
+import dynamic from 'next/dynamic';
+import useSWR from 'swr';
+import { jsonFetcher } from '@/lib/http/json-fetcher';
+const AnalysisProgress = dynamic(() => import('@/components/analysis-progress').then(m => m.AnalysisProgress));
+const MarkdownRenderer = dynamic(() => import('@/components/markdown-renderer').then(m => m.MarkdownRenderer));
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
@@ -18,6 +21,8 @@ type AdminReport = {
 };
 
 type AdminReportViewerProps = {
+  jobId: number;
+  version: string;
   reports: AdminReport[];
   initialReportKey?: string;
   title: string;
@@ -26,6 +31,7 @@ type AdminReportViewerProps = {
 };
 
 export function AdminReportViewer({
+  jobId, version,
   reports,
   initialReportKey,
   title,
@@ -37,6 +43,7 @@ export function AdminReportViewer({
   );
   const [isFullscreen, setIsFullscreen] = useState(false);
 
+  const { data, error } = useSWR(selectedReportKey ? `/api/admin/jobs/${jobId}/details?report=${encodeURIComponent(selectedReportKey)}&v=${encodeURIComponent(version)}` : null, jsonFetcher);
   const selectedReport = useMemo(
     () =>
       reports.find((report) => report.reportKey === selectedReportKey) ||
@@ -67,6 +74,7 @@ export function AdminReportViewer({
 
   return (
     <>
+      {error && <p role="alert">{error.message}</p>}
       {isFullscreen && (
         <button
           aria-label="Exit report fullscreen"
@@ -153,7 +161,7 @@ export function AdminReportViewer({
         <CardContent className="min-h-0 flex-1 p-0">
           {selectedReport ? (
             <article
-              key={`${selectedReport.id}-${selectedReport.content.length}`}
+              key={`${selectedReport.id}-${data?.report?.content || ''.length}`}
               className={cn(
                 'overflow-auto bg-white px-5 py-6 sm:px-8 lg:px-12 xl:px-16',
                 isFullscreen
@@ -161,8 +169,8 @@ export function AdminReportViewer({
                   : 'min-h-[620px] lg:h-[calc(100dvh-340px)] lg:min-h-[680px]'
               )}
             >
-              {selectedReport.reportKey === 'progress' ? <AnalysisProgress content={selectedReport.content} /> : <MarkdownRenderer
-                content={selectedReport.content}
+              {selectedReport.reportKey === 'progress' ? <AnalysisProgress content={data?.report?.content || ''} /> : <MarkdownRenderer
+                content={data?.report?.content || ''}
                 className="mx-auto max-w-[1180px]"
               />}
             </article>

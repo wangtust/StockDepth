@@ -2,7 +2,7 @@ import './globals.css';
 import type { Metadata, Viewport } from 'next';
 import { Manrope } from 'next/font/google';
 import { getAccountForUser, getPublicUser } from '@/lib/db/queries';
-import { SWRConfig } from 'swr';
+import { DataCache } from '@/components/data-cache';
 
 export const metadata: Metadata = {
   title: 'StockDepth',
@@ -36,16 +36,14 @@ export default async function RootLayout({
       className={`bg-white dark:bg-gray-950 text-black dark:text-white ${manrope.className}`}
     >
       <body className="min-h-[100dvh] bg-gray-50">
-        <SWRConfig
-          value={{
-            fallback: {
+        <DataCache key={publicUser?.id ?? 'anonymous'}
+          fallback={{
               '/api/user': serializeForClient(publicUser),
               '/api/account': serializeForClient(account)
-            }
           }}
         >
           {children}
-        </SWRConfig>
+        </DataCache>
       </body>
     </html>
   );

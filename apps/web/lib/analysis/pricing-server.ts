@@ -24,9 +24,7 @@ export async function ensureAnalysisPricing() {
 }
 
 export async function getAnalysisPricingRows() {
-  await ensureAnalysisPricing();
-
-  return db
+  const rows = await db
     .select({
       depth: analysisPricing.depth,
       label: analysisPricing.label,
@@ -35,6 +33,9 @@ export async function getAnalysisPricingRows() {
     })
     .from(analysisPricing)
     .orderBy(asc(analysisPricing.depth));
+  if (rows.length === 3) return rows;
+  await ensureAnalysisPricing();
+  return db.select().from(analysisPricing).orderBy(asc(analysisPricing.depth));
 }
 
 export async function getAnalysisPricingConfig() {
@@ -46,13 +47,12 @@ export async function getAnalysisPricingConfig() {
 }
 
 export async function getDepthCreditCostFromDb(depth: number) {
-  await ensureAnalysisPricing();
-
   const [row] = await db
     .select({ creditCost: analysisPricing.creditCost })
     .from(analysisPricing)
     .where(eq(analysisPricing.depth, depth))
     .limit(1);
 
+  if (!row) await ensureAnalysisPricing();
   return row?.creditCost ?? DEPTH_CREDIT_COSTS[depth as AnalysisDepth] ?? DEPTH_CREDIT_COSTS[1];
 }

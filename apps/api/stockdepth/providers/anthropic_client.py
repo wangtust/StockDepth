@@ -1,3 +1,4 @@
+from .rate_limit import provider_runtime_options
 import re
 from typing import Any, Optional
 
@@ -61,6 +62,8 @@ class AnthropicClient(BaseLLMClient):
                 continue
             llm_kwargs[key] = self.kwargs[key]
 
+        for key, value in provider_runtime_options('anthropic', llm_kwargs.get('base_url') or self.base_url).items():
+            llm_kwargs.setdefault(key, value)
         return NormalizedChatAnthropic(**llm_kwargs)
 
     def validate_model(self) -> bool:

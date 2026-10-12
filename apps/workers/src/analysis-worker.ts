@@ -1,5 +1,6 @@
 import '../env';
-import { readFile } from 'node:fs/promises';
+import { readFile, readdir } from 'node:fs/promises';
+import { fetchWithBackoff } from './request';
 import { asc, eq, sql } from 'drizzle-orm';
 import { getAnalysisConcurrencySettings } from '@/lib/analysis/concurrency-settings';
 import { db } from '@/lib/db/drizzle';
@@ -53,19 +54,48 @@ const runHardTimeoutMs = positiveIntegerFromEnv(
   Math.max(runTimeoutMs * 2, runTimeoutMs + runStallTimeoutMs)
 );
 const mockMode = process.env.ANALYSIS_WORKER_MOCK === 'true';
+const localConcurrencyCap = positiveIntegerFromEnv('ANALYSIS_WORKER_MAX_CONCURRENCY', 4);
+const providerConcurrency = positiveIntegerFromEnv('ANALYSIS_PROVIDER_CONCURRENCY', 2);
+const minAvailableMemoryMb = positiveIntegerFromEnv('ANALYSIS_WORKER_MIN_AVAILABLE_MB', 256);
+let cachedRuntimeConfig: Awaited<ReturnType<typeof readRuntimeConfig>> | null = null;
+let configReadAt = 0;
 
 function positiveIntegerFromEnv(name: string, fallback: number) {
   const value = Number(process.env[name] || fallback);
   return Number.isFinite(value) && value >= 1 ? Math.floor(value) : fallback;
 }
 
-async function loadWorkerRuntimeConfig() {
+async function readRuntimeConfig() {
   const settings = await getAnalysisConcurrencySettings();
 
   return {
-    workerConcurrency: settings.systemConcurrency,
+    workerConcurrency: Math.min(settings.systemConcurrency, localConcurrencyCap),
     userConcurrency: settings.userConcurrency
   };
+}
+
+async function loadWorkerRuntimeConfig() {
+  if (!cachedRuntimeConfig || Date.now() - configReadAt >= 30000) {
+    cachedRuntimeConfig = await readRuntimeConfig();
+    configReadAt = Date.now();
+  }
+  return cachedRuntimeConfig;
+}
+
+async function memorySnapshot() {
+  const memory = await readFile('/proc/meminfo', 'utf8');
+  const availableMb = Number(memory.match(/MemAvailable:\s+(\d+)/)?.[1] || 0) / 1024;
+  let runnerRssMb = 0;
+  for (const pid of (await readdir('/proc')).filter(value => /^\d+$/.test(value))) {
+    try {
+      const command = await readFile(`/proc/${pid}/cmdline`, 'utf8');
+      if (!command.split('\0').some(arg => arg.endsWith('/analysis_runner.py'))) continue;
+      const status = await readFile(`/proc/${pid}/status`, 'utf8');
+      runnerRssMb += Number(status.match(/VmRSS:\s+(\d+)/)?.[1] || 0) / 1024;
+    } catch { /* Process exited during sampling. */ }
+  }
+  return { availableMb: Math.round(availableMb), runnerRssMb: Math.round(runnerRssMb),
+    workerRssMb: Math.round(process.memoryUsage().rss / 1024 / 1024) };
 }
 
 function authHeader(): Record<string, string> {
@@ -169,6 +199,10 @@ async function claimNextJob(userConcurrency: number): Promise<ClaimedJob | null>
           from ${analysisJobs}
           where ${analysisJobs.status} = 'queued'
             and ${userConcurrencyCondition}
+            and (select count(*) from analysis_jobs provider_jobs
+              where provider_jobs.status = 'running'
+                and provider_jobs.provider is not distinct from analysis_jobs.provider
+                and provider_jobs.base_url is not distinct from analysis_jobs.base_url) < ${providerConcurrency}
           order by ${analysisJobs.createdAt} asc
           for update skip locked
           limit 1
@@ -210,7 +244,8 @@ async function startStockDepth(job: ClaimedJob) {
     throw new Error('任务没有可用的数据库模型配置，请管理员配置模型后重新提交分析。');
   }
 
-  const response = await fetch(`${tradingAgentsUrl}/api/start`, {
+  // Start is sent once; transient read requests use bounded backoff below.
+  const response = await fetchWithBackoff(`${tradingAgentsUrl}/api/start`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -256,7 +291,7 @@ async function fetchRun(job: ClaimedJob): Promise<StockDepthRun> {
     ticker: job.ticker,
     date: job.tradeDate
   });
-  const response = await fetch(`${tradingAgentsUrl}/api/run?${query}`, {
+  const response = await fetchWithBackoff(`${tradingAgentsUrl}/api/run?${query}`, {
     headers: authHeader()
   });
   const payload = await response.json();
@@ -287,10 +322,11 @@ async function saveReports(job: ClaimedJob, reports: StockDepthReport[]) {
   });
 }
 
-async function syncUsage(job: ClaimedJob, run: StockDepthRun) {
+async function syncUsage(job: ClaimedJob, run: StockDepthRun, previousCalls: Map<string, string>) {
   if (!run.usage) return;
   await db.transaction(async (tx) => {
     for (const call of run.usage!.calls) {
+      if (previousCalls.get(call.call_id) === JSON.stringify(call)) continue;
       const values = {
         jobId: job.id, callId: call.call_id, agent: call.agent, model: call.model,
         startedAt: new Date(call.started_at), endedAt: call.ended_at ? new Date(call.ended_at) : null,
@@ -317,6 +353,7 @@ async function syncUsage(job: ClaimedJob, run: StockDepthRun) {
       tokenUsageComplete: totals.complete && run.usage!.history_complete,
     }).where(eq(analysisJobs.id, job.id));
   });
+  for (const call of run.usage.calls) previousCalls.set(call.call_id, JSON.stringify(call));
 }
 
 function hasFinalDecisionReport(reports: StockDepthReport[]) {
@@ -407,26 +444,33 @@ async function processJob(job: ClaimedJob, options: { startRun?: boolean } = {})
   const startedAt = Date.now();
   let lastProgressAt = startedAt;
   let lastSignature = '';
+  let lastReportsSignature = '';
+  let lastUsageSignature = '';
+  const previousCalls = new Map<string, string>();
 
   while (true) {
     const run = await fetchRun(job);
     const reports = run.reports || [];
-    await saveReports(job, reports);
-    await syncUsage(job, run);
+    const reportsSignature = JSON.stringify(reports);
+    if (reportsSignature !== lastReportsSignature) {
+      await saveReports(job, reports);
+      lastReportsSignature = reportsSignature;
+    }
+    const usageSignature = JSON.stringify(run.usage);
+    if (usageSignature !== lastUsageSignature) {
+      await syncUsage(job, run, previousCalls);
+      lastUsageSignature = usageSignature;
+    }
 
     const signature = progressSignature(run);
     if (signature !== lastSignature) {
       lastSignature = signature;
       lastProgressAt = Date.now();
-    }
-
-    await db
-      .update(analysisJobs)
-      .set({
+      await db.update(analysisJobs).set({
         externalStatus: run.status,
         updatedAt: new Date()
-      })
-      .where(eq(analysisJobs.id, job.id));
+      }).where(eq(analysisJobs.id, job.id));
+    }
 
     if (
       run.status === 'complete' ||
@@ -498,6 +542,7 @@ async function main() {
     `Analysis worker started${mockMode ? ' in mock mode' : ''} with concurrency ${runtimeConfig.workerConcurrency}, user concurrency ${runtimeConfig.userConcurrency || 'unlimited'}`
   );
   const activeJobs = new Set<Promise<void>>();
+  let lastMetricsAt = 0;
 
   function trackJob(job: ClaimedJob, options: { startRun?: boolean } = {}) {
     const task = runClaimedJob(job, options).finally(() => {
@@ -516,6 +561,19 @@ async function main() {
 
   while (true) {
     const currentConfig = await loadWorkerRuntimeConfig();
+    const memory = await memorySnapshot();
+    if (Date.now() - lastMetricsAt >= 30000) {
+      const [queue] = await db.execute(sql`select count(*)::int as queued,
+        coalesce(extract(epoch from now() at time zone 'UTC' - min(created_at)), 0)::int as oldest_wait_seconds
+        from analysis_jobs where status = 'queued'`);
+      console.log(JSON.stringify({ event: 'worker_metrics', active: activeJobs.size,
+        concurrency: currentConfig.workerConcurrency, providerConcurrency, ...memory, ...queue }));
+      lastMetricsAt = Date.now();
+    }
+    if (memory.availableMb < minAvailableMemoryMb) {
+      await sleep(pollIntervalMs);
+      continue;
+    }
 
     while (activeJobs.size < currentConfig.workerConcurrency) {
       const job = await claimNextJob(currentConfig.userConcurrency);

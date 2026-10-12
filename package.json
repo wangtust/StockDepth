@@ -1,8 +1,11 @@
 {
   "name": "stockdepth",
   "private": true,
+  "packageManager": "pnpm@12.11.2",
   "scripts": {
-    "dev": "./bin/stockdepth start",
+    "dev": "pnpm --dir apps/web dev",
+    "build": "./bin/stockdepth build",
+    "start": "./bin/stockdepth start",
     "stop": "./bin/stockdepth stop",
     "status": "./bin/stockdepth status",
     "check:web": "pnpm --dir apps/web exec tsc --noEmit",

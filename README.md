@@ -24,12 +24,36 @@ PostgreSQL 保存用户、模型、任务、报告与模拟交易数据，并作
 ```bash
 conda create -n stockdepth -c conda-forge python=3.11 nodejs=22 -y
 conda activate stockdepth
-npm install -g pnpm tsx
+npm install -g pnpm@12.11.2 tsx@4.23.15
 
 cd ./StockDepth
-pnpm install
+pnpm install --frozen-lockfile
 python -m pip install -e apps/api
 ```
+
+首次运行或更新网页代码后，先执行 `./bin/stockdepth build`，再执行
+`./bin/stockdepth start`。网页默认使用 `next build` / `next start` 的生产模式。
+只更新网页时执行 `./bin/stockdepth stop web`、`./bin/stockdepth build`、
+`./bin/stockdepth start web`；构建失败时不会自动退回开发模式。
+开发网页可使用 `pnpm dev`。应用依赖固定版本，安装时使用仓库根目录锁文件。
+连接池默认最多 5 个连接，并为 Drizzle 的参数查询启用预编译，减少重复 Describe
+往返。若数据库连接代理不支持预编译语句，设置 `STOCKDEPTH_DB_PREPARE=false`。
+
+Worker 的有效并发为管理员设置与 `ANALYSIS_WORKER_MAX_CONCURRENCY` 的较小值，
+默认本机上限 4，同供应商及 endpoint 同时运行上限 2。可用内存低于 256 MB 时
+暂停领取新任务，继续监测已有任务和恢复中的任务。`var/analysis.log` 每 30 秒
+记录活动任务、队列长度、最长排队时间、Worker/分析进程 RSS 和可用内存。
+供应商调用在本机独立 Python runner 之间共享限流文件，默认每分钟 60 次初始调用；
+可用 `STOCKDEPTH_PROVIDER_<供应商大写且连字符替换为下划线>_RPM` 覆盖。
+SDK 内部重试继续使用其退避策略，可能增加实际 HTTP 请求数；兼容网关保留最多
+一次 SDK 重试，其余默认最多两次。多个主机不会共享这一限流额度。
+这些保护值不是已验证的真实模型容量，调整前应先测内存和供应商配额。
+
+只读性能复测：`node scripts/diagnostics/measure-stage.cjs final`。
+数据库统计：`node scripts/diagnostics/database-stats.cjs`；未安装
+`pg_stat_statements` 时明确报告不可用，不自动修改远程数据库的全局设置。
+`node scripts/diagnostics/worker-capacity.cjs` 需要创建数据库权限，自动创建并
+清理独立测试库，验证完整迁移和 1/2/4 并发的队列及报告存储，不调用收费模型。
 
 如果环境和依赖已安装，可跳过这一步。
 
@@ -81,6 +105,7 @@ STOCKDEPTH_WEB_PASSWORD=replace-with-your-internal-api-password
 在项目根目录执行：
 
 ```bash
+./bin/stockdepth build
 ./bin/stockdepth start api web analysis paper
 ./bin/stockdepth status api web analysis paper
 ```
@@ -113,3 +138,5 @@ tail -f var/api.log var/web.log var/analysis.log var/paper.log
 也可单独操作服务，例如 `./bin/stockdepth restart web`。不指定服务名时默认操作 `api web analysis`，模拟交易 `paper` 需要显式指定。PostgreSQL 由系统或外部数据库服务管理，启停脚本不管理它。
 
 分析并发配置保存在数据库 `analysis_worker_settings` 中，默认全系统 200 个任务、每用户 5 个任务。管理员可在 `/admin/system` 修改，保存后自动影响后续任务调度；超过限制的任务排队。并发数量不再读取 `.env`。
+
+性能测试与本次优化结果见 [性能诊断](docs/performance-2026-10-12.md)，可运行 `node scripts/diagnostics/latency.cjs` 复测页面、接口和数据库延迟。

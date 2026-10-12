@@ -1,3 +1,4 @@
+from .rate_limit import provider_runtime_options
 from typing import Any, Optional
 
 from langchain_google_genai import ChatGoogleGenerativeAI
@@ -56,6 +57,8 @@ class GoogleClient(BaseLLMClient):
                 # Gemini 2.5: map to thinking_budget
                 llm_kwargs["thinking_budget"] = -1 if thinking_level == "high" else 0
 
+        for key, value in provider_runtime_options('google', llm_kwargs.get('base_url') or self.base_url).items():
+            llm_kwargs.setdefault(key, value)
         return NormalizedChatGoogleGenerativeAI(**llm_kwargs)
 
     def validate_model(self) -> bool:

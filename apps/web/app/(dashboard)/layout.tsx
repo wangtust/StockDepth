@@ -14,7 +14,7 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { signOut } from '@/app/(login)/actions';
 import { useRouter } from 'next/navigation';
 import { User } from '@/lib/db/schema';
-import useSWR, { mutate } from 'swr';
+import useSWR, { useSWRConfig } from 'swr';
 import { safeJson } from '@/lib/http/safe-json';
 
 const fetcher = (url: string) => fetch(url).then(safeJson);
@@ -24,6 +24,7 @@ type PublicUser = Omit<User, 'passwordHash'> & {
 };
 
 function UserMenu() {
+  const { mutate } = useSWRConfig();
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const { data: user } = useSWR<PublicUser>('/api/user', fetcher);
   const router = useRouter();
@@ -33,7 +34,7 @@ function UserMenu() {
 
   async function handleSignOut() {
     await signOut();
-    mutate('/api/user');
+    await mutate(() => true, undefined, { revalidate: false });
     router.push('/');
   }
 

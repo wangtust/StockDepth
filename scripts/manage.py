@@ -14,7 +14,7 @@ STATE = ROOT / 'var/processes.json'
 RUNTIME = Path(os.environ['STOCKDEPTH_RUNTIME_BIN'])
 SERVICES = {
     'api': (ROOT / 'apps/api', [str(RUNTIME / 'python'), '-m', 'stockdepth.api.server']),
-    'web': (ROOT / 'apps/web', [str(RUNTIME / 'pnpm'), 'dev', '--hostname', '0.0.0.0']),
+    'web': (ROOT / 'apps/web', [str(RUNTIME / 'pnpm'), 'start', '--hostname', '0.0.0.0']),
     'analysis': (ROOT / 'apps/workers', [str(RUNTIME / 'tsx'), 'src/analysis-worker.ts']),
     'paper': (ROOT / 'apps/workers', [str(RUNTIME / 'tsx'), 'src/paper-trader-worker.ts']),
 }
@@ -31,7 +31,7 @@ def live(record):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('action', choices=['start', 'stop', 'status', 'restart'])
+    parser.add_argument('action', choices=['start', 'stop', 'status', 'restart', 'build'])
     parser.add_argument('services', nargs='*')
     args = parser.parse_args()
     names = args.services or ['api', 'web', 'analysis']
@@ -45,6 +45,11 @@ def main():
     env['PATH'] = str(RUNTIME) + ':' + env.get('PATH', '')
     env['PYTHONPATH'] = str(ROOT / 'apps/api')
     env['PYTHONUNBUFFERED'] = '1'
+    if args.action == 'build':
+        raise SystemExit(subprocess.run([str(RUNTIME / 'pnpm'), 'build'], cwd=ROOT / 'apps/web', env=env).returncode)
+    if args.action in ('start', 'restart') and 'web' in names:
+        if not (ROOT / 'apps/web/.next/BUILD_ID').exists():
+            raise SystemExit('请先运行 ./bin/stockdepth build，生成生产构建。')
     if args.action in ('start', 'restart'):
         result = subprocess.run(
             [str(RUNTIME / 'node'), str(ROOT / 'scripts/initialize-database.cjs')],

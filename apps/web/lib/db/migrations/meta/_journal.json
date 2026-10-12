@@ -176,6 +176,13 @@
       "when": 1791819482974,
       "tag": "0024_daily_lilandra",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1791828384083,
+      "tag": "0025_luxuriant_smasher",
+      "breakpoints": true
     }
   ]
 }

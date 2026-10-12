@@ -1,6 +1,6 @@
 'use client';
 
-import { FormEvent, useEffect, useMemo, useState } from 'react';
+import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import {
   ArrowDownToLine,
@@ -32,6 +32,8 @@ import { cn } from '@/lib/utils';
 import useSWR from 'swr';
 import { jsonFetcher } from '@/lib/http/json-fetcher';
 import { pollingDefaults } from '@/lib/http/polling';
+import { createManualTradeOperation, isDefinitiveTradeRejection, type ManualTradeOperation } from '@/lib/paper/manual-trade-client';
+import { analysisStatusMessage } from '@/lib/analysis/client-status-message';
 
 type Portfolio = {
   id: number;
@@ -174,6 +176,10 @@ export default function PortfolioPage() {
   const [analysisRealtimeData, setAnalysisRealtimeData] = useState(true);
   const [busy, setBusy] = useState('');
   const [error, setError] = useState('');
+  const tradeInFlight = useRef(false);
+  const tradeOperation = useRef<ManualTradeOperation | null>(null);
+  const [uncertainTrades, setUncertainTrades] = useState<ManualTradeOperation[]>([]);
+  useEffect(() => { tradeOperation.current = null; }, [payload.portfolio?.id, tradeTicker, tradeSide, quantity, price, note]);
 
   const portfolio = payload.portfolio;
   const currency = portfolio?.currency || 'USD';
@@ -293,13 +299,14 @@ export default function PortfolioPage() {
 
   async function handleTrade(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (tradeInFlight.current) return;
     if (!portfolio) {
       setError('Create a paper portfolio first.');
       return;
     }
     const quantityValue = Number(quantity);
     const priceValue = Number(price);
-    if (!Number.isInteger(quantityValue) || quantityValue <= 0) {
+    if (!Number.isSafeInteger(quantityValue) || quantityValue <= 0) {
       setError('Shares must be a positive whole number.');
       return;
     }
@@ -307,20 +314,51 @@ export default function PortfolioPage() {
       setError('Price must be a positive number.');
       return;
     }
-    const data = await submitJson(
-      '/api/paper/trades',
-      {
-        portfolioId: portfolio.id,
-        ticker: tradeTicker,
-        side: tradeSide,
-        quantity: quantityValue,
-        price: priceValue,
-        note
-      },
-      'trade'
-    );
-    if (data) {
-      setNote('');
+    const body = { portfolioId: portfolio.id, ticker: tradeTicker, side: tradeSide,
+      quantity: quantityValue, price: priceValue, note };
+    const operation = tradeOperation.current ?? createManualTradeOperation(body);
+    tradeOperation.current = operation;
+    await sendManualTrade(operation);
+  }
+
+  async function sendManualTrade(operation: ManualTradeOperation) {
+    if (tradeInFlight.current) return;
+    tradeInFlight.current = true;
+    setBusy('trade');
+    setError('');
+    let confirmed = false;
+    try {
+      const response = await fetch('/api/paper/trades', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Idempotency-Key': operation.key },
+        body: JSON.stringify(operation.body)
+      });
+      // Malformed/empty success responses do not prove a completed trade.
+      const result = await response.json();
+      if (!response.ok) {
+        if (isDefinitiveTradeRejection(response.status, result)) {
+          if (tradeOperation.current?.key === operation.key) tradeOperation.current = null;
+          setUncertainTrades(current => current.filter(item => item.key !== operation.key));
+          setError(`Trade rejected: ${result.error}`);
+          return;
+        }
+        throw new Error(result.error || `HTTP ${response.status}`);
+      }
+      if (!result || !result.trade || !Number.isSafeInteger(result.trade.id)) throw new Error('Unrecognized trade response');
+      confirmed = true;
+      if (tradeOperation.current?.key === operation.key) tradeOperation.current = null;
+      setUncertainTrades(current => current.filter(item => item.key !== operation.key));
+      // Preserve edits made while this request was in flight.
+      setNote(current => current === operation.body.note ? '' : current);
+      await refreshAfterMutation();
+    } catch (err) {
+      if (!confirmed) {
+        setUncertainTrades(current => current.some(item => item.key === operation.key) ? current : [...current, operation]);
+        setError(`Trade response uncertain; it may already have executed. ${err instanceof Error ? err.message : String(err)}`);
+      }
+    } finally {
+      tradeInFlight.current = false;
+      setBusy('');
     }
   }
 
@@ -815,6 +853,12 @@ export default function PortfolioPage() {
                       placeholder="Manual paper trade"
                     />
                   </div>
+                  {uncertainTrades.map(operation => (
+                    <div key={operation.key} role="status" className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+                      <p>Response uncertain: {operation.body.side} {operation.body.quantity} {operation.body.ticker} @ {operation.body.price}. It may already have executed. Refresh to inspect trades, or explicitly retry the original request with the same key. Changed inputs submit a separate trade. Keep this page open until resolved.</p>
+                      <Button type="button" variant="outline" disabled={busy === 'trade'} onClick={() => sendManualTrade(operation)}>Retry original trade</Button>
+                    </div>
+                  ))}
                   {selectedPosition && (
                     <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600">
                       Holding {selectedPosition.quantity} shares at{' '}
@@ -967,6 +1011,7 @@ export default function PortfolioPage() {
                             </a>
                           </Button>
                         </div>
+                        {analysisStatusMessage(run) && <p role="status" className="mt-2 text-sm text-slate-600">{analysisStatusMessage(run)}</p>}
                         {run.errorMessage && (
                           <div className="mt-2 text-sm text-red-700">
                             {run.errorMessage}

@@ -1,245 +1,88 @@
-import { eq, sql } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { db } from '@/lib/db/drizzle';
-import {
-  paperPortfolios,
-  paperPositions,
-  paperTradeDecisions,
-  paperTrades
-} from '@/lib/db/schema';
+import { paperTradeDecisions } from '@/lib/db/schema';
+import { applyTrade, integerAmount, lockPortfolio, lockPositions, PaperTradeError, Portfolio, Position } from './trading';
 
-type Portfolio = typeof paperPortfolios.$inferSelect;
-type Position = typeof paperPositions.$inferSelect;
 type Decision = typeof paperTradeDecisions.$inferSelect;
+export type PaperExecutionResult = { status: 'executed' | 'skipped'; message?: string };
 
-export type PaperExecutionResult = {
-  status: 'executed' | 'skipped';
-  message?: string;
-};
-
-export async function executePaperDecision({
-  decision,
-  portfolio,
-  positions,
-  maxPositionBps = 2000,
-  maxTradeBps = 1000
-}: {
+// Legacy Worker input remains accepted; portfolio/position snapshots are identity hints
+// only. The API uses executePaperDecisionForUser with the authenticated user ID.
+export async function executePaperDecision({ decision: hint, portfolio, maxPositionBps = 2000, maxTradeBps = 1000, expectedUserId }: {
   decision: Decision;
   portfolio: Portfolio;
   positions: Position[];
   maxPositionBps?: number;
   maxTradeBps?: number;
+  expectedUserId?: number;
 }): Promise<PaperExecutionResult> {
-  if (decision.status === 'executed') {
-    return { status: 'skipped', message: 'Decision has already been executed.' };
-  }
-
-  if (decision.action === 'hold') {
-    await markDecision(decision.id, 'skipped', 'Hold decision.');
-    return { status: 'skipped', message: 'Hold decision.' };
-  }
-
-  const targetPosition = positions.find((position) => position.ticker === decision.ticker);
-  const positionValueCents = positions.reduce(
-    (sum, position) => sum + position.quantity * position.lastPriceCents,
-    0
-  );
-  const totalValueCents = portfolio.cashCents + positionValueCents;
-  const currentValueCents = targetPosition
-    ? targetPosition.quantity * targetPosition.lastPriceCents
-    : 0;
-  const targetWeight = Math.min(decision.targetWeightBps, maxPositionBps) / 10000;
-  const targetValueCents = Math.floor(totalValueCents * targetWeight);
-  const maxTradeValueCents = Math.floor(totalValueCents * (maxTradeBps / 10000));
-  const priceCents = decision.priceCents || targetPosition?.lastPriceCents || 0;
-
-  if (!priceCents) {
-    await markDecision(decision.id, 'skipped', 'No usable price for simulated execution.');
-    return { status: 'skipped', message: 'No usable price for simulated execution.' };
-  }
-
-  if (decision.action === 'buy') {
-    const desiredSpendCents = Math.max(0, targetValueCents - currentValueCents);
-    const spendCents = Math.min(desiredSpendCents, maxTradeValueCents, portfolio.cashCents);
-    const modelQuantity = decision.quantity > 0 ? decision.quantity : Number.MAX_SAFE_INTEGER;
-    const quantity = Math.min(modelQuantity, Math.floor(spendCents / priceCents));
-
-    if (quantity <= 0) {
-      await markDecision(decision.id, 'skipped', 'Risk checks reduced buy quantity to zero.');
-      return { status: 'skipped', message: 'Risk checks reduced buy quantity to zero.' };
-    }
-
-    await executeBuy({ decision, portfolio, position: targetPosition, quantity, priceCents });
-    return { status: 'executed' };
-  }
-
-  if (decision.action === 'sell') {
-    if (!targetPosition || targetPosition.quantity <= 0) {
-      await markDecision(decision.id, 'skipped', 'No shares available to sell.');
-      return { status: 'skipped', message: 'No shares available to sell.' };
-    }
-
-    const desiredSellCents = Math.max(0, currentValueCents - targetValueCents);
-    const maxSharesByValue = Math.floor(Math.min(desiredSellCents, maxTradeValueCents) / priceCents);
-    const modelQuantity = decision.quantity > 0 ? decision.quantity : Number.MAX_SAFE_INTEGER;
-    const quantity = Math.min(modelQuantity, maxSharesByValue, targetPosition.quantity);
-
-    if (quantity <= 0) {
-      await markDecision(decision.id, 'skipped', 'Risk checks reduced sell quantity to zero.');
-      return { status: 'skipped', message: 'Risk checks reduced sell quantity to zero.' };
-    }
-
-    await executeSell({ decision, portfolio, position: targetPosition, quantity, priceCents });
-    return { status: 'executed' };
-  }
-
-  await markDecision(decision.id, 'skipped', `Unsupported action: ${decision.action}`);
-  return { status: 'skipped', message: `Unsupported action: ${decision.action}` };
+  return executeLockedDecision({ decisionId: hint.id, portfolioId: portfolio.id,
+    userId: expectedUserId ?? hint.userId, maxPositionBps, maxTradeBps });
 }
 
-async function executeBuy({
-  decision,
-  portfolio,
-  position,
-  quantity,
-  priceCents
-}: {
-  decision: Decision;
-  portfolio: Portfolio;
-  position?: Position;
-  quantity: number;
-  priceCents: number;
-}) {
-  await db.transaction(async (tx) => {
-    const grossAmountCents = quantity * priceCents;
-    const oldQuantity = position?.quantity || 0;
-    const oldCostCents = oldQuantity * (position?.avgCostCents || 0);
-    const newQuantity = oldQuantity + quantity;
-    const avgCostCents = Math.round((oldCostCents + grossAmountCents) / newQuantity);
+export async function executePaperDecisionForUser(decisionId: number, userId: number): Promise<PaperExecutionResult> {
+  return executeLockedDecision({ decisionId, userId, maxPositionBps: 2000, maxTradeBps: 1000 });
+}
 
-    const [updatedPosition] = position
-      ? await tx
-          .update(paperPositions)
-          .set({
-            quantity: newQuantity,
-            avgCostCents,
-            lastPriceCents: priceCents,
-            updatedAt: new Date()
-          })
-          .where(eq(paperPositions.id, position.id))
-          .returning()
-      : await tx
-          .insert(paperPositions)
-          .values({
-            portfolioId: portfolio.id,
-            userId: decision.userId,
-            ticker: decision.ticker,
-            quantity,
-            avgCostCents,
-            lastPriceCents: priceCents
-          })
-          .returning();
-
-    await tx
-      .update(paperPortfolios)
-      .set({
-        cashCents: sql`${paperPortfolios.cashCents} - ${grossAmountCents}`,
-        updatedAt: new Date()
-      })
-      .where(eq(paperPortfolios.id, portfolio.id));
-
-    await tx.insert(paperTrades).values({
-      portfolioId: portfolio.id,
-      userId: decision.userId,
-      positionId: updatedPosition.id,
-      ticker: decision.ticker,
-      side: 'buy',
-      quantity,
-      priceCents,
-      grossAmountCents,
-      note: `Paper trade from decision #${decision.id}`
+async function executeLockedDecision({ decisionId, portfolioId, userId, maxPositionBps, maxTradeBps }: {
+  decisionId: number; portfolioId?: number; userId: number; maxPositionBps: number; maxTradeBps: number;
+}): Promise<PaperExecutionResult> {
+  integerAmount(decisionId, 'Decision ID', 1);
+  for (const bps of [maxPositionBps, maxTradeBps]) {
+    if (!Number.isSafeInteger(bps) || bps < 0 || bps > 10000) throw new PaperTradeError('Invalid risk limit.');
+  }
+  return db.transaction(async tx => {
+    // Discover only the lock target, never status/balance/position snapshots. Ownership
+    // and the full decision are checked again after the portfolio lock is acquired.
+    if (portfolioId === undefined) {
+      const [target] = await tx.select({ portfolioId: paperTradeDecisions.portfolioId }).from(paperTradeDecisions)
+        .where(and(eq(paperTradeDecisions.id, decisionId), eq(paperTradeDecisions.userId, userId))).limit(1);
+      if (!target) throw new PaperTradeError('Decision not found.', 404);
+      portfolioId = target.portfolioId;
+    }
+    const currentPortfolio = await lockPortfolio(tx, portfolioId, userId);
+    const [decision] = await tx.select().from(paperTradeDecisions).where(and(
+      eq(paperTradeDecisions.id, decisionId), eq(paperTradeDecisions.portfolioId, currentPortfolio.id), eq(paperTradeDecisions.userId, userId)
+    )).for('update');
+    if (!decision) throw new PaperTradeError('Decision not found.', 404);
+    if (decision.status === 'executed') return { status: 'skipped', message: 'Decision has already been executed.' };
+    if (!['proposed', 'skipped'].includes(decision.status)) throw new PaperTradeError(`Decision cannot be executed from status ${decision.status}.`);
+    const skip = async (message: string): Promise<PaperExecutionResult> => {
+      await tx.update(paperTradeDecisions).set({status:'skipped', errorMessage:message, executedAt:null}).where(eq(paperTradeDecisions.id,decision.id));
+      return {status:'skipped',message};
+    };
+    if (decision.action === 'hold') return skip('Hold decision.');
+    if (!['buy','sell'].includes(decision.action)) return skip(`Unsupported action: ${decision.action}`);
+    const positions = await lockPositions(tx, currentPortfolio);
+    const position = positions.find(p=>p.ticker===decision.ticker);
+    integerAmount(decision.quantity, 'Decision quantity'); integerAmount(decision.priceCents, 'Decision price');
+    if (!Number.isSafeInteger(decision.targetWeightBps) || decision.targetWeightBps<0 || decision.targetWeightBps>10000) throw new PaperTradeError('Invalid target weight.');
+    const priceCents = decision.priceCents || position?.lastPriceCents || 0;
+    if (!priceCents) return skip('No usable price for simulated execution.');
+    // Exact arithmetic for valuation and percentage floors; no unsafe products in Number.
+    const total = BigInt(currentPortfolio.cashCents) + positions.reduce((sum,p)=>sum+BigInt(p.quantity)*BigInt(p.lastPriceCents),0n);
+    const current = position ? BigInt(position.quantity)*BigInt(position.lastPriceCents) : 0n;
+    const target = total*BigInt(Math.min(decision.targetWeightBps,maxPositionBps))/10000n;
+    const maxTrade = total*BigInt(maxTradeBps)/10000n;
+    const min = (...values: bigint[])=>values.reduce((a,b)=>a<b?a:b);
+    const modelQuantity = BigInt(decision.quantity || 2_147_483_647);
+    let quantity: number;
+    if (decision.action==='buy') {
+      const desired = target>current ? target-current : 0n;
+      const spend = min(desired,maxTrade,BigInt(currentPortfolio.cashCents));
+      quantity=Number(min(modelQuantity,spend/BigInt(priceCents)));
+      if (!quantity) return skip('Risk checks reduced buy quantity to zero.');
+    } else {
+      if (!position || !position.quantity) return skip('No shares available to sell.');
+      const desired = current>target ? current-target : 0n;
+      quantity=Number(min(modelQuantity,min(desired,maxTrade)/BigInt(priceCents),BigInt(position.quantity)));
+      if (!quantity) return skip('Risk checks reduced sell quantity to zero.');
+    }
+    await applyTrade(tx,currentPortfolio,position,{
+      ticker:decision.ticker,side:decision.action as 'buy'|'sell',quantity,priceCents,
+      note:`Paper trade from decision #${decision.id}`,decisionId:decision.id
     });
-
-    await tx
-      .update(paperTradeDecisions)
-      .set({
-        status: 'executed',
-        quantity,
-        priceCents,
-        executedAt: new Date(),
-        errorMessage: null
-      })
-      .where(eq(paperTradeDecisions.id, decision.id));
+    await tx.update(paperTradeDecisions).set({status:'executed',quantity,priceCents,executedAt:new Date(),errorMessage:null}).where(eq(paperTradeDecisions.id,decision.id));
+    return {status:'executed'};
   });
-}
-
-async function executeSell({
-  decision,
-  portfolio,
-  position,
-  quantity,
-  priceCents
-}: {
-  decision: Decision;
-  portfolio: Portfolio;
-  position: Position;
-  quantity: number;
-  priceCents: number;
-}) {
-  await db.transaction(async (tx) => {
-    const grossAmountCents = quantity * priceCents;
-    const realizedPnlCents = (priceCents - position.avgCostCents) * quantity;
-
-    await tx
-      .update(paperPositions)
-      .set({
-        quantity: position.quantity - quantity,
-        lastPriceCents: priceCents,
-        realizedPnlCents: sql`${paperPositions.realizedPnlCents} + ${realizedPnlCents}`,
-        updatedAt: new Date()
-      })
-      .where(eq(paperPositions.id, position.id));
-
-    await tx
-      .update(paperPortfolios)
-      .set({
-        cashCents: sql`${paperPortfolios.cashCents} + ${grossAmountCents}`,
-        updatedAt: new Date()
-      })
-      .where(eq(paperPortfolios.id, portfolio.id));
-
-    await tx.insert(paperTrades).values({
-      portfolioId: portfolio.id,
-      userId: decision.userId,
-      positionId: position.id,
-      ticker: decision.ticker,
-      side: 'sell',
-      quantity,
-      priceCents,
-      grossAmountCents,
-      realizedPnlCents,
-      note: `Paper trade from decision #${decision.id}`
-    });
-
-    await tx
-      .update(paperTradeDecisions)
-      .set({
-        status: 'executed',
-        quantity,
-        priceCents,
-        executedAt: new Date(),
-        errorMessage: null
-      })
-      .where(eq(paperTradeDecisions.id, decision.id));
-  });
-}
-
-async function markDecision(id: number, status: string, message: string) {
-  await db
-    .update(paperTradeDecisions)
-    .set({
-      status,
-      errorMessage: message,
-      executedAt: null
-    })
-    .where(eq(paperTradeDecisions.id, id));
 }

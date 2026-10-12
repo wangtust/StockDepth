@@ -33,6 +33,11 @@ async function main() {
       assert.equal(overview.hasActiveAnalysisRuns, activity.active);
       const actual = JSON.parse(JSON.stringify(next)), expected = JSON.parse(JSON.stringify(old));
       delete actual.hasActiveAnalysisRuns;
+      // Round 3 adds an optional decision link; all pre-migration trades remain unlinked.
+      for (const trade of expected.trades) {
+        assert.equal(trade.decisionId, null, 'Historical trades must not be backfilled');
+        delete trade.decisionId;
+      }
       // The original grouped query had undefined ordering for equal timestamps.
       for(const payload of [actual,expected]) payload.analysisRuns.sort((a: any,b: any)=>Date.parse(b.createdAt)-Date.parse(a.createdAt)||b.id-a.id);
       function differences(a: any,b: any,p=''): string[] {

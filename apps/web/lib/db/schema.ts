@@ -10,6 +10,9 @@ import {
   index,
   uniqueIndex,
   boolean,
+  uuid,
+  jsonb,
+  check,
 } from 'drizzle-orm/pg-core';
 import { relations, sql } from 'drizzle-orm';
 
@@ -175,6 +178,7 @@ export const paperPortfolios = pgTable(
   },
   (table) => [
     index('paper_portfolios_user_status_idx').on(table.userId, table.status),
+    check('paper_portfolios_cash_nonnegative', sql`${table.cashCents} >= 0`),
   ]
 );
 
@@ -199,6 +203,7 @@ export const paperPositions = pgTable(
   (table) => [
     uniqueIndex('paper_positions_portfolio_ticker_idx').on(table.portfolioId, table.ticker),
     index('paper_positions_user_idx').on(table.userId),
+    check('paper_positions_amounts_nonnegative', sql`${table.quantity} >= 0 AND ${table.avgCostCents} >= 0 AND ${table.lastPriceCents} >= 0`),
   ]
 );
 
@@ -213,6 +218,7 @@ export const paperTrades = pgTable(
       .notNull()
       .references(() => users.id),
     positionId: integer('position_id').references(() => paperPositions.id),
+    decisionId: integer('decision_id').references(() => paperTradeDecisions.id),
     ticker: varchar('ticker', { length: 40 }).notNull(),
     side: varchar('side', { length: 12 }).notNull(),
     quantity: integer('quantity').notNull(),
@@ -226,8 +232,23 @@ export const paperTrades = pgTable(
   (table) => [
     index('paper_trades_portfolio_created_idx').on(table.portfolioId, table.createdAt),
     index('paper_trades_user_created_idx').on(table.userId, table.createdAt),
+    uniqueIndex('paper_trades_decision_idx').on(table.decisionId),
+    check('paper_trades_amounts_valid', sql`${table.quantity} > 0 AND ${table.priceCents} > 0 AND ${table.grossAmountCents}::bigint = ${table.quantity}::bigint * ${table.priceCents}::bigint AND ${table.feeCents} >= 0`),
   ]
 );
+
+// The portfolio lock serializes claims; result is written in the trade transaction.
+export const paperTradeRequests = pgTable('paper_trade_requests', {
+  id: serial('id').primaryKey(),
+  userId: integer('user_id').notNull().references(() => users.id),
+  portfolioId: integer('portfolio_id').notNull().references(() => paperPortfolios.id),
+  key: uuid('key').notNull(),
+  request: text('request').notNull(),
+  result: jsonb('result').notNull(),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+}, (table) => [
+  uniqueIndex('paper_trade_requests_scope_key_idx').on(table.userId, table.portfolioId, table.key),
+]);
 
 export const paperAnalysisRuns = pgTable(
   'paper_analysis_runs',

@@ -3,7 +3,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { db } from '@/lib/db/drizzle';
 import { getUser } from '@/lib/db/queries';
-import { paperPortfolios, paperPositions, paperTrades } from '@/lib/db/schema';
+import { users, paperPortfolios, paperPositions, paperTrades } from '@/lib/db/schema';
+import { integerAmount } from '@/lib/paper/trading';
 
 const createPortfolioSchema = z.object({
   name: z.string().trim().min(1).max(120).default('Paper Portfolio'),
@@ -28,9 +29,13 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const initialCashCents = toCents(parsed.data.initialCash);
   try {
+    const initialCashCents = integerAmount(toCents(parsed.data.initialCash), 'Initial cash', 1);
     const portfolio = await db.transaction(async (tx) => {
+      // Match trade lock order, and check usage only after serializing with trades.
+      const [user] = await tx.select({ status: users.status, deletedAt: users.deletedAt })
+        .from(users).where(eq(users.id, currentUser.id)).for('share');
+      if (!user || user.status !== 'active' || user.deletedAt) throw new Error('Unauthorized');
       const [existingPortfolio] = await tx
         .select({ id: paperPortfolios.id })
         .from(paperPortfolios)
@@ -40,7 +45,8 @@ export async function POST(request: NextRequest) {
             eq(paperPortfolios.status, 'active')
           )
         )
-        .limit(1);
+        .limit(1)
+        .for('update');
 
       if (existingPortfolio) {
         const [usage] = await tx

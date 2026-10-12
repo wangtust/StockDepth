@@ -15,6 +15,7 @@ import dynamic from 'next/dynamic';
 import useSWR from 'swr';
 import { jsonFetcher } from '@/lib/http/json-fetcher';
 import { pollingDefaults } from '@/lib/http/polling';
+import { analysisStatusMessage } from '@/lib/analysis/client-status-message';
 const AnalysisProgress = dynamic(() => import('@/components/analysis-progress').then(m => m.AnalysisProgress));
 const MarkdownRenderer = dynamic(() => import('@/components/markdown-renderer').then(m => m.MarkdownRenderer));
 import { cn } from '@/lib/utils';
@@ -123,6 +124,7 @@ export default function AnalysisClient({ initialPayload }: { initialPayload: Job
   const selectedReports: Report[] = detail?.reports || [];
   const usageJob: Job | null = detail?.job || null;
   const calls: UsageCall[] = detail?.calls || [];
+  const statusJob = usageJob?.id === selectedJobId ? usageJob : selectedJob;
   const effectiveReportKey = selectedReports.some(r => r.reportKey === selectedReportKey)
     ? selectedReportKey : (selectedReports.find(r => r.reportKey === 'progress') || selectedReports[0])?.reportKey || selectedJob?.defaultReportKey || '';
   const { data: reportData, error: reportError, mutate: refreshReport } = useSWR(
@@ -445,6 +447,8 @@ export default function AnalysisClient({ initialPayload }: { initialPayload: Job
                       <div className="mt-1 text-xs text-muted-foreground">
                         创建于 <time dateTime={job.createdAt}>{formatAnalysisDate(new Date(job.createdAt))}</time>
                       </div>
+                      {analysisStatusMessage(job) && <p className="mt-2 text-xs text-slate-600">{analysisStatusMessage(job)}</p>}
+                      {job.errorMessage && <p className="mt-1 text-xs text-red-700">{job.errorMessage}</p>}
                       <AnalysisUsage job={job} compact />
                     </button>
                     <DropdownMenu>
@@ -507,16 +511,16 @@ export default function AnalysisClient({ initialPayload }: { initialPayload: Job
                   </p>
                 </div>
                 <div className="flex shrink-0 items-center gap-3">
-                  {selectedJob?.status === 'failed' && (
+                  {statusJob?.status === 'failed' && (
                     <Button
                       className="rounded-md"
-                      disabled={retryingJobId === selectedJob.id}
-                      onClick={() => handleRetryJob(selectedJob.id)}
+                      disabled={retryingJobId === statusJob.id}
+                      onClick={() => handleRetryJob(statusJob.id)}
                       size="sm"
                       type="button"
                       variant="outline"
                     >
-                      {retryingJobId === selectedJob.id ? (
+                      {retryingJobId === statusJob.id ? (
                         <Loader2 className="h-4 w-4 animate-spin" />
                       ) : (
                         <RefreshCcw className="h-4 w-4" />
@@ -553,6 +557,8 @@ export default function AnalysisClient({ initialPayload }: { initialPayload: Job
                 </div>
               </div>
 
+              {statusJob && analysisStatusMessage(statusJob) && <p role="status" className="text-sm text-slate-600">{analysisStatusMessage(statusJob)}</p>}
+              {statusJob?.errorMessage && <p role="alert" className="text-sm text-red-700">{statusJob.errorMessage}</p>}
               {selectedReports.length > 0 && (
                 <div
                   className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1"

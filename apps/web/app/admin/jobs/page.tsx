@@ -1,5 +1,6 @@
+import { AnalysisUsage } from '@/components/analysis-usage';
 import Link from 'next/link';
-import { and, desc, eq, ilike, or } from 'drizzle-orm';
+import { and, desc, eq, ilike, or, sql } from 'drizzle-orm';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -10,7 +11,6 @@ import { cancelAnalysisJob, retryAnalysisJob } from '@/app/admin/actions';
 import {
   formatAdminDate,
   formatAdminDateTime,
-  formatElapsed,
   StatusBadge
 } from '@/app/admin/_components/admin-ui';
 
@@ -53,6 +53,8 @@ export default async function AdminJobsPage({ searchParams }: PageProps) {
 
   const rows = await db
     .select({
+      costTotal: sql<string | null>`(select sum(estimated_cost)::text from analysis_model_calls where job_id = ${analysisJobs.id})`,
+      costComplete: sql<boolean>`coalesce((select bool_and(cost_complete) from analysis_model_calls where job_id = ${analysisJobs.id}), false)`,
       id: analysisJobs.id,
       ticker: analysisJobs.ticker,
       tradeDate: analysisJobs.tradeDate,
@@ -62,6 +64,10 @@ export default async function AdminJobsPage({ searchParams }: PageProps) {
       externalPid: analysisJobs.externalPid,
       errorMessage: analysisJobs.errorMessage,
       createdAt: analysisJobs.createdAt,
+      inputTokens: analysisJobs.inputTokens,
+      outputTokens: analysisJobs.outputTokens,
+      totalTokens: analysisJobs.totalTokens,
+      tokenUsageComplete: analysisJobs.tokenUsageComplete,
       startedAt: analysisJobs.startedAt,
       completedAt: analysisJobs.completedAt,
       userEmail: users.email
@@ -146,13 +152,8 @@ export default async function AdminJobsPage({ searchParams }: PageProps) {
                       {job.completedAt && (
                         <div>Completed {formatAdminDate(job.completedAt)}</div>
                       )}
-                      <div className="mt-1 font-medium text-slate-700">
-                        {job.status === 'running'
-                          ? `Running ${formatElapsed(job.startedAt || job.createdAt)}`
-                          : job.completedAt
-                            ? `Took ${formatElapsed(job.startedAt || job.createdAt, job.completedAt)}`
-                            : 'Not finished'}
-                      </div>
+                      <AnalysisUsage job={job} compact />
+                      <div className="mt-1">费用 {job.costTotal != null ? `¥${job.costTotal}` : '未知'}{(!job.costComplete || !job.tokenUsageComplete) && ' · 统计不完整'}</div>
                     </td>
                     <td className="max-w-[320px] py-3 pr-4">
                       <p className="line-clamp-4 text-xs text-red-700">

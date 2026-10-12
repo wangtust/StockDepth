@@ -106,6 +106,12 @@ function ModelConfigForm({
     deepModel: string;
     isDefault: boolean;
     isActive: boolean;
+    quickInputPrice: string | null;
+    quickCachePrice: string | null;
+    quickOutputPrice: string | null;
+    deepInputPrice: string | null;
+    deepCachePrice: string | null;
+    deepOutputPrice: string | null;
     apiKeyLabel: string;
     updatedAtLabel: string;
   };
@@ -150,6 +156,18 @@ function ModelConfigForm({
         <Field label="Quick Model" name="quickModel" defaultValue={config?.quickModel || 'qwen-plus'} required />
         <Field label="Deep Model" name="deepModel" defaultValue={config?.deepModel || 'qwen-plus'} required />
       </div>
+
+      <fieldset className="rounded-md border border-slate-200 p-4">
+        <legend className="px-2 text-sm font-medium">模型价格（人民币元 / 百万 tokens）</legend>
+        <p className="mb-3 text-xs text-slate-500">每组全部填写或全部留空。留空表示价格未知，0 表示免费。相同模型填写相同价格；改价不会影响已记录调用。</p>
+        {(['quick', 'deep'] as const).map(role => <div key={role} className="mb-3">
+          <div className="mb-2 text-sm font-medium">{role === 'quick' ? 'Quick Model' : 'Deep Model'}</div>
+          <div className="grid gap-3 sm:grid-cols-3">{(['Input', 'Cache', 'Output'] as const).map(kind => {
+            const name = `${role}${kind}Price` as const;
+            return <Field key={name} label={kind === 'Input' ? '输入' : kind === 'Cache' ? '缓存命中' : '输出'} name={name} type="number" defaultValue={config?.[name] ?? ''} />;
+          })}</div>
+        </div>)}
+      </fieldset>
 
       {config?.updatedAtLabel && (
         <p className="text-xs text-slate-500">Last updated {config.updatedAtLabel}</p>
@@ -203,6 +221,8 @@ function Field({
       <Input
         name={name}
         type={type}
+        min={type === 'number' ? 0 : undefined}
+        step={type === 'number' ? '0.000001' : undefined}
         defaultValue={defaultValue}
         placeholder={placeholder}
         className="mt-2"

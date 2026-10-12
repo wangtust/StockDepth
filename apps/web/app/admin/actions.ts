@@ -33,7 +33,31 @@ function revalidateAdmin() {
   revalidatePath('/admin/system');
 }
 
+const modelPrice = z.preprocess(value => value === '' || value == null ? null : value,
+  z.string().trim().regex(/^\d{1,9}(\.\d{1,6})?$/, '价格须为非负数字，最多六位小数').nullable());
+const priceFields = ['quickInputPrice', 'quickCachePrice', 'quickOutputPrice', 'deepInputPrice', 'deepCachePrice', 'deepOutputPrice'] as const;
+function modelPrices(formData: FormData) {
+  return Object.fromEntries(priceFields.map(field => [field, formData.get(field)]));
+}
+function validateModelPrices(data: Record<string, unknown>) {
+  for (const role of ['quick', 'deep']) {
+    const values = ['Input', 'Cache', 'Output'].map(kind => data[`${role}${kind}Price`]);
+    if (values.some(value => value != null) && !values.every(value => value != null)) throw new Error('每个模型的输入、缓存命中、输出价格须全部填写，或全部留空。');
+    if (values.every(value => value != null) && Number(values[1]) > Number(values[0])) throw new Error('缓存命中价格不能高于普通输入价格。');
+  }
+  if (data.quickModel === data.deepModel && ['Input', 'Cache', 'Output'].some(kind => {
+    const quick = data[`quick${kind}Price`], deep = data[`deep${kind}Price`];
+    return (quick == null) !== (deep == null) || (quick != null && Number(quick) !== Number(deep));
+  })) throw new Error('相同模型名称须填写相同价格。');
+}
+
 const modelConfigSchema = z.object({
+  quickInputPrice: modelPrice,
+  quickCachePrice: modelPrice,
+  quickOutputPrice: modelPrice,
+  deepInputPrice: modelPrice,
+  deepCachePrice: modelPrice,
+  deepOutputPrice: modelPrice,
   name: z.string().trim().min(1).max(120),
   provider: z.enum(['openai', 'openai-compatible', 'anthropic', 'google', 'azure', 'xai', 'deepseek', 'qwen', 'qwen-us', 'qwen-cn', 'glm', 'glm-cn', 'minimax', 'minimax-cn', 'openrouter', 'ollama']),
   baseUrl: z.string().trim().max(500),
@@ -62,6 +86,7 @@ export async function createModelConfig(formData: FormData) {
   const data = modelConfigSchema
     .extend({ apiKey: z.string().trim().min(1).max(1000) })
     .parse({
+      ...modelPrices(formData),
       name: formData.get('name'),
       provider: formData.get('provider'),
       baseUrl: formData.get('baseUrl'),
@@ -72,6 +97,7 @@ export async function createModelConfig(formData: FormData) {
       isActive: formData.get('isActive') !== 'off'
     });
 
+  validateModelPrices(data);
   const [created] = await db.insert(llmModelConfigs).values(data).returning();
   if (data.isDefault) {
     await clearOtherDefaultModelConfigs(created.id);
@@ -86,6 +112,7 @@ export async function createModelConfig(formData: FormData) {
       name: created.name,
       provider: created.provider,
       baseUrl: created.baseUrl,
+      prices: Object.fromEntries(priceFields.map(field => [field, created[field]])),
       quickModel: created.quickModel,
       deepModel: created.deepModel,
       isDefault: created.isDefault,
@@ -101,6 +128,7 @@ export async function updateModelConfig(formData: FormData) {
   const admin = await requirePlatformAdmin();
   const configId = userIdSchema.parse(formData.get('configId'));
   const data = modelConfigSchema.parse({
+    ...modelPrices(formData),
     name: formData.get('name'),
     provider: formData.get('provider'),
     baseUrl: formData.get('baseUrl'),
@@ -111,7 +139,15 @@ export async function updateModelConfig(formData: FormData) {
     isActive: formData.get('isActive') === 'on'
   });
 
+  validateModelPrices(data);
   const updateValues = {
+    quickInputPrice: data.quickInputPrice,
+    quickCachePrice: data.quickCachePrice,
+    quickOutputPrice: data.quickOutputPrice,
+    deepInputPrice: data.deepInputPrice,
+    deepCachePrice: data.deepCachePrice,
+    deepOutputPrice: data.deepOutputPrice,
+
     name: data.name,
     provider: data.provider,
     baseUrl: data.baseUrl,
@@ -146,6 +182,7 @@ export async function updateModelConfig(formData: FormData) {
       name: updated.name,
       provider: updated.provider,
       baseUrl: updated.baseUrl,
+      prices: Object.fromEntries(priceFields.map(field => [field, updated[field]])),
       quickModel: updated.quickModel,
       deepModel: updated.deepModel,
       isDefault: updated.isDefault,

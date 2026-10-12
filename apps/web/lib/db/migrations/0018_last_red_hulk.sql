@@ -1,0 +1,2 @@
+ALTER TABLE "analysis_model_calls" ADD COLUMN "is_retry" boolean DEFAULT false NOT NULL;--> statement-breakpoint
+ALTER TABLE "analysis_model_calls" ADD COLUMN "request_kind" varchar(30) DEFAULT 'standard' NOT NULL;

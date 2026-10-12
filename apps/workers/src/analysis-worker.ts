@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { asc, eq, sql } from 'drizzle-orm';
 import { getAnalysisConcurrencySettings } from '@/lib/analysis/concurrency-settings';
 import { db } from '@/lib/db/drizzle';
-import { analysisJobs, analysisReports, llmModelConfigs } from '@/lib/db/schema';
+import { analysisJobs, analysisReports, analysisModelCalls, llmModelConfigs } from '@/lib/db/schema';
 
 type ClaimedJob = typeof analysisJobs.$inferSelect;
 
@@ -16,10 +16,20 @@ type StockDepthReport = {
   content: string;
 };
 
+type ModelCall = {
+  call_id: string; agent: string; model: string;
+  started_at: string; ended_at: string | null; status: string;
+  input_tokens: number | null; output_tokens: number | null; total_tokens: number | null;
+  cached_input_tokens?: number | null; raw_usage?: object | null;
+  pricing_snapshot?: object | null; estimated_cost?: string | null; cost_complete?: boolean;
+  usage_available: boolean; is_retry: boolean; request_kind: string;
+};
+
 type StockDepthRun = {
   status: string;
   reports?: StockDepthReport[];
   runner_log?: string;
+  usage?: { calls: ModelCall[]; history_complete: boolean };
 };
 
 const tradingAgentsUrl =
@@ -152,7 +162,7 @@ async function claimNextJob(userConcurrency: number): Promise<ClaimedJob | null>
     .update(analysisJobs)
     .set({
       status: 'running',
-      startedAt: new Date(),
+      startedAt: sql`coalesce(${analysisJobs.startedAt}, now())`,
       updatedAt: new Date()
     })
     .where(
@@ -222,6 +232,10 @@ async function startStockDepth(job: ClaimedJob) {
       base_url: modelConfig.baseUrl || undefined,
       quick_model: modelConfig.quickModel,
       deep_model: modelConfig.deepModel,
+      model_prices: {
+        [modelConfig.quickModel]: modelConfig.quickInputPrice == null ? null : { currency: 'CNY', unit: 'million_tokens', input: modelConfig.quickInputPrice, cache: modelConfig.quickCachePrice, output: modelConfig.quickOutputPrice },
+        [modelConfig.deepModel]: modelConfig.deepInputPrice == null ? null : { currency: 'CNY', unit: 'million_tokens', input: modelConfig.deepInputPrice, cache: modelConfig.deepCachePrice, output: modelConfig.deepOutputPrice },
+      },
       api_key: modelConfig.apiKey
     })
   });
@@ -278,6 +292,38 @@ async function saveReports(job: ClaimedJob, reports: StockDepthReport[]) {
   });
 }
 
+async function syncUsage(job: ClaimedJob, run: StockDepthRun) {
+  if (!run.usage) return;
+  await db.transaction(async (tx) => {
+    for (const call of run.usage!.calls) {
+      const values = {
+        jobId: job.id, callId: call.call_id, agent: call.agent, model: call.model,
+        startedAt: new Date(call.started_at), endedAt: call.ended_at ? new Date(call.ended_at) : null,
+        status: call.status, inputTokens: call.input_tokens, outputTokens: call.output_tokens,
+        totalTokens: call.total_tokens, usageAvailable: call.usage_available,
+        isRetry: call.is_retry, requestKind: call.request_kind,
+        cachedInputTokens: call.cached_input_tokens ?? null,
+        rawUsage: call.raw_usage ? JSON.stringify(call.raw_usage) : null,
+        pricingSnapshot: call.pricing_snapshot ? JSON.stringify(call.pricing_snapshot) : null,
+        estimatedCost: call.estimated_cost ?? null, costComplete: call.cost_complete ?? false,
+      };
+      await tx.insert(analysisModelCalls).values(values).onConflictDoUpdate({
+        target: [analysisModelCalls.jobId, analysisModelCalls.callId], set: values,
+      });
+    }
+    const [totals] = await tx.select({
+      input: sql<number>`coalesce(sum(${analysisModelCalls.inputTokens}), 0)::bigint`,
+      output: sql<number>`coalesce(sum(${analysisModelCalls.outputTokens}), 0)::bigint`,
+      total: sql<number>`coalesce(sum(${analysisModelCalls.totalTokens}), 0)::bigint`,
+      complete: sql<boolean>`coalesce(bool_and(${analysisModelCalls.usageAvailable}), false)`,
+    }).from(analysisModelCalls).where(eq(analysisModelCalls.jobId, job.id));
+    await tx.update(analysisJobs).set({
+      inputTokens: Number(totals.input), outputTokens: Number(totals.output), totalTokens: Number(totals.total),
+      tokenUsageComplete: totals.complete && run.usage!.history_complete,
+    }).where(eq(analysisJobs.id, job.id));
+  });
+}
+
 function hasFinalDecisionReport(reports: StockDepthReport[]) {
   const reportKeys = new Set(reports.map((report) => report.key));
   return reportKeys.has('decision');
@@ -287,6 +333,7 @@ function progressSignature(run: StockDepthRun) {
   const reports = run.reports || [];
   return JSON.stringify({
     status: run.status,
+    calls: run.usage?.calls,
     reports: reports.map((report) => ({
       key: report.key,
       relativePath: report.relative_path,
@@ -338,6 +385,7 @@ async function processMockJob(job: ClaimedJob) {
     .update(analysisJobs)
     .set({
       externalStatus: 'mock',
+      tokenUsageComplete: true,
       externalPid: null,
       updatedAt: new Date()
     })
@@ -369,6 +417,7 @@ async function processJob(job: ClaimedJob, options: { startRun?: boolean } = {})
     const run = await fetchRun(job);
     const reports = run.reports || [];
     await saveReports(job, reports);
+    await syncUsage(job, run);
 
     const signature = progressSignature(run);
     if (signature !== lastSignature) {

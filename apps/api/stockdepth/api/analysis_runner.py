@@ -10,6 +10,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
+from stockdepth.api.usage import UsageRecorder
 from stockdepth.data.utils import safe_ticker_component
 from stockdepth.default_config import DEFAULT_CONFIG
 from stockdepth.workflows.checkpointer import clear_checkpoint, checkpoint_step, get_checkpointer, thread_id
@@ -201,6 +202,7 @@ def main() -> None:
 
     state = graph.propagator.create_initial_state(ticker, args.date, asset_type=args.asset_type)
     graph_args = graph.propagator.get_graph_args()
+    graph_args.setdefault("config", {})["callbacks"] = [UsageRecorder(run_dir / "usage.json")]
     checkpointer_ctx = None
     stream_input = state
     final_state = {}

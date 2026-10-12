@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { Maximize2, Minimize2 } from 'lucide-react';
+import { AnalysisProgress } from '@/components/analysis-progress';
 import { MarkdownRenderer } from '@/components/markdown-renderer';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -160,10 +161,10 @@ export function AdminReportViewer({
                   : 'min-h-[620px] lg:h-[calc(100dvh-340px)] lg:min-h-[680px]'
               )}
             >
-              <MarkdownRenderer
+              {selectedReport.reportKey === 'progress' ? <AnalysisProgress content={selectedReport.content} /> : <MarkdownRenderer
                 content={selectedReport.content}
                 className="mx-auto max-w-[1180px]"
-              />
+              />}
             </article>
           ) : (
             <div className="flex min-h-[560px] items-center justify-center bg-white px-6 text-center">

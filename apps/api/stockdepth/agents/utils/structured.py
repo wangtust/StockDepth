@@ -64,7 +64,7 @@ def invoke_structured_or_freetext(
         try:
             started = time.monotonic()
             logger.info("%s: structured request started", agent_name)
-            result = structured_llm.invoke(prompt)
+            result = structured_llm.invoke(prompt, config={"metadata": {"request_kind": "structured"}})
             logger.info("%s: structured request completed in %.1fs", agent_name, time.monotonic() - started)
             return render(result)
         except Exception as exc:
@@ -75,6 +75,6 @@ def invoke_structured_or_freetext(
 
     started = time.monotonic()
     logger.info("%s: free-text request started", agent_name)
-    response = plain_llm.invoke(prompt)
+    response = plain_llm.invoke(prompt, config={"metadata": {"request_kind": "free-text", "fallback_retry": structured_llm is not None}})
     logger.info("%s: free-text request completed in %.1fs", agent_name, time.monotonic() - started)
     return response.content

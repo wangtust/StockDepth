@@ -30,6 +30,13 @@ export async function getModelConfigsForAdmin() {
       provider: llmModelConfigs.provider,
       baseUrl: llmModelConfigs.baseUrl,
       apiKey: llmModelConfigs.apiKey,
+      quickInputPrice: llmModelConfigs.quickInputPrice,
+      quickCachePrice: llmModelConfigs.quickCachePrice,
+      quickOutputPrice: llmModelConfigs.quickOutputPrice,
+      deepInputPrice: llmModelConfigs.deepInputPrice,
+      deepCachePrice: llmModelConfigs.deepCachePrice,
+      deepOutputPrice: llmModelConfigs.deepOutputPrice,
+
       quickModel: llmModelConfigs.quickModel,
       deepModel: llmModelConfigs.deepModel,
       isDefault: llmModelConfigs.isDefault,

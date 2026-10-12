@@ -9,5 +9,10 @@ if (!process.env.POSTGRES_URL) {
   throw new Error('POSTGRES_URL environment variable is not set');
 }
 
-export const client = postgres(process.env.POSTGRES_URL);
+// Next.js development reloads modules; retain the pool instead of leaking one per reload.
+const databaseGlobal = globalThis as typeof globalThis & {
+  stockdepthDatabaseClient?: ReturnType<typeof postgres>;
+};
+export const client = databaseGlobal.stockdepthDatabaseClient ?? postgres(process.env.POSTGRES_URL);
+if (process.env.NODE_ENV !== 'production') databaseGlobal.stockdepthDatabaseClient = client;
 export const db = drizzle(client, { schema });

@@ -1,4 +1,5 @@
 from __future__ import annotations
+from stockdepth.api.usage import read_usage
 
 import base64
 import hmac
@@ -319,6 +320,7 @@ class Handler(SimpleHTTPRequestHandler):
                     "reports": reports,
                     "message_log": tail_file(run_dir / "message_tool.log"),
                     "runner_log": tail_file(run_dir / "web_runner.log"),
+                    "usage": read_usage(run_dir / "usage.json"),
                 },
             )
             return
@@ -410,6 +412,7 @@ class Handler(SimpleHTTPRequestHandler):
                 cmd.append("--realtime-data")
             env = os.environ.copy()
             env.setdefault("PYTHONUNBUFFERED", "1")
+            env["STOCKDEPTH_MODEL_PRICES"] = json.dumps(payload.get("model_prices") or {})
             api_key_env = get_api_key_env(provider) if provider else None
             if api_key and api_key_env:
                 env[api_key_env] = api_key

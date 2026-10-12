@@ -2,7 +2,7 @@ import { and, eq, isNull, sql } from 'drizzle-orm';
 import { NextRequest, NextResponse } from 'next/server';
 import { getUser } from '@/lib/db/queries';
 import { db } from '@/lib/db/drizzle';
-import { analysisJobs, analysisReports } from '@/lib/db/schema';
+import { analysisJobs, analysisReports, analysisModelCalls } from '@/lib/db/schema';
 
 export async function GET(
   _request: NextRequest,
@@ -45,7 +45,14 @@ export async function GET(
     )
     .orderBy(analysisReports.id);
 
-  return NextResponse.json({ job, reports });
+  const calls = await db.select({
+    callId: analysisModelCalls.callId, agent: analysisModelCalls.agent, model: analysisModelCalls.model,
+    status: analysisModelCalls.status, startedAt: analysisModelCalls.startedAt, endedAt: analysisModelCalls.endedAt,
+    inputTokens: analysisModelCalls.inputTokens, outputTokens: analysisModelCalls.outputTokens, totalTokens: analysisModelCalls.totalTokens,
+    usageAvailable: analysisModelCalls.usageAvailable, isRetry: analysisModelCalls.isRetry, requestKind: analysisModelCalls.requestKind,
+  }).from(analysisModelCalls)
+    .where(eq(analysisModelCalls.jobId, id)).orderBy(analysisModelCalls.startedAt);
+  return NextResponse.json({ job, reports, calls });
 }
 
 export async function DELETE(

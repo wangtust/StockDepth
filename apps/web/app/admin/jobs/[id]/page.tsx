@@ -1,3 +1,5 @@
+import { ModelCosts } from '@/app/admin/_components/model-costs';
+import { AnalysisUsage } from '@/components/analysis-usage';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { and, eq } from 'drizzle-orm';
@@ -6,7 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { requirePlatformAdmin } from '@/lib/auth/admin';
 import { db } from '@/lib/db/drizzle';
-import { analysisJobs, analysisReports, users } from '@/lib/db/schema';
+import { analysisJobs, analysisReports, analysisModelCalls, users } from '@/lib/db/schema';
 import { cancelAnalysisJob, retryAnalysisJob } from '@/app/admin/actions';
 import {
   formatAdminDateTime,
@@ -70,6 +72,10 @@ export default async function AdminJobDetailPage({ params, searchParams }: PageP
       externalPid: analysisJobs.externalPid,
       errorMessage: analysisJobs.errorMessage,
       createdAt: analysisJobs.createdAt,
+      inputTokens: analysisJobs.inputTokens,
+      outputTokens: analysisJobs.outputTokens,
+      totalTokens: analysisJobs.totalTokens,
+      tokenUsageComplete: analysisJobs.tokenUsageComplete,
       startedAt: analysisJobs.startedAt,
       completedAt: analysisJobs.completedAt,
       updatedAt: analysisJobs.updatedAt,
@@ -84,6 +90,8 @@ export default async function AdminJobDetailPage({ params, searchParams }: PageP
   if (!job) {
     notFound();
   }
+
+  const calls = await db.select().from(analysisModelCalls).where(eq(analysisModelCalls.jobId, jobId)).orderBy(analysisModelCalls.startedAt);
 
   const reports = await db
     .select({
@@ -162,6 +170,8 @@ export default async function AdminJobDetailPage({ params, searchParams }: PageP
         </div>
       </div>
 
+      <ModelCosts calls={calls} usageComplete={job.tokenUsageComplete} />
+      <AnalysisUsage job={job} calls={calls} />
       <AdminReportViewer
         reports={reports.map((report) => ({
           id: report.id,

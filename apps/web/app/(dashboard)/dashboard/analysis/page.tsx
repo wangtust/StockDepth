@@ -11,6 +11,7 @@ import {
   CardHeader,
   CardTitle
 } from '@/components/ui/card';
+import { AnalysisProgress } from '@/components/analysis-progress';
 import { MarkdownRenderer } from '@/components/markdown-renderer';
 import { cn } from '@/lib/utils';
 import { Loader2, Maximize2, Minimize2, MoreHorizontal, Play, RefreshCcw, Trash2 } from 'lucide-react';
@@ -20,7 +21,9 @@ import {
   normalizePricingConfig
 } from '@/lib/analysis/pricing';
 
-type Job = {
+import { AnalysisUsage, type UsageJob, type UsageCall } from '@/components/analysis-usage';
+
+type Job = UsageJob & {
   id: number;
   ticker: string;
   tradeDate: string;
@@ -94,6 +97,8 @@ function formatAnalysisDate(date: Date) {
 
 export default function AnalysisPage() {
   const [payload, setPayload] = useState<JobsPayload>({ credits: 0, jobs: [] });
+  const [calls, setCalls] = useState<UsageCall[]>([]);
+  const [usageJob, setUsageJob] = useState<(Job) | null>(null);
   const [selectedJobId, setSelectedJobId] = useState<number | null>(null);
   const [selectedReports, setSelectedReports] = useState<Report[]>([]);
   const [selectedReportKey, setSelectedReportKey] = useState<string>('');
@@ -150,6 +155,8 @@ export default function AnalysisPage() {
     if (!response.ok) {
       throw new Error(data.error || 'Failed to load analysis report');
     }
+    setCalls(data.calls || []);
+    setUsageJob(data.job);
     const reports = data.reports || [];
     const currentReportKey = selectedReportKeyRef.current;
     const shouldRestoreScroll =
@@ -524,6 +531,7 @@ export default function AnalysisPage() {
                       <div className="mt-1 truncate text-sm text-muted-foreground">
                         {job.realtimeData ? 'Realtime' : job.tradeDate} · {getDepthLabel(job.depth)} · {job.reportCount || 0} reports
                       </div>
+                      <AnalysisUsage job={job} compact />
                     </button>
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
@@ -578,6 +586,7 @@ export default function AnalysisPage() {
             )}
           >
             <CardHeader className="gap-4 border-b border-slate-200 bg-white px-5 py-4 sm:px-6">
+              {selectedJob && <AnalysisUsage job={usageJob?.id === selectedJob.id ? usageJob : selectedJob} calls={usageJob?.id === selectedJob.id ? calls : []} />}
               <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <div className="min-w-0">
                   <CardTitle className="text-base text-slate-950">Report</CardTitle>
@@ -668,10 +677,10 @@ export default function AnalysisPage() {
                       : 'min-h-[520px] lg:h-[calc(100dvh-280px)] lg:min-h-[640px]'
                   )}
                 >
-                  <MarkdownRenderer
+                  {selectedReport?.reportKey === 'progress' ? <AnalysisProgress content={selectedReport.content} running={selectedJob?.status === 'running'} /> : <MarkdownRenderer
                     content={selectedReport?.content || ''}
                     className="max-w-none"
-                  />
+                  />}
                 </article>
               ) : (
                 <div className="flex min-h-[520px] items-center justify-center bg-white px-6 text-center">

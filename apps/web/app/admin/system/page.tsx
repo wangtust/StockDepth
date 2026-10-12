@@ -188,19 +188,8 @@ export default async function AdminSystemPage({ searchParams }: PageProps) {
     }
   ];
 
-  const runtimeConcurrencyCeiling = positiveIntegerEnvValue(
-    'ANALYSIS_WORKER_MAX_CONCURRENCY',
-    4
-  );
-  const effectiveWorkerConcurrency = Math.min(
-    concurrencySettings.systemConcurrency,
-    runtimeConcurrencyCeiling
-  );
-
   const workerConfig = [
     ['Configured global concurrency', String(concurrencySettings.systemConcurrency)],
-    ['Effective worker concurrency', String(effectiveWorkerConcurrency)],
-    ['Runtime ceiling', String(runtimeConcurrencyCeiling)],
     ['Per-user concurrency', String(concurrencySettings.userConcurrency)],
     ['Poll interval', `${envValue('ANALYSIS_WORKER_POLL_MS', '5000')} ms`],
     ['Soft timeout', `${envValue('ANALYSIS_WORKER_RUN_TIMEOUT_MS', '2700000')} ms`],
@@ -280,7 +269,7 @@ export default async function AdminSystemPage({ searchParams }: PageProps) {
                   required
                 />
                 <p className="mt-2 text-xs text-slate-500">
-                  Worker concurrency is capped by the runtime ceiling in the environment.
+                  Stored in the database and applied automatically to newly scheduled jobs.
                 </p>
               </div>
 

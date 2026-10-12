@@ -17,8 +17,8 @@ export type AnalysisConcurrencySettingsInput = {
 };
 
 const DEFAULT_ANALYSIS_CONCURRENCY_SETTINGS: AnalysisConcurrencySettingsInput = {
-  systemConcurrency: 1,
-  userConcurrency: 1
+  systemConcurrency: 200,
+  userConcurrency: 5
 };
 
 function coercePositiveInteger(value: unknown, fallback: number) {

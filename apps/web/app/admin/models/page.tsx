@@ -1,3 +1,6 @@
+import { ModelCreateForm } from './model-create-form';
+import { ModelConfigCard } from './model-config-card';
+import { ModelActionsMenu } from './model-actions-menu';
 import { redirect } from 'next/navigation';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -7,7 +10,7 @@ import {
   getModelConfigsForAdmin,
   maskApiKey
 } from '@/lib/analysis/model-configs-server';
-import { createModelConfig, updateModelConfig } from '@/app/admin/actions';
+import { updateModelConfig } from '@/app/admin/actions';
 import { formatAdminDateTime, StatusBadge } from '@/app/admin/_components/admin-ui';
 
 export const dynamic = 'force-dynamic';
@@ -15,12 +18,6 @@ export const dynamic = 'force-dynamic';
 type PageProps = {
   searchParams: Promise<{ saved?: string; created?: string }>;
 };
-
-async function createModelConfigAction(formData: FormData) {
-  'use server';
-  await createModelConfig(formData);
-  redirect('/admin/models?created=1');
-}
 
 async function updateModelConfigAction(formData: FormData) {
   'use server';
@@ -38,7 +35,7 @@ export default async function AdminModelsPage({ searchParams }: PageProps) {
       <div>
         <h1 className="text-2xl font-semibold text-slate-950">Models</h1>
         <p className="mt-1 text-sm text-slate-600">
-          Manage LLM gateways, API keys, and the default model used for new analysis jobs.
+          配置可供用户选择的模型、接口和价格。点击列表展开编辑。
         </p>
       </div>
 
@@ -53,38 +50,38 @@ export default async function AdminModelsPage({ searchParams }: PageProps) {
           <CardTitle>Add Model Config</CardTitle>
         </CardHeader>
         <CardContent>
-          <ModelConfigForm action={createModelConfigAction} requireApiKey />
+          <ModelConfigForm requireApiKey />
         </CardContent>
       </Card>
 
       <div className="space-y-4">
         {configs.map((config) => (
-          <Card key={config.id} className="rounded-md">
-            <CardHeader>
-              <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-                <div>
-                  <CardTitle>{config.name}</CardTitle>
-                  <p className="mt-1 text-sm text-slate-500">
-                    {config.provider} · {config.quickModel} / {config.deepModel}
-                  </p>
-                </div>
-                <div className="flex gap-2">
+          <div key={config.id} className="relative">
+            <ModelActionsMenu configId={config.id} />
+            <ModelConfigCard configId={config.id} summary={
+              <span className="flex min-w-0 flex-1 flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                <span>
+                  <span className="font-semibold">{config.name}</span>
+                  <span className="mt-1 block text-sm text-slate-500">
+                    {config.provider} · {config.modelName}
+                  </span>
+                </span>
+                <span className="flex gap-2">
                   {config.isDefault && <StatusBadge status="default" />}
                   <StatusBadge status={config.isActive ? 'active' : 'disabled'} />
-                </div>
-              </div>
-            </CardHeader>
-            <CardContent>
-              <ModelConfigForm
-                action={updateModelConfigAction}
-                config={{
-                  ...config,
-                  apiKeyLabel: maskApiKey(config.apiKey),
-                  updatedAtLabel: formatAdminDateTime(config.updatedAt)
-                }}
-              />
-            </CardContent>
-          </Card>
+                </span>
+              </span>
+            }>
+                <ModelConfigForm
+                  action={updateModelConfigAction}
+                  config={{
+                    ...config,
+                    apiKeyLabel: maskApiKey(config.apiKey),
+                    updatedAtLabel: formatAdminDateTime(config.updatedAt)
+                  }}
+                />
+            </ModelConfigCard>
+          </div>
         ))}
       </div>
     </div>
@@ -96,22 +93,18 @@ function ModelConfigForm({
   config,
   requireApiKey = false
 }: {
-  action: (formData: FormData) => Promise<void>;
+  action?: (formData: FormData) => Promise<void>;
   config?: {
     id: number;
     name: string;
     provider: string;
     baseUrl: string;
-    quickModel: string;
-    deepModel: string;
+    modelName: string;
     isDefault: boolean;
     isActive: boolean;
-    quickInputPrice: string | null;
-    quickCachePrice: string | null;
-    quickOutputPrice: string | null;
-    deepInputPrice: string | null;
-    deepCachePrice: string | null;
-    deepOutputPrice: string | null;
+    inputPrice: string | null;
+    cachePrice: string | null;
+    outputPrice: string | null;
     apiKeyLabel: string;
     updatedAtLabel: string;
   };
@@ -119,8 +112,8 @@ function ModelConfigForm({
 }) {
   const isNewConfig = !config;
 
-  return (
-    <form action={action} className="space-y-4">
+  const fields = (
+    <>
       {config && <input type="hidden" name="configId" value={config.id} />}
       <div className="grid gap-4 lg:grid-cols-2">
         <Field label="Name" name="name" defaultValue={config?.name} required />
@@ -153,20 +146,17 @@ function ModelConfigForm({
           placeholder={config ? 'Leave blank to keep existing key' : ''}
           required={requireApiKey}
         />
-        <Field label="Quick Model" name="quickModel" defaultValue={config?.quickModel || 'qwen-plus'} required />
-        <Field label="Deep Model" name="deepModel" defaultValue={config?.deepModel || 'qwen-plus'} required />
+        <Field label="模型名称（API 使用的标识）" name="modelName" defaultValue={config?.modelName} placeholder="例如 hy3、glm-5.3" required />
       </div>
 
       <fieldset className="rounded-md border border-slate-200 p-4">
         <legend className="px-2 text-sm font-medium">模型价格（人民币元 / 百万 tokens）</legend>
-        <p className="mb-3 text-xs text-slate-500">每组全部填写或全部留空。留空表示价格未知，0 表示免费。相同模型填写相同价格；改价不会影响已记录调用。</p>
-        {(['quick', 'deep'] as const).map(role => <div key={role} className="mb-3">
-          <div className="mb-2 text-sm font-medium">{role === 'quick' ? 'Quick Model' : 'Deep Model'}</div>
-          <div className="grid gap-3 sm:grid-cols-3">{(['Input', 'Cache', 'Output'] as const).map(kind => {
-            const name = `${role}${kind}Price` as const;
-            return <Field key={name} label={kind === 'Input' ? '输入' : kind === 'Cache' ? '缓存命中' : '输出'} name={name} type="number" defaultValue={config?.[name] ?? ''} />;
-          })}</div>
-        </div>)}
+        <p className="mb-3 text-xs text-slate-500">全部填写或全部留空；0 表示免费。修改价格不会影响已记录调用。</p>
+        <div className="grid gap-3 sm:grid-cols-3">
+          <Field label="输入" name="inputPrice" type="number" defaultValue={config?.inputPrice ?? ''} />
+          <Field label="缓存命中" name="cachePrice" type="number" defaultValue={config?.cachePrice ?? ''} />
+          <Field label="输出" name="outputPrice" type="number" defaultValue={config?.outputPrice ?? ''} />
+        </div>
       </fieldset>
 
       {config?.updatedAtLabel && (
@@ -194,10 +184,11 @@ function ModelConfigForm({
             Active
           </label>
         </div>
-        <Button type="submit">{config ? 'Save Model' : 'Create Model'}</Button>
+        <Button type="submit">{config ? 'Save Model' : '测试并添加模型'}</Button>
       </div>
-    </form>
+    </>
   );
+  return config ? <form action={action} className="space-y-4">{fields}</form> : <ModelCreateForm>{fields}</ModelCreateForm>;
 }
 
 function Field({

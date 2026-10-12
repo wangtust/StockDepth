@@ -1,5 +1,6 @@
+import { LiveAnalysisRefresh } from '@/components/live-analysis-refresh';
 import { ModelCosts } from '@/app/admin/_components/model-costs';
-import { AnalysisUsage } from '@/components/analysis-usage';
+import { AnalysisUsage, AnalysisTimer } from '@/components/analysis-usage';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { and, eq } from 'drizzle-orm';
@@ -12,7 +13,6 @@ import { analysisJobs, analysisReports, analysisModelCalls, users } from '@/lib/
 import { cancelAnalysisJob, retryAnalysisJob } from '@/app/admin/actions';
 import {
   formatAdminDateTime,
-  formatElapsed,
   StatusBadge
 } from '@/app/admin/_components/admin-ui';
 import { AdminReportViewer } from '@/app/admin/jobs/[id]/admin-report-viewer';
@@ -108,12 +108,6 @@ export default async function AdminJobDetailPage({ params, searchParams }: PageP
 
   const selectedReport =
     reports.find((report) => report.reportKey === selectedReportParam) || reports[0];
-  const runDuration = job.completedAt
-    ? formatElapsed(job.startedAt || job.createdAt, job.completedAt)
-    : job.status === 'running'
-      ? formatElapsed(job.startedAt || job.createdAt)
-      : 'not finished';
-
   const facts: Array<[string, string]> = [
     ['Owner', job.userEmail || `User #${job.userId || '-'}`],
     ['Language', job.language],
@@ -144,7 +138,7 @@ export default async function AdminJobDetailPage({ params, searchParams }: PageP
             {job.hiddenAt && <span className="text-sm text-slate-500">用户已删除（仅用户列表隐藏）</span>}
           </div>
           <p className="mt-1 text-sm text-slate-600">
-            Job #{job.id} · {job.tradeDate} · {reports.length} sections · {runDuration}
+            Job #{job.id} · {job.tradeDate} · {reports.length} sections · <AnalysisTimer job={job} />
           </p>
         </div>
 

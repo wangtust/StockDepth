@@ -43,5 +43,5 @@ export function resultSummary(result: string): string {
   if (!result.trim()) return '返回为空';
   if (/^(error|exception|failed|错误|失败)/im.test(result)) return '返回包含错误信息，请展开查看';
   const lines = result.split('\n').filter(line => line.trim());
-  return `${lines.length} 行数据 · ${result.length.toLocaleString()} 字符`;
+  return `${lines.length} 行数据 · ${result.length.toLocaleString('en-US')} 字符`;
 }

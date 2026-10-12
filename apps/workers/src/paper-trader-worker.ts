@@ -50,7 +50,7 @@ async function getDefaultModelConfig() {
   const [config] = await db
     .select()
     .from(llmModelConfigs)
-    .where(eq(llmModelConfigs.isActive, true))
+    .where(and(eq(llmModelConfigs.isActive, true), isNull(llmModelConfigs.retiredAt)))
     .orderBy(sql`${llmModelConfigs.isDefault} desc`, asc(llmModelConfigs.id))
     .limit(1);
   return config ?? null;
@@ -210,7 +210,7 @@ async function callDecisionModel(modelConfig: ModelConfig, prompt: string) {
       Authorization: `Bearer ${modelConfig.apiKey}`
     },
     body: JSON.stringify({
-      model: modelConfig.deepModel || modelConfig.quickModel,
+      model: modelConfig.modelName,
       temperature: 0.1,
       response_format: { type: 'json_object' },
       messages: [

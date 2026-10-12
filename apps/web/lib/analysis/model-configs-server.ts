@@ -1,6 +1,6 @@
 import 'server-only';
 
-import { asc, desc, eq } from 'drizzle-orm';
+import { and, asc, desc, eq, isNull } from 'drizzle-orm';
 import { db } from '@/lib/db/drizzle';
 import { llmModelConfigs } from '@/lib/db/schema';
 
@@ -10,15 +10,13 @@ export async function getActiveModelConfigs() {
       id: llmModelConfigs.id,
       name: llmModelConfigs.name,
       provider: llmModelConfigs.provider,
-      baseUrl: llmModelConfigs.baseUrl,
-      quickModel: llmModelConfigs.quickModel,
-      deepModel: llmModelConfigs.deepModel,
+      modelName: llmModelConfigs.modelName,
       isDefault: llmModelConfigs.isDefault,
       isActive: llmModelConfigs.isActive,
       updatedAt: llmModelConfigs.updatedAt
     })
     .from(llmModelConfigs)
-    .where(eq(llmModelConfigs.isActive, true))
+    .where(and(eq(llmModelConfigs.isActive, true), isNull(llmModelConfigs.retiredAt)))
     .orderBy(desc(llmModelConfigs.isDefault), asc(llmModelConfigs.id));
 }
 
@@ -30,21 +28,17 @@ export async function getModelConfigsForAdmin() {
       provider: llmModelConfigs.provider,
       baseUrl: llmModelConfigs.baseUrl,
       apiKey: llmModelConfigs.apiKey,
-      quickInputPrice: llmModelConfigs.quickInputPrice,
-      quickCachePrice: llmModelConfigs.quickCachePrice,
-      quickOutputPrice: llmModelConfigs.quickOutputPrice,
-      deepInputPrice: llmModelConfigs.deepInputPrice,
-      deepCachePrice: llmModelConfigs.deepCachePrice,
-      deepOutputPrice: llmModelConfigs.deepOutputPrice,
-
-      quickModel: llmModelConfigs.quickModel,
-      deepModel: llmModelConfigs.deepModel,
+      modelName: llmModelConfigs.modelName,
+      inputPrice: llmModelConfigs.inputPrice,
+      cachePrice: llmModelConfigs.cachePrice,
+      outputPrice: llmModelConfigs.outputPrice,
       isDefault: llmModelConfigs.isDefault,
       isActive: llmModelConfigs.isActive,
       createdAt: llmModelConfigs.createdAt,
       updatedAt: llmModelConfigs.updatedAt
     })
     .from(llmModelConfigs)
+    .where(isNull(llmModelConfigs.retiredAt))
     .orderBy(desc(llmModelConfigs.isDefault), asc(llmModelConfigs.id));
 }
 
@@ -52,7 +46,7 @@ export async function getDefaultModelConfig() {
   const configs = await db
     .select()
     .from(llmModelConfigs)
-    .where(eq(llmModelConfigs.isActive, true))
+    .where(and(eq(llmModelConfigs.isActive, true), isNull(llmModelConfigs.retiredAt)))
     .orderBy(desc(llmModelConfigs.isDefault), asc(llmModelConfigs.id))
     .limit(1);
 

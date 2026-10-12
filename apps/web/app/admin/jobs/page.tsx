@@ -1,3 +1,4 @@
+import { LiveAnalysisRefresh } from '@/components/live-analysis-refresh';
 import { AnalysisUsage } from '@/components/analysis-usage';
 import Link from 'next/link';
 import { and, desc, eq, ilike, or, sql } from 'drizzle-orm';
@@ -75,11 +76,12 @@ export default async function AdminJobsPage({ searchParams }: PageProps) {
     .from(analysisJobs)
     .leftJoin(users, eq(analysisJobs.userId, users.id))
     .where(whereParts.length ? and(...whereParts) : undefined)
-    .orderBy(desc(analysisJobs.createdAt))
+    .orderBy(desc(analysisJobs.id))
     .limit(100);
 
   return (
     <div className="space-y-6">
+      <LiveAnalysisRefresh enabled={rows.some(job => ['running', 'queued'].includes(job.status))} />
       <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <h1 className="text-2xl font-semibold text-slate-950">Analysis Jobs</h1>

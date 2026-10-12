@@ -52,7 +52,7 @@ export function RecentlyDeletedJobs() {
           <div key={job.id} className="flex items-center justify-between gap-4 rounded-md border p-3">
             <div className="min-w-0">
               <p className="truncate font-medium">{job.ticker} · {job.tradeDate} · {job.status}</p>
-              <p className="text-xs text-muted-foreground">删除时间：{new Date(job.hiddenAt).toLocaleString('zh-CN')}</p>
+              <p className="text-xs text-muted-foreground">删除时间：{new Date(job.hiddenAt).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}</p>
             </div>
             <Button variant="outline" size="sm" disabled={restoringId !== null} onClick={() => restore(job.id)}>
               {restoringId === job.id ? '恢复中…' : '恢复'}

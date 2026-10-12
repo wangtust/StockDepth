@@ -81,8 +81,8 @@ export const analysisJobs = pgTable(
 
 export const analysisWorkerSettings = pgTable('analysis_worker_settings', {
   key: varchar('key', { length: 50 }).primaryKey(),
-  systemConcurrency: integer('system_concurrency').notNull().default(1),
-  userConcurrency: integer('user_concurrency').notNull().default(1),
+  systemConcurrency: integer('system_concurrency').notNull().default(200),
+  userConcurrency: integer('user_concurrency').notNull().default(5),
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
 });
 
@@ -92,16 +92,13 @@ export const llmModelConfigs = pgTable('llm_model_configs', {
   provider: varchar('provider', { length: 80 }).notNull(),
   baseUrl: text('base_url').notNull(),
   apiKey: text('api_key').notNull(),
-  quickModel: varchar('quick_model', { length: 160 }).notNull(),
-  deepModel: varchar('deep_model', { length: 160 }).notNull(),
-  quickInputPrice: numeric('quick_input_price', { precision: 15, scale: 6 }),
-  quickCachePrice: numeric('quick_cache_price', { precision: 15, scale: 6 }),
-  quickOutputPrice: numeric('quick_output_price', { precision: 15, scale: 6 }),
-  deepInputPrice: numeric('deep_input_price', { precision: 15, scale: 6 }),
-  deepCachePrice: numeric('deep_cache_price', { precision: 15, scale: 6 }),
-  deepOutputPrice: numeric('deep_output_price', { precision: 15, scale: 6 }),
+  modelName: varchar('model_name', { length: 160 }).notNull(),
+  inputPrice: numeric('input_price', { precision: 15, scale: 6 }),
+  cachePrice: numeric('cache_price', { precision: 15, scale: 6 }),
+  outputPrice: numeric('output_price', { precision: 15, scale: 6 }),
   isDefault: boolean('is_default').notNull().default(false),
   isActive: boolean('is_active').notNull().default(true),
+  retiredAt: timestamp('retired_at'),
   createdAt: timestamp('created_at').notNull().defaultNow(),
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
 });

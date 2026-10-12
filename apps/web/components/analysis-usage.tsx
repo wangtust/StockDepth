@@ -20,8 +20,22 @@ export type UsageCall = {
 };
 
 function elapsed(start: string | Date, end: string | Date | number) {
-  const seconds = Math.max(0, Math.floor((new Date(end).getTime() - new Date(start).getTime()) / 1000));
+  const delta = new Date(end).getTime() - new Date(start).getTime();
+  if (!Number.isFinite(delta) || delta < 0) return '时间异常';
+  const seconds = Math.floor(delta / 1000);
   return `${Math.floor(seconds / 3600)}:${String(Math.floor(seconds / 60) % 60).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`;
+}
+
+export function AnalysisTimer({ job }: { job: UsageJob }) {
+  const [now, setNow] = useState<number | null>(null);
+  useEffect(() => {
+    setNow(Date.now());
+    if (job.status !== 'running') return;
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [job.status]);
+  const end = job.completedAt || (job.status === 'running' ? now : job.updatedAt);
+  return <span>{job.startedAt && end ? elapsed(job.startedAt, end) : job.status === 'queued' ? '等待开始' : '—'}</span>;
 }
 
 export function AnalysisUsage({ job, calls, compact = false }: { job: UsageJob; calls?: UsageCall[]; compact?: boolean }) {
@@ -34,7 +48,7 @@ export function AnalysisUsage({ job, calls, compact = false }: { job: UsageJob; 
   }, [job.status]);
   const end = job.completedAt || (job.status === 'running' ? now : job.updatedAt);
   const duration = job.startedAt && end ? elapsed(job.startedAt, end) : job.status === 'queued' ? '等待开始' : '—';
-  const number = (value?: number | null) => value == null ? '未知' : value.toLocaleString();
+  const number = (value?: number | null) => value == null ? '未知' : value.toLocaleString('en-US');
   return <div className="mt-2 text-xs text-slate-600">
     <div>耗时 {duration} · 总 token {number(job.totalTokens)}{!job.tokenUsageComplete && '（统计不完整）'}</div>
     {!compact && <>

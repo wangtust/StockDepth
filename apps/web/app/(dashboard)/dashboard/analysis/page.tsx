@@ -48,14 +48,7 @@ type Report = {
 type JobsPayload = {
   credits: number;
   pricing?: Partial<Record<number, number>>;
-  defaultModel?: {
-    id: number;
-    name: string;
-    provider: string;
-    quickModel: string;
-    deepModel: string;
-    isDefault: boolean;
-  } | null;
+  models?: Array<{ id: number; name: string; modelName: string; isDefault: boolean }>;
   jobs: Job[];
 };
 
@@ -82,7 +75,7 @@ function areReportsEqual(currentReports: Report[], nextReports: Report[]) {
 
 function formatAnalysisDate(date: Date) {
   const parts = new Intl.DateTimeFormat('en-US', {
-    timeZone: 'Asia/Hong_Kong',
+    timeZone: 'Asia/Shanghai',
     year: 'numeric',
     month: '2-digit',
     day: '2-digit'
@@ -102,8 +95,12 @@ export default function AnalysisPage() {
   const [selectedJobId, setSelectedJobId] = useState<number | null>(null);
   const [selectedReports, setSelectedReports] = useState<Report[]>([]);
   const [selectedReportKey, setSelectedReportKey] = useState<string>('');
+  const [modelConfigId, setModelConfigId] = useState<number | null>(null);
   const [ticker, setTicker] = useState('AAPL');
-  const [tradeDate, setTradeDate] = useState(() => formatAnalysisDate(new Date()));
+  const [tradeDate, setTradeDate] = useState('');
+  useEffect(() => {
+    setTradeDate(formatAnalysisDate(new Date()));
+  }, []);
   const [realtimeData, setRealtimeData] = useState(false);
   const [language, setLanguage] = useState('Chinese');
   const [depth, setDepth] = useState(1);
@@ -132,7 +129,8 @@ export default function AnalysisPage() {
   const pricing = normalizePricingConfig(payload.pricing);
   const selectedDepthCost = getDepthCreditCostFromConfig(depth, pricing);
   const hasEnoughCredits = payload.credits >= selectedDepthCost;
-  const defaultModel = payload.defaultModel ?? null;
+  const models = payload.models ?? [];
+  const selectedModelId = models.some(model => model.id === modelConfigId) ? modelConfigId : (models.find(model => model.isDefault) ?? models[0])?.id ?? null;
 
   const loadJobs = useCallback(async () => {
     const response = await fetch('/api/analysis/jobs', { cache: 'no-store' });
@@ -287,6 +285,7 @@ export default function AnalysisPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          modelConfigId: selectedModelId,
           ticker,
           tradeDate,
           realtimeData,
@@ -456,22 +455,15 @@ export default function AnalysisPage() {
                       </select>
                     </div>
                   </div>
-                  {defaultModel ? (
+                  {models.length ? (
                     <div>
-                      <Label className="mb-2">
-                        Model
-                      </Label>
-                      <div className="flex min-h-9 w-full items-center rounded-md border border-slate-200 bg-slate-50 px-3 text-sm text-slate-700">
-                        <span className="min-w-0 truncate">
-                          {defaultModel.name} · {defaultModel.quickModel}
-                        </span>
-                      </div>
+                      <Label htmlFor="analysis-model" className="mb-2">分析模型</Label>
+                      <select id="analysis-model" className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm" value={selectedModelId ?? ''} onChange={event => setModelConfigId(Number(event.target.value))} required>
+                        {models.map(model => <option key={model.id} value={model.id}>{model.name} · {model.modelName}</option>)}
+                      </select>
+                      <p className="mt-1 text-xs text-slate-500">所有分析阶段使用所选模型。</p>
                     </div>
-                  ) : (
-                    <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
-                      No active model is configured.
-                    </div>
-                  )}
+                  ) : <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">暂无可用模型，请联系管理员。</div>}
                   <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600">
                     <div className="flex items-center justify-between gap-3">
                       <span>{getDepthLabel(depth)} analysis</span>
@@ -487,7 +479,7 @@ export default function AnalysisPage() {
                   <Button
                     type="submit"
                     className="w-full rounded-md"
-                    disabled={submitting || !hasEnoughCredits || !defaultModel}
+                    disabled={submitting || !hasEnoughCredits || !selectedModelId}
                   >
                     {submitting ? (
                       <Loader2 className="h-4 w-4 animate-spin" />
@@ -531,10 +523,13 @@ export default function AnalysisPage() {
                       <div className="mt-1 truncate text-sm text-muted-foreground">
                         {job.realtimeData ? 'Realtime' : job.tradeDate} · {getDepthLabel(job.depth)} · {job.reportCount || 0} reports
                       </div>
+                      <div className="mt-1 text-xs text-muted-foreground">
+                        创建于 <time dateTime={job.createdAt}>{formatAnalysisDate(new Date(job.createdAt))}</time>
+                      </div>
                       <AnalysisUsage job={job} compact />
                     </button>
                     <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
+                      <DropdownMenuTrigger asChild id={`job-menu-trigger-${job.id}`} aria-controls={`job-menu-content-${job.id}`}>
                         <Button
                           type="button"
                           variant="ghost"
@@ -546,7 +541,7 @@ export default function AnalysisPage() {
                           <MoreHorizontal className="h-4 w-4" />
                         </Button>
                       </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end">
+                      <DropdownMenuContent align="end" id={`job-menu-content-${job.id}`} aria-labelledby={`job-menu-trigger-${job.id}`}>
                         <DropdownMenuItem
                           className="text-red-600 focus:bg-red-50 focus:text-red-600"
                           disabled={deletingJobId !== null}

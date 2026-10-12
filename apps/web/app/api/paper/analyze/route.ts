@@ -149,8 +149,8 @@ export async function POST(request: NextRequest) {
           analysts: JSON.stringify(data.analysts),
           provider: modelConfig.provider,
           baseUrl: modelConfig.baseUrl,
-          quickModel: modelConfig.quickModel,
-          deepModel: modelConfig.deepModel,
+          quickModel: modelConfig.modelName,
+          deepModel: modelConfig.modelName,
           modelConfigId: modelConfig.id,
           status: 'queued'
         })

@@ -136,8 +136,7 @@ function publicModel(
         id: model.id,
         name: model.name,
         provider: model.provider,
-        quickModel: model.quickModel,
-        deepModel: model.deepModel,
+        modelName: model.modelName,
         isDefault: model.isDefault
       }
     : null;

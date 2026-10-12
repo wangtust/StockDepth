@@ -102,8 +102,7 @@ type PaperPayload = {
     id: number;
     name: string;
     provider: string;
-    quickModel: string;
-    deepModel: string;
+    modelName: string;
     isDefault: boolean;
   } | null;
   portfolio: Portfolio | null;
@@ -696,7 +695,7 @@ export default function PortfolioPage() {
                     </div>
                     <div className="mt-1 truncate text-xs text-slate-500">
                       {defaultModel
-                        ? `${defaultModel.name} · ${defaultModel.quickModel}`
+                        ? `${defaultModel.name} · ${defaultModel.modelName}`
                         : 'No active model configured'}
                     </div>
                   </div>

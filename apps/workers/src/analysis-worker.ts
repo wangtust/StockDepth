@@ -52,10 +52,6 @@ const runHardTimeoutMs = positiveIntegerFromEnv(
   'ANALYSIS_WORKER_HARD_TIMEOUT_MS',
   Math.max(runTimeoutMs * 2, runTimeoutMs + runStallTimeoutMs)
 );
-const maxWorkerConcurrency = positiveIntegerFromEnv(
-  'ANALYSIS_WORKER_MAX_CONCURRENCY',
-  4
-);
 const mockMode = process.env.ANALYSIS_WORKER_MOCK === 'true';
 
 function positiveIntegerFromEnv(name: string, fallback: number) {
@@ -67,7 +63,7 @@ async function loadWorkerRuntimeConfig() {
   const settings = await getAnalysisConcurrencySettings();
 
   return {
-    workerConcurrency: Math.min(settings.systemConcurrency, maxWorkerConcurrency),
+    workerConcurrency: settings.systemConcurrency,
     userConcurrency: settings.userConcurrency
   };
 }
@@ -162,7 +158,7 @@ async function claimNextJob(userConcurrency: number): Promise<ClaimedJob | null>
     .update(analysisJobs)
     .set({
       status: 'running',
-      startedAt: sql`coalesce(${analysisJobs.startedAt}, now())`,
+      startedAt: sql`coalesce(${analysisJobs.startedAt}, now() AT TIME ZONE 'UTC')`,
       updatedAt: new Date()
     })
     .where(
@@ -210,7 +206,7 @@ async function startStockDepth(job: ClaimedJob) {
       )[0]
     : null;
 
-  if (!modelConfig || !modelConfig.isActive) {
+  if (!modelConfig || !modelConfig.isActive || modelConfig.retiredAt) {
     throw new Error('任务没有可用的数据库模型配置，请管理员配置模型后重新提交分析。');
   }
 
@@ -230,11 +226,10 @@ async function startStockDepth(job: ClaimedJob) {
       analysts: parseAnalysts(job.analysts),
       provider: modelConfig.provider,
       base_url: modelConfig.baseUrl || undefined,
-      quick_model: modelConfig.quickModel,
-      deep_model: modelConfig.deepModel,
+      quick_model: job.quickModel || modelConfig.modelName,
+      deep_model: job.deepModel || modelConfig.modelName,
       model_prices: {
-        [modelConfig.quickModel]: modelConfig.quickInputPrice == null ? null : { currency: 'CNY', unit: 'million_tokens', input: modelConfig.quickInputPrice, cache: modelConfig.quickCachePrice, output: modelConfig.quickOutputPrice },
-        [modelConfig.deepModel]: modelConfig.deepInputPrice == null ? null : { currency: 'CNY', unit: 'million_tokens', input: modelConfig.deepInputPrice, cache: modelConfig.deepCachePrice, output: modelConfig.deepOutputPrice },
+        [modelConfig.modelName]: modelConfig.inputPrice == null ? null : { currency: 'CNY', unit: 'million_tokens', input: modelConfig.inputPrice, cache: modelConfig.cachePrice, output: modelConfig.outputPrice },
       },
       api_key: modelConfig.apiKey
     })
@@ -532,7 +527,7 @@ async function main() {
     }
 
     if (activeJobs.size >= currentConfig.workerConcurrency) {
-      await Promise.race(activeJobs);
+      await Promise.race([...activeJobs, sleep(pollIntervalMs)]);
       continue;
     }
 

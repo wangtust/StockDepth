@@ -5,13 +5,14 @@ import { z } from 'zod';
 import { getUser } from '@/lib/db/queries';
 import { db } from '@/lib/db/drizzle';
 import {
+  llmModelConfigs,
   analysisJobs,
   analysisReports,
   creditTransactions,
   users
 } from '@/lib/db/schema';
 import { getAnalysisPricingConfig, getDepthCreditCostFromDb } from '@/lib/analysis/pricing-server';
-import { getDefaultModelConfig } from '@/lib/analysis/model-configs-server';
+import { getActiveModelConfigs } from '@/lib/analysis/model-configs-server';
 import { normalizeTicker } from '@/lib/market/tickers';
 
 const createJobSchema = z.object({
@@ -21,10 +22,7 @@ const createJobSchema = z.object({
   language: z.string().trim().min(1).max(40).default('Chinese'),
   depth: z.coerce.number().int().refine((value) => [1, 3, 5].includes(value)),
   analysts: z.array(z.string()).min(1).default(['market', 'news', 'fundamentals']),
-  provider: z.string().trim().max(80).optional(),
-  baseUrl: z.string().trim().max(500).optional(),
-  quickModel: z.string().trim().max(160).optional(),
-  deepModel: z.string().trim().max(160).optional()
+  modelConfigId: z.number().int().positive()
 });
 
 function today() {
@@ -72,27 +70,18 @@ export async function GET() {
     .leftJoin(analysisReports, eq(analysisReports.jobId, analysisJobs.id))
     .where(and(eq(analysisJobs.userId, currentUser.id), isNull(analysisJobs.hiddenAt)))
     .groupBy(analysisJobs.id)
-    .orderBy(desc(analysisJobs.createdAt))
+    .orderBy(desc(analysisJobs.id))
     .limit(50);
 
-  const [pricing, defaultModel] = await Promise.all([
+  const [pricing, models] = await Promise.all([
     getAnalysisPricingConfig(),
-    getDefaultModelConfig()
+    getActiveModelConfigs()
   ]);
 
   return NextResponse.json({
     credits: currentUser.analysisCredits ?? 0,
     pricing,
-    defaultModel: defaultModel
-      ? {
-          id: defaultModel.id,
-          name: defaultModel.name,
-          provider: defaultModel.provider,
-          quickModel: defaultModel.quickModel,
-          deepModel: defaultModel.deepModel,
-          isDefault: defaultModel.isDefault
-        }
-      : null,
+    models: models.map(model => ({ id: model.id, name: model.name, modelName: model.modelName, isDefault: model.isDefault })),
     jobs
   });
 }
@@ -115,11 +104,12 @@ export async function POST(request: NextRequest) {
   const ticker = normalizeTicker(data.ticker);
   const tradeDate = data.tradeDate || today();
   const creditCost = await getDepthCreditCostFromDb(data.depth);
-  const modelConfig = await getDefaultModelConfig();
+  const [modelConfig] = await db.select().from(llmModelConfigs)
+    .where(and(eq(llmModelConfigs.id, data.modelConfigId), eq(llmModelConfigs.isActive, true), isNull(llmModelConfigs.retiredAt))).limit(1);
 
   if (!modelConfig) {
     return NextResponse.json(
-      { error: 'No active model config is available. Please ask an admin to configure a model.' },
+      { error: '所选模型不可用，请选择其他已启用模型。' },
       { status: 400 }
     );
   }
@@ -156,8 +146,8 @@ export async function POST(request: NextRequest) {
         analysts: JSON.stringify(data.analysts),
         provider: modelConfig.provider,
         baseUrl: modelConfig.baseUrl,
-        quickModel: modelConfig.quickModel,
-        deepModel: modelConfig.deepModel,
+        quickModel: modelConfig.modelName,
+        deepModel: modelConfig.modelName,
         modelConfigId: modelConfig.id,
         status: 'queued'
       })

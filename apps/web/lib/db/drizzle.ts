@@ -13,6 +13,6 @@ if (!process.env.POSTGRES_URL) {
 const databaseGlobal = globalThis as typeof globalThis & {
   stockdepthDatabaseClient?: ReturnType<typeof postgres>;
 };
-export const client = databaseGlobal.stockdepthDatabaseClient ?? postgres(process.env.POSTGRES_URL);
+export const client = databaseGlobal.stockdepthDatabaseClient ?? postgres(process.env.POSTGRES_URL, { connection: { TimeZone: 'UTC' } });
 if (process.env.NODE_ENV !== 'production') databaseGlobal.stockdepthDatabaseClient = client;
 export const db = drizzle(client, { schema });

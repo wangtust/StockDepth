@@ -1,7 +1,8 @@
 'use server';
 
+import { testModelConnection } from '@/lib/analysis/test-model-server';
 import { revalidatePath } from 'next/cache';
-import { and, eq, sql } from 'drizzle-orm';
+import { and, eq, inArray, isNull, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { requirePlatformAdmin, requireSuperAdmin, writeAdminAuditLog } from '@/lib/auth/admin';
 import {
@@ -35,35 +36,25 @@ function revalidateAdmin() {
 
 const modelPrice = z.preprocess(value => value === '' || value == null ? null : value,
   z.string().trim().regex(/^\d{1,9}(\.\d{1,6})?$/, '价格须为非负数字，最多六位小数').nullable());
-const priceFields = ['quickInputPrice', 'quickCachePrice', 'quickOutputPrice', 'deepInputPrice', 'deepCachePrice', 'deepOutputPrice'] as const;
+const priceFields = ['inputPrice', 'cachePrice', 'outputPrice'] as const;
 function modelPrices(formData: FormData) {
   return Object.fromEntries(priceFields.map(field => [field, formData.get(field)]));
 }
 function validateModelPrices(data: Record<string, unknown>) {
-  for (const role of ['quick', 'deep']) {
-    const values = ['Input', 'Cache', 'Output'].map(kind => data[`${role}${kind}Price`]);
-    if (values.some(value => value != null) && !values.every(value => value != null)) throw new Error('每个模型的输入、缓存命中、输出价格须全部填写，或全部留空。');
-    if (values.every(value => value != null) && Number(values[1]) > Number(values[0])) throw new Error('缓存命中价格不能高于普通输入价格。');
-  }
-  if (data.quickModel === data.deepModel && ['Input', 'Cache', 'Output'].some(kind => {
-    const quick = data[`quick${kind}Price`], deep = data[`deep${kind}Price`];
-    return (quick == null) !== (deep == null) || (quick != null && Number(quick) !== Number(deep));
-  })) throw new Error('相同模型名称须填写相同价格。');
+  const values = priceFields.map(field => data[field]);
+  if (values.some(value => value != null) && !values.every(value => value != null)) throw new Error('输入、缓存命中、输出价格须全部填写，或全部留空。');
+  if (values.every(value => value != null) && Number(values[1]) > Number(values[0])) throw new Error('缓存命中价格不能高于普通输入价格。');
 }
 
 const modelConfigSchema = z.object({
-  quickInputPrice: modelPrice,
-  quickCachePrice: modelPrice,
-  quickOutputPrice: modelPrice,
-  deepInputPrice: modelPrice,
-  deepCachePrice: modelPrice,
-  deepOutputPrice: modelPrice,
+  inputPrice: modelPrice,
+  cachePrice: modelPrice,
+  outputPrice: modelPrice,
   name: z.string().trim().min(1).max(120),
   provider: z.enum(['openai', 'openai-compatible', 'anthropic', 'google', 'azure', 'xai', 'deepseek', 'qwen', 'qwen-us', 'qwen-cn', 'glm', 'glm-cn', 'minimax', 'minimax-cn', 'openrouter', 'ollama']),
   baseUrl: z.string().trim().max(500),
   apiKey: z.string().trim().max(1000).optional(),
-  quickModel: z.string().trim().min(1).max(160),
-  deepModel: z.string().trim().min(1).max(160),
+  modelName: z.string().trim().min(1).max(160),
   isDefault: z.coerce.boolean().optional(),
   isActive: z.coerce.boolean().optional()
 });
@@ -91,13 +82,14 @@ export async function createModelConfig(formData: FormData) {
       provider: formData.get('provider'),
       baseUrl: formData.get('baseUrl'),
       apiKey: formData.get('apiKey'),
-      quickModel: formData.get('quickModel'),
-      deepModel: formData.get('deepModel'),
+      modelName: formData.get('modelName'),
       isDefault: formData.get('isDefault') === 'on',
-      isActive: formData.get('isActive') !== 'off'
+      isActive: formData.get('isActive') === 'on'
     });
 
   validateModelPrices(data);
+  const probe = await testModelConnection(data);
+  if (!probe.success) return { error: probe.error || '模型测试失败，配置未保存。' };
   const [created] = await db.insert(llmModelConfigs).values(data).returning();
   if (data.isDefault) {
     await clearOtherDefaultModelConfigs(created.id);
@@ -113,8 +105,7 @@ export async function createModelConfig(formData: FormData) {
       provider: created.provider,
       baseUrl: created.baseUrl,
       prices: Object.fromEntries(priceFields.map(field => [field, created[field]])),
-      quickModel: created.quickModel,
-      deepModel: created.deepModel,
+      modelName: created.modelName,
       isDefault: created.isDefault,
       isActive: created.isActive
     }
@@ -133,26 +124,21 @@ export async function updateModelConfig(formData: FormData) {
     provider: formData.get('provider'),
     baseUrl: formData.get('baseUrl'),
     apiKey: formData.get('apiKey') || undefined,
-    quickModel: formData.get('quickModel'),
-    deepModel: formData.get('deepModel'),
+    modelName: formData.get('modelName'),
     isDefault: formData.get('isDefault') === 'on',
     isActive: formData.get('isActive') === 'on'
   });
 
   validateModelPrices(data);
   const updateValues = {
-    quickInputPrice: data.quickInputPrice,
-    quickCachePrice: data.quickCachePrice,
-    quickOutputPrice: data.quickOutputPrice,
-    deepInputPrice: data.deepInputPrice,
-    deepCachePrice: data.deepCachePrice,
-    deepOutputPrice: data.deepOutputPrice,
+    inputPrice: data.inputPrice,
+    cachePrice: data.cachePrice,
+    outputPrice: data.outputPrice,
 
     name: data.name,
     provider: data.provider,
     baseUrl: data.baseUrl,
-    quickModel: data.quickModel,
-    deepModel: data.deepModel,
+    modelName: data.modelName,
     isDefault: !!data.isDefault,
     isActive: !!data.isActive,
     updatedAt: new Date(),
@@ -162,7 +148,7 @@ export async function updateModelConfig(formData: FormData) {
   const [updated] = await db
     .update(llmModelConfigs)
     .set(updateValues)
-    .where(eq(llmModelConfigs.id, configId))
+    .where(and(eq(llmModelConfigs.id, configId), isNull(llmModelConfigs.retiredAt)))
     .returning();
 
   if (!updated) {
@@ -183,8 +169,7 @@ export async function updateModelConfig(formData: FormData) {
       provider: updated.provider,
       baseUrl: updated.baseUrl,
       prices: Object.fromEntries(priceFields.map(field => [field, updated[field]])),
-      quickModel: updated.quickModel,
-      deepModel: updated.deepModel,
+      modelName: updated.modelName,
       isDefault: updated.isDefault,
       isActive: updated.isActive,
       apiKeyChanged: !!data.apiKey
@@ -193,6 +178,35 @@ export async function updateModelConfig(formData: FormData) {
 
   revalidateAdmin();
   return { success: 'Model config updated.' };
+}
+
+export async function deleteModelConfig(formData: FormData) {
+  const admin = await requirePlatformAdmin();
+  const configId = userIdSchema.parse(formData.get('configId'));
+  const result = await db.transaction(async (tx) => {
+    const [model] = await tx.select({ id: llmModelConfigs.id })
+      .from(llmModelConfigs).where(eq(llmModelConfigs.id, configId)).for('update');
+    if (!model) return { error: '模型已不存在，请刷新页面。' };
+    const [activeJob] = await tx.select({ id: analysisJobs.id }).from(analysisJobs)
+      .where(and(eq(analysisJobs.modelConfigId, configId), inArray(analysisJobs.status, ['queued', 'running'])))
+      .limit(1);
+    if (activeJob) return { error: '该模型仍有排队或运行中的任务，请任务结束后再删除。' };
+    await tx.update(llmModelConfigs)
+      .set({ retiredAt: new Date(), isActive: false, isDefault: false, updatedAt: new Date() })
+      .where(eq(llmModelConfigs.id, configId));
+    return { success: '模型已弃用，配置保留在数据库中。' };
+  });
+  if (result.error) return result;
+  await writeAdminAuditLog({
+    adminUserId: admin.id,
+    action: 'llm_model_config.retire',
+    targetType: 'llm_model_config',
+    targetId: configId,
+    metadata: {}
+  });
+  revalidateAdmin();
+  revalidatePath('/dashboard/analysis');
+  return result;
 }
 
 export async function updateAnalysisPricing(formData: FormData) {

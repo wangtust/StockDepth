@@ -28,7 +28,7 @@ export function AnalysisProgress({ content, running = false }: { content: string
             <Bot className="size-4 text-emerald-600" />{turn.tools.length ? '模型发起数据查询' : '模型生成分析回复'}
           </div>
           {turn.text && <div className="px-4 py-4 sm:px-5">
-            {turn.text.length > 1200 ? <details><summary className="cursor-pointer text-sm font-medium text-slate-700">查看分析回复 · {turn.text.length.toLocaleString()} 字符<span className="mt-2 block text-sm font-normal leading-6 text-slate-500">{turn.text.replace(/[#*`]/g, "").slice(0, 180)}…</span></summary><div className="mt-3"><MarkdownRenderer content={turn.text} /></div></details> : <MarkdownRenderer content={turn.text} />}
+            {turn.text.length > 1200 ? <details><summary className="cursor-pointer text-sm font-medium text-slate-700">查看分析回复 · {turn.text.length.toLocaleString('en-US')} 字符<span className="mt-2 block text-sm font-normal leading-6 text-slate-500">{turn.text.replace(/[#*`]/g, "").slice(0, 180)}…</span></summary><div className="mt-3"><MarkdownRenderer content={turn.text} /></div></details> : <MarkdownRenderer content={turn.text} />}
           </div>}
           {!!turn.tools.length && <div className="space-y-3 p-4 sm:p-5">
             {turn.tools.map((tool, toolIndex) => <div key={`${tool.name}-${toolIndex}`} className="rounded-lg border border-slate-200 bg-slate-50/50 p-3">

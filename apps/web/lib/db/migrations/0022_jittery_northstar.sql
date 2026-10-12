@@ -1,0 +1,1 @@
+ALTER TABLE "llm_model_configs" ADD COLUMN "retired_at" timestamp;

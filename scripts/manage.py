@@ -14,7 +14,7 @@ STATE = ROOT / 'var/processes.json'
 RUNTIME = Path(os.environ['STOCKDEPTH_RUNTIME_BIN'])
 SERVICES = {
     'api': (ROOT / 'apps/api', [str(RUNTIME / 'python'), '-m', 'stockdepth.api.server']),
-    'web': (ROOT / 'apps/web', [str(RUNTIME / 'pnpm'), 'dev', '--hostname', '127.0.0.1']),
+    'web': (ROOT / 'apps/web', [str(RUNTIME / 'pnpm'), 'dev', '--hostname', '0.0.0.0']),
     'analysis': (ROOT / 'apps/workers', [str(RUNTIME / 'tsx'), 'src/analysis-worker.ts']),
     'paper': (ROOT / 'apps/workers', [str(RUNTIME / 'tsx'), 'src/paper-trader-worker.ts']),
 }

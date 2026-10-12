@@ -80,6 +80,7 @@ chmod 600 .env
 | POSTGRES_URL | PostgreSQL 连接地址及凭据 |
 | BASE_URL | 网站地址，默认 http://localhost:3000 |
 | AUTH_SECRET | 登录会话签名密钥，可用 `openssl rand -base64 32` 生成 |
+| STOCKDEPTH_ADMIN_EMAIL / STOCKDEPTH_ADMIN_PASSWORD | 初始管理员邮箱和密码；没有管理员时自动创建，已有管理员时保留原账户和密码 |
 | STRIPE_SECRET_KEY / STRIPE_WEBHOOK_SECRET | 支付与 webhook 验证；无需支付时可保留模板占位值 |
 | STOCKDEPTH_API_URL | worker 调用分析 API 的地址 |
 | STOCKDEPTH_API_USERNAME / PASSWORD | worker 的内部 API 调用凭据 |
@@ -100,7 +101,7 @@ chmod 600 .env
 ./bin/stockdepth start api web analysis paper
 ```
 
-这一步只创建数据库内部结构，不创建 PostgreSQL 数据库本身，也不自动创建账户或 Stripe 商品。建表依据版本控制中的项目 SQL 结构文件，避免每次启动直接修改 schema 造成不可追踪的变更。连接用户需具有创建 schema、表和修改结构的权限。
+这一步创建数据库内部结构，并在没有管理员时根据 `.env` 创建初始管理员；不创建 PostgreSQL 数据库本身或 Stripe 商品。建表依据版本控制中的项目 SQL 结构文件，避免每次启动直接修改 schema 造成不可追踪的变更。连接用户需具有创建 schema、表和修改结构的权限。
 
 需要单独执行结构更新时仍可使用：
 
@@ -109,7 +110,9 @@ conda activate stockdepth  # 当前机器使用 tradingagents-saas
 pnpm --dir apps/web db:migrate
 ```
 
-新环境如需初始化管理员账户，可运行 `pnpm --dir apps/web db:seed`，默认账户为 `test@test.com` / `admin123`，登录后修改密码。配置了真实 Stripe Key 时，seed 还会创建远端商品，因此只在需要初始化时运行。当前机器已有用户与数据，不需要 seed，也不要运行 db:setup 覆盖配置。
+新环境首次启动前，在 `.env` 设置 `STOCKDEPTH_ADMIN_EMAIL` 和 `STOCKDEPTH_ADMIN_PASSWORD`，启动命令会自动创建 `super_admin` 账户。密码至少 8 个字符、最多 100 个字符，UTF-8 长度不超过 72 字节。重复启动或修改这两项不会覆盖已有管理员或重置密码。如果两项均未配置，则跳过账户创建；仅配置一项或配置无效时会停止启动。如果邮箱已被其他账户使用，也会停止启动，不会自动提升其权限。
+
+手动开发初始化命令 `pnpm --dir apps/web db:seed` 仍使用 `test@test.com` / `admin123`，且真实 Stripe Key 会触发远端商品创建；常规启动无需执行 seed，也不要运行 db:setup 覆盖配置。
 
 数据库保存用户、模型、任务、报告及模拟交易数据。分析文件和检查点在 `~/.stockdepth`。任务删除是软删除，可在 Account 的“最近删除”恢复，管理员仍可查看。
 

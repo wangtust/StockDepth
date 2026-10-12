@@ -7,6 +7,7 @@ require(path.join(modules, 'dotenv')).config({ path: path.join(root, '.env') });
 const postgres = require(path.join(modules, 'postgres'));
 const { drizzle } = require(path.join(modules, 'drizzle-orm/postgres-js'));
 const { migrate } = require(path.join(modules, 'drizzle-orm/postgres-js/migrator'));
+const { initializeAdmin } = require('./initialize-admin.cjs');
 
 async function initialize() {
   if (!process.env.POSTGRES_URL) throw new Error('请在根目录 .env 配置 POSTGRES_URL');
@@ -26,6 +27,7 @@ async function initialize() {
     const missing = expected.filter(name => !actual.has(name));
     if (missing.length) throw new Error('数据库结构不完整，缺少表：' + missing.join(', '));
     console.log(`数据库就绪：已验证 ${expected.length} 张项目表。`);
+    await initializeAdmin(sql, process.env);
   } finally {
     if (locked) await sql`select pg_advisory_unlock(739421, 1)`;
     await sql.end();

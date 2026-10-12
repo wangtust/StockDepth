@@ -1,0 +1,1 @@
+ALTER TABLE "paper_portfolios" ADD COLUMN "auto_trade_enabled" boolean DEFAULT false NOT NULL;

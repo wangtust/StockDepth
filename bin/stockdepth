@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+set -euo pipefail
+STOCKDEPTH_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+STOCKDEPTH_RUNTIME_BIN="${STOCKDEPTH_RUNTIME_BIN:-$(python3 - "$STOCKDEPTH_ROOT/.env" <<'PY'
+import sys
+from pathlib import Path
+for line in Path(sys.argv[1]).read_text().splitlines():
+    if line.startswith('STOCKDEPTH_RUNTIME_BIN='):
+        print(line.split('=', 1)[1].strip().strip('\"').strip("'"))
+        break
+PY
+)}"
+if [[ -z "$STOCKDEPTH_RUNTIME_BIN" || ! -x "$STOCKDEPTH_RUNTIME_BIN/python" ]]; then
+  echo '请在根目录 .env 中配置 STOCKDEPTH_RUNTIME_BIN，指向包含 Python、Node、pnpm、tsx 的 bin 目录。' >&2
+  exit 1
+fi
+export STOCKDEPTH_RUNTIME_BIN
+exec "$STOCKDEPTH_RUNTIME_BIN/python" "$STOCKDEPTH_ROOT/scripts/manage.py" "$@"

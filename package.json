@@ -1,0 +1,11 @@
+{
+  "name": "stockdepth",
+  "private": true,
+  "scripts": {
+    "dev": "./bin/stockdepth start",
+    "stop": "./bin/stockdepth stop",
+    "status": "./bin/stockdepth status",
+    "check:web": "pnpm --dir apps/web exec tsc --noEmit",
+    "check:workers": "pnpm --dir apps/workers check"
+  }
+}

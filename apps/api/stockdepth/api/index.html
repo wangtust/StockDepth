@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>StockDepth Live Reports</title>
+    <link rel="stylesheet" href="/style.css" />
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.7/dist/purify.min.js"></script>
+  </head>
+  <body>
+    <aside class="sidebar">
+      <header class="brand">
+        <div>
+          <h1>StockDepth</h1>
+          <p>Live report viewer</p>
+        </div>
+        <button id="refreshRuns" title="刷新列表">↻</button>
+      </header>
+
+      <section class="panel">
+        <h2>Start Analysis</h2>
+        <form id="startForm">
+          <label>
+            Ticker
+            <input name="ticker" placeholder="002714.SZ" required />
+          </label>
+          <label>
+            Date
+            <input name="date" type="date" />
+          </label>
+          <div class="grid">
+            <label>
+              Language
+              <input name="language" id="languageInput" list="languageOptions" value="Chinese" />
+              <datalist id="languageOptions"></datalist>
+            </label>
+            <label>
+              Depth
+              <select name="depth" id="depthSelect"></select>
+            </label>
+          </div>
+          <label>
+            LLM Provider
+            <select name="provider" id="providerSelect"></select>
+          </label>
+          <div class="grid">
+            <label>
+              Quick Model
+              <input name="quick_model" id="quickModel" list="quickModelOptions" value="qwen-turbo" />
+              <datalist id="quickModelOptions"></datalist>
+            </label>
+            <label>
+              Deep Model
+              <input name="deep_model" id="deepModel" list="deepModelOptions" value="qwen-plus" />
+              <datalist id="deepModelOptions"></datalist>
+            </label>
+          </div>
+          <label>
+            Base URL
+            <input name="base_url" id="baseUrl" value="https://dashscope-intl.aliyuncs.com/compatible-mode/v1" />
+          </label>
+          <fieldset>
+            <legend>Analysts</legend>
+            <label><input type="checkbox" name="analysts" value="market" checked /> Market</label>
+            <label><input type="checkbox" name="analysts" value="social" /> Sentiment</label>
+            <label><input type="checkbox" name="analysts" value="news" checked /> News</label>
+            <label><input type="checkbox" name="analysts" value="fundamentals" checked /> Fundamentals</label>
+          </fieldset>
+          <button type="submit">Start</button>
+          <p id="startStatus" class="muted"></p>
+        </form>
+      </section>
+
+      <section class="panel runs-panel">
+        <h2>Runs</h2>
+        <div id="runs" class="runs"></div>
+      </section>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <div>
+          <h2 id="runTitle">Select a run</h2>
+          <p id="runMeta">Reports refresh automatically every 2 seconds.</p>
+        </div>
+        <div class="status">
+          <span id="runStatus">idle</span>
+          <span id="updatedAt"></span>
+        </div>
+      </header>
+
+      <nav id="tabs" class="tabs"></nav>
+
+      <section class="content-wrap">
+        <article id="content" class="markdown empty">
+          <h2>等待选择报告</h2>
+          <p>左侧选择一个运行记录，或直接从网页启动新的股票分析。</p>
+        </article>
+        <aside class="log-panel">
+          <header>
+            <h3>Live Log</h3>
+            <button id="toggleLog">Hide</button>
+          </header>
+          <pre id="liveLog"></pre>
+        </aside>
+      </section>
+    </main>
+
+    <script src="/app.js"></script>
+  </body>
+</html>

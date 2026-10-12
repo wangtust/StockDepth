@@ -13,6 +13,7 @@ export function jobsPageQuery(userId: number, before?: number) {
       coalesce((select jsonb_agg(jsonb_build_object(
         'id', j.id, 'ticker', j.ticker, 'tradeDate', j.trade_date,
         'realtimeData', j.realtime_data, 'language', j.language, 'depth', j.depth,
+        'quickModel', j.quick_model, 'deepModel', j.deep_model,
         'status', j.status, 'inputTokens', j.input_tokens, 'outputTokens', j.output_tokens,
         'totalTokens', j.total_tokens, 'tokenUsageComplete', j.token_usage_complete,
         'startedAt', j.started_at at time zone 'UTC', 'completedAt', j.completed_at at time zone 'UTC',

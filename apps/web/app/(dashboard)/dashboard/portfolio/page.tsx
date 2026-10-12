@@ -1,6 +1,6 @@
 'use client';
 
-import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
+import { FormEvent, useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 import {
   ArrowDownToLine,
@@ -29,6 +29,9 @@ import {
   normalizePricingConfig
 } from '@/lib/analysis/pricing';
 import { cn } from '@/lib/utils';
+import useSWR from 'swr';
+import { jsonFetcher } from '@/lib/http/json-fetcher';
+import { pollingDefaults } from '@/lib/http/polling';
 
 type Portfolio = {
   id: number;
@@ -110,6 +113,7 @@ type PaperPayload = {
   positions: Position[];
   trades: Trade[];
   analysisRuns: AnalysisRun[];
+  hasActiveAnalysisRuns?: boolean;
 };
 
 const emptyPayload: PaperPayload = {
@@ -143,7 +147,19 @@ function formatDate(value: string) {
 }
 
 export default function PortfolioPage() {
-  const [payload, setPayload] = useState<PaperPayload>(emptyPayload);
+  const { data, error: readError, isLoading: loading, mutate } = useSWR<PaperPayload>(
+    '/api/paper',
+    jsonFetcher,
+    {
+      ...pollingDefaults,
+      // Portfolio reads are relatively large; only live jobs need periodic updates.
+      refreshInterval: (current) => (current?.hasActiveAnalysisRuns || current?.analysisRuns?.some(
+        (run) => run.status === 'queued' || run.status === 'running'
+      )) ? 10000 : 0,
+      shouldRetryOnError: false
+    }
+  );
+  const payload = useMemo(() => data ? normalizePayload(data) : emptyPayload, [data]);
   const [portfolioName, setPortfolioName] = useState('Paper Portfolio');
   const [initialCash, setInitialCash] = useState('100000');
   const [watchTicker, setWatchTicker] = useState('');
@@ -156,7 +172,6 @@ export default function PortfolioPage() {
   const [selectedWatchlistIds, setSelectedWatchlistIds] = useState<number[]>([]);
   const [analysisDepth, setAnalysisDepth] = useState(1);
   const [analysisRealtimeData, setAnalysisRealtimeData] = useState(true);
-  const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState('');
   const [error, setError] = useState('');
 
@@ -185,37 +200,25 @@ export default function PortfolioPage() {
     [payload.positions, tradeTicker]
   );
 
-  const loadPaper = useCallback(async () => {
-    const response = await fetch('/api/paper', { cache: 'no-store' });
-    const data = await readJson(response);
-    if (!response.ok) {
-      throw new Error(data.error || 'Failed to load portfolio.');
-    }
-    const nextPayload = normalizePayload(data);
-    setPayload(nextPayload);
-    setTradeTicker((current) => current || nextPayload.watchlist[0]?.ticker || '');
-  }, []);
-
   useEffect(() => {
-    let mounted = true;
-    async function run() {
-      try {
-        await loadPaper();
-      } catch (err) {
-        if (mounted) {
-          setError(err instanceof Error ? err.message : String(err));
-        }
-      } finally {
-        if (mounted) {
-          setLoading(false);
-        }
-      }
+    if (!data) return;
+    setTradeTicker((current) => current || payload.watchlist[0]?.ticker || '');
+  }, [data, payload.watchlist]);
+
+  async function loadPaper() {
+    // Explicit reads must reject on failure; SWR's plain revalidation swallows
+    // fetch errors. A mutation also prevents an older in-flight read overwriting it.
+    await mutate(() => jsonFetcher('/api/paper'), { revalidate: false });
+  }
+
+  async function refreshAfterMutation() {
+    try {
+      await loadPaper();
+    } catch (err) {
+      // The write already succeeded. Keep its result so the user does not repeat it.
+      setError(`Saved, but refreshing the portfolio failed: ${err instanceof Error ? err.message : String(err)}`);
     }
-    run();
-    return () => {
-      mounted = false;
-    };
-  }, [loadPaper]);
+  }
 
   async function submitJson(path: string, body: unknown, label: string) {
     setBusy(label);
@@ -230,7 +233,7 @@ export default function PortfolioPage() {
       if (!response.ok) {
         throw new Error(data.error || 'Request failed.');
       }
-      await loadPaper();
+      await refreshAfterMutation();
       return data;
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -269,9 +272,6 @@ export default function PortfolioPage() {
   }
 
   async function handleRemoveWatchlist(id: number) {
-    setSelectedWatchlistIds((currentIds) =>
-      currentIds.filter((currentId) => currentId !== id)
-    );
     setBusy(`watchlist-${id}`);
     setError('');
     try {
@@ -282,7 +282,8 @@ export default function PortfolioPage() {
       if (!response.ok) {
         throw new Error(data.error || 'Failed to remove ticker.');
       }
-      await loadPaper();
+      setSelectedWatchlistIds((currentIds) => currentIds.filter((currentId) => currentId !== id));
+      await refreshAfterMutation();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -342,7 +343,7 @@ export default function PortfolioPage() {
       if (!response.ok) {
         throw new Error(data.error || 'Failed to update auto trading setting.');
       }
-      await loadPaper();
+      await refreshAfterMutation();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -361,7 +362,7 @@ export default function PortfolioPage() {
       if (!response.ok) {
         throw new Error(data.error || 'Failed to execute decision.');
       }
-      await loadPaper();
+      await refreshAfterMutation();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -410,6 +411,21 @@ export default function PortfolioPage() {
     );
   }
 
+  const visibleError = error || (readError instanceof Error ? readError.message : readError ? String(readError) : '');
+
+  if (!data) {
+    return (
+      <section className="flex-1 bg-slate-50 p-4 sm:p-6 lg:p-8">
+        <h1 className="text-xl font-semibold text-slate-950">Paper Portfolio</h1>
+        {loading ? <p role="status">Loading portfolio…</p> : <p role="alert">{visibleError || 'Portfolio data is unavailable.'}</p>}
+        <Button variant="outline" disabled={loading} onClick={async () => {
+          setError('');
+          try { await loadPaper(); } catch (err) { setError(err instanceof Error ? err.message : String(err)); }
+        }}>Refresh</Button>
+      </section>
+    );
+  }
+
   return (
     <section className="flex-1 bg-slate-50 p-4 sm:p-6 lg:p-8">
       <div className="mx-auto flex w-full max-w-[1800px] flex-col gap-6">
@@ -440,9 +456,9 @@ export default function PortfolioPage() {
           </Button>
         </div>
 
-        {error && (
+        {visibleError && (
           <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-            {error}
+            {visibleError}
           </div>
         )}
 
@@ -1114,7 +1130,8 @@ function normalizePayload(data: Partial<PaperPayload> | null): PaperPayload {
     watchlist: Array.isArray(data?.watchlist) ? data.watchlist : [],
     positions: Array.isArray(data?.positions) ? data.positions : [],
     trades: Array.isArray(data?.trades) ? data.trades : [],
-    analysisRuns: Array.isArray(data?.analysisRuns) ? data.analysisRuns : []
+    analysisRuns: Array.isArray(data?.analysisRuns) ? data.analysisRuns : [],
+    hasActiveAnalysisRuns: data?.hasActiveAnalysisRuns === true
   };
 }
 

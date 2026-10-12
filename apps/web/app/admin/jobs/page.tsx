@@ -1,7 +1,7 @@
 import { LiveAnalysisRefresh } from '@/components/live-analysis-refresh';
 import { AnalysisUsage } from '@/components/analysis-usage';
 import Link from 'next/link';
-import { and, desc, eq, ilike, or, sql } from 'drizzle-orm';
+import { and, desc, eq, ilike, lt, or, sql } from 'drizzle-orm';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -18,7 +18,7 @@ import {
 export const dynamic = 'force-dynamic';
 
 type PageProps = {
-  searchParams: Promise<{ status?: string; q?: string }>;
+  searchParams: Promise<{ status?: string; q?: string; before?: string }>;
 };
 
 const statusOptions = ['all', 'queued', 'running', 'complete', 'failed'];
@@ -35,11 +35,15 @@ async function cancelAnalysisJobAction(formData: FormData) {
 
 export default async function AdminJobsPage({ searchParams }: PageProps) {
   await requirePlatformAdmin();
-  const { status = 'all', q = '' } = await searchParams;
+  const { status = 'all', q = '', before } = await searchParams;
   const statusFilter = statusOptions.includes(status) ? status : 'all';
   const query = q.trim();
 
+  const cursor = before && /^[1-9]\d*$/.test(before) && Number.isSafeInteger(Number(before))
+    && Number(before) <= 2147483647 ? Number(before) : undefined;
+  const pageSize = 50;
   const whereParts = [];
+  if (cursor) whereParts.push(lt(analysisJobs.id, cursor));
   if (statusFilter !== 'all') {
     whereParts.push(eq(analysisJobs.status, statusFilter));
   }
@@ -52,10 +56,10 @@ export default async function AdminJobsPage({ searchParams }: PageProps) {
     );
   }
 
-  const rows = await db
+  const pageRows = await db
     .select({
-      costTotal: sql<string | null>`(select sum(estimated_cost)::text from analysis_model_calls where job_id = ${analysisJobs.id})`,
-      costComplete: sql<boolean>`coalesce((select bool_and(cost_complete) from analysis_model_calls where job_id = ${analysisJobs.id}), false)`,
+      costTotal: sql<string | null>`costs.cost_total`,
+      costComplete: sql<boolean>`coalesce(costs.cost_complete, false)`,
       id: analysisJobs.id,
       ticker: analysisJobs.ticker,
       tradeDate: analysisJobs.tradeDate,
@@ -75,9 +79,20 @@ export default async function AdminJobsPage({ searchParams }: PageProps) {
     })
     .from(analysisJobs)
     .leftJoin(users, eq(analysisJobs.userId, users.id))
+    .leftJoin(sql`lateral (
+      select sum(estimated_cost)::text as cost_total, bool_and(cost_complete) as cost_complete
+      from analysis_model_calls where job_id = ${analysisJobs.id}
+    ) costs`, sql`true`)
     .where(whereParts.length ? and(...whereParts) : undefined)
     .orderBy(desc(analysisJobs.id))
-    .limit(100);
+    .limit(pageSize + 1);
+  const rows = pageRows.slice(0, pageSize);
+  const nextCursor = pageRows.length > pageSize ? rows.at(-1)?.id : undefined;
+  function pageHref(next?: number) {
+    const params = new URLSearchParams({ status: statusFilter, q: query });
+    if (next) params.set('before', String(next));
+    return `/admin/jobs?${params.toString()}`;
+  }
 
   return (
     <div className="space-y-6">
@@ -108,6 +123,10 @@ export default async function AdminJobsPage({ searchParams }: PageProps) {
         </form>
       </div>
 
+      <div className="flex gap-2">
+        {cursor && <Button asChild variant="outline"><Link href={pageHref()}>Newest</Link></Button>}
+        {nextCursor && <Button asChild variant="outline"><Link href={pageHref(nextCursor)}>Older jobs</Link></Button>}
+      </div>
       <Card className="rounded-md">
         <CardHeader>
           <CardTitle>Jobs</CardTitle>

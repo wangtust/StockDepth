@@ -41,6 +41,8 @@ type Job = UsageJob & {
   updatedAt: string;
   reportCount?: number;
   defaultReportKey?: string | null;
+  quickModel?: string | null;
+  deepModel?: string | null;
 };
 
 type Report = {
@@ -434,6 +436,11 @@ export default function AnalysisClient({ initialPayload }: { initialPayload: Job
                       </div>
                       <div className="mt-1 truncate text-sm text-muted-foreground">
                         {job.realtimeData ? 'Realtime' : job.tradeDate} · {getDepthLabel(job.depth)} · {job.reportCount || 0} reports
+                      </div>
+                      <div className="mt-1 text-xs text-muted-foreground">
+                        模型：{job.quickModel && job.deepModel && job.quickModel !== job.deepModel
+                          ? `快速 ${job.quickModel} · 深度 ${job.deepModel}`
+                          : job.deepModel || job.quickModel || '未记录'}
                       </div>
                       <div className="mt-1 text-xs text-muted-foreground">
                         创建于 <time dateTime={job.createdAt}>{formatAnalysisDate(new Date(job.createdAt))}</time>

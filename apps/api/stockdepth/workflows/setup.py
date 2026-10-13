@@ -8,6 +8,7 @@ from stockdepth.agents import *
 from stockdepth.agents.utils.agent_states import AgentState
 
 from .analyst_execution import build_analyst_execution_plan
+from .parallel_analysts import add_parallel_analysts
 from .conditional_logic import ConditionalLogic
 
 
@@ -68,11 +69,17 @@ class GraphSetup:
         # Create workflow
         workflow = StateGraph(AgentState)
 
-        # Add analyst nodes to the graph
-        for spec in plan.specs:
-            workflow.add_node(spec.agent_node, analyst_factories[spec.key]())
-            workflow.add_node(spec.clear_node, create_msg_delete())
-            workflow.add_node(spec.tool_node, self.tool_nodes[spec.key])
+        # Serial topology and names remain unchanged for old checkpoints.
+        if plan.concurrency_limit == 1:
+            for spec in plan.specs:
+                workflow.add_node(spec.agent_node, analyst_factories[spec.key]())
+                workflow.add_node(spec.clear_node, create_msg_delete())
+                workflow.add_node(spec.tool_node, self.tool_nodes[spec.key])
+        else:
+            add_parallel_analysts(
+                workflow, plan, analyst_factories, self.tool_nodes,
+                self.conditional_logic, "Bull Researcher",
+            )
 
         # Add other nodes
         workflow.add_node("Bull Researcher", bull_researcher_node)
@@ -84,29 +91,30 @@ class GraphSetup:
         workflow.add_node("Conservative Analyst", conservative_analyst)
         workflow.add_node("Portfolio Manager", portfolio_manager_node)
 
-        # Define edges
-        # Start with the first analyst
-        workflow.add_edge(START, plan.specs[0].agent_node)
+        if plan.concurrency_limit == 1:
+            # Define edges
+            # Start with the first analyst
+            workflow.add_edge(START, plan.specs[0].agent_node)
 
-        # Connect analysts in sequence
-        for i, spec in enumerate(plan.specs):
-            current_analyst = spec.agent_node
-            current_tools = spec.tool_node
-            current_clear = spec.clear_node
+            # Connect analysts in sequence
+            for i, spec in enumerate(plan.specs):
+                current_analyst = spec.agent_node
+                current_tools = spec.tool_node
+                current_clear = spec.clear_node
 
-            # Add conditional edges for current analyst
-            workflow.add_conditional_edges(
-                current_analyst,
-                getattr(self.conditional_logic, f"should_continue_{spec.key}"),
-                [current_tools, current_clear],
-            )
-            workflow.add_edge(current_tools, current_analyst)
+                # Add conditional edges for current analyst
+                workflow.add_conditional_edges(
+                    current_analyst,
+                    getattr(self.conditional_logic, f"should_continue_{spec.key}"),
+                    [current_tools, current_clear],
+                )
+                workflow.add_edge(current_tools, current_analyst)
 
-            # Connect to next analyst or to Bull Researcher if this is the last analyst
-            if i < len(plan.specs) - 1:
-                workflow.add_edge(current_clear, plan.specs[i + 1].agent_node)
-            else:
-                workflow.add_edge(current_clear, "Bull Researcher")
+                # Connect to next analyst or to Bull Researcher if this is the last analyst
+                if i < len(plan.specs) - 1:
+                    workflow.add_edge(current_clear, plan.specs[i + 1].agent_node)
+                else:
+                    workflow.add_edge(current_clear, "Bull Researcher")
 
         # Add remaining edges
         workflow.add_conditional_edges(

@@ -26,6 +26,8 @@ export async function renewAnalysis(job: AnalysisJob) {
 
 // Admission is serialized briefly, never across HTTP/model execution. This makes
 // user/provider counts consistent even when two workers claim different rows.
+// Shared endpoints honor capacities of active snapshots as well as the candidate.
+// These are job reservations, not a limiter for parallel requests inside Python.
 export async function claimAnalysis(settings: { systemConcurrency: number; userConcurrency: number }, providerLimit: number, recovering = false): Promise<AnalysisJob | null> {
   return db.transaction(async tx => {
     await tx.execute(sql`select pg_advisory_xact_lock(739421, 2)`);
@@ -49,7 +51,20 @@ export async function claimAnalysis(settings: { systemConcurrency: number; userC
             and rtrim(coalesce(r.quick_config_snapshot::jsonb->>'baseUrl', r.base_url), '/') is not distinct from rtrim(bucket.endpoint, '/'))
           or (coalesce(r.deep_config_snapshot::jsonb->>'provider', r.provider) is not distinct from bucket.provider
             and rtrim(coalesce(r.deep_config_snapshot::jsonb->>'baseUrl', r.base_url), '/') is not distinct from rtrim(bucket.endpoint, '/'))
-        )) >= greatest(1, least(${providerLimit}, bucket.capacity))
+        )) >= greatest(1, least(${providerLimit}, bucket.capacity,
+          coalesce((select min(existing.capacity) from analysis_jobs r
+            cross join lateral (values
+              (coalesce(r.quick_config_snapshot::jsonb->>'provider', r.provider),
+               coalesce(r.quick_config_snapshot::jsonb->>'baseUrl', r.base_url),
+               coalesce((r.quick_config_snapshot::jsonb #>> '{modelOptions,request_concurrency}')::int, ${providerLimit})),
+              (coalesce(r.deep_config_snapshot::jsonb->>'provider', r.provider),
+               coalesce(r.deep_config_snapshot::jsonb->>'baseUrl', r.base_url),
+               coalesce((r.deep_config_snapshot::jsonb #>> '{modelOptions,request_concurrency}')::int, ${providerLimit}))
+              ) existing(provider, endpoint, capacity)
+            where ${active}
+              and existing.provider is not distinct from bucket.provider
+              and rtrim(existing.endpoint, '/') is not distinct from rtrim(bucket.endpoint, '/')),
+            ${providerLimit})))
       )
     )`;
     const [job] = await tx.update(analysisJobs).set({ status: 'running', workerOwner: randomUUID(),

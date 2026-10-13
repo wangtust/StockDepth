@@ -58,14 +58,16 @@ def build_analyst_execution_plan(
     selected_analysts: Iterable[str],
     concurrency_limit: int = 1,
 ) -> AnalystExecutionPlan:
-    if concurrency_limit < 1:
-        raise ValueError("analyst concurrency limit must be >= 1")
+    if type(concurrency_limit) is not int or concurrency_limit not in (1, 2):
+        raise ValueError("analyst concurrency limit must be integer 1 or 2")
 
     specs: List[AnalystNodeSpec] = []
     for analyst_key in selected_analysts:
         spec = ANALYST_NODE_SPECS.get(analyst_key)
         if spec is None:
             raise ValueError(f"unknown analyst key: {analyst_key}")
+        if spec in specs:
+            raise ValueError(f"duplicate analyst key: {analyst_key}")
         specs.append(spec)
 
     if not specs:
@@ -138,3 +140,21 @@ def sync_analyst_tracker_from_chunk(
         if not active_found:
             tracker.mark_started(spec.key, started_at=current_time)
             active_found = True
+
+
+def effective_analyst_concurrency(config) -> int:
+    """Respect the Quick model snapshot's per-run request ceiling.
+
+    Missing snapshot capacity stays serial. This is not a host-wide in-flight
+    request semaphore: Worker job admission and provider RPM remain separate.
+    """
+    requested = config.get("analyst_concurrency_limit", 1)
+    if type(requested) is not int or requested not in (1, 2):
+        raise ValueError("analyst concurrency limit must be integer 1 or 2")
+    quick = (config.get("model_configs") or {}).get("quick")
+    if quick is None:
+        return requested
+    ceiling = (quick.get("options") or {}).get("request_concurrency", 1)
+    if type(ceiling) is not int or ceiling < 1:
+        raise ValueError("Quick model request_concurrency must be a positive integer")
+    return min(requested, ceiling)

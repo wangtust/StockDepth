@@ -42,6 +42,7 @@ from stockdepth.agents.utils.agent_utils import (
 from .checkpointer import checkpoint_step, clear_checkpoint, get_checkpointer, thread_id
 from .conditional_logic import ConditionalLogic
 from .setup import GraphSetup
+from .analyst_execution import effective_analyst_concurrency
 from .propagation import Propagator
 from .reflection import Reflector
 from .signal_processing import SignalProcessor
@@ -96,7 +97,7 @@ class StockDepthGraph:
             self.deep_thinking_llm,
             self.tool_nodes,
             self.conditional_logic,
-            analyst_concurrency_limit=self.config.get("analyst_concurrency_limit", 1),
+            analyst_concurrency_limit=effective_analyst_concurrency(self.config),
         )
 
         self.propagator = Propagator(

@@ -12,6 +12,7 @@ import {
 } from '@/lib/analysis/concurrency-settings';
 import { db } from '@/lib/db/drizzle';
 import {
+  adminAuditLogs,
   analysisPricing,
   analysisJobs,
   creditTransactions,
@@ -76,9 +77,9 @@ async function clearOtherDefaultModelConfigs(configId?: number) {
 
 export async function createModelConfig(formData: FormData) {
   const admin = await requirePlatformAdmin();
-  const data = modelConfigSchema
+  const parsed = modelConfigSchema
     .extend({ apiKey: z.string().trim().min(1).max(1000) })
-    .parse({
+    .safeParse({
       ...modelPrices(formData),
       name: formData.get('name'),
       provider: formData.get('provider'),
@@ -89,33 +90,45 @@ export async function createModelConfig(formData: FormData) {
       isActive: formData.get('isActive') === 'on'
     });
 
-  validateModelPrices(data);
+  if (!parsed.success) {
+    const issue = parsed.error.issues[0];
+    const labels: Record<string, string> = { name: '显示名称', provider: 'Provider', baseUrl: 'Base URL', apiKey: 'API Key', modelName: '模型名称', inputPrice: '输入价格', cachePrice: '缓存命中价格', outputPrice: '输出价格' };
+    const field = String(issue.path[0] || '表单');
+    const detail = field.endsWith('Price') ? '须为非负数字，最多六位小数；也可留空。' : field === 'provider' ? '请选择受支持的供应商。' : '请检查是否为空或超过长度限制。';
+    return { error: `${labels[field] || field}：${detail}` };
+  }
+  const data = parsed.data;
+  try { validateModelPrices(data); }
+  catch (error) { return { error: (error as Error).message }; }
   let storedData: typeof data;
   try { storedData = modelConfigWrite(data); }
   catch { return { error: '模型密钥加密配置不可用，配置未保存。' }; }
   const probe = await testModelConnection(data);
   if (!probe.success) return { error: probe.error || '模型测试失败，配置未保存。' };
-  const [created] = await db.insert(llmModelConfigs).values(storedData).returning();
-  if (data.isDefault) {
-    await clearOtherDefaultModelConfigs(created.id);
+  try {
+    await db.transaction(async (tx) => {
+      const [created] = await tx.insert(llmModelConfigs).values(storedData).returning();
+      if (data.isDefault) {
+        await tx.update(llmModelConfigs).set({ isDefault: false, updatedAt: new Date() })
+          .where(sql`${llmModelConfigs.id} <> ${created.id}`);
+      }
+      await tx.insert(adminAuditLogs).values({
+        adminUserId: admin.id,
+        action: 'llm_model_config.create',
+        targetType: 'llm_model_config',
+        targetId: created.id,
+        metadata: JSON.stringify({
+          name: created.name, provider: created.provider, baseUrl: created.baseUrl,
+          prices: Object.fromEntries(priceFields.map(field => [field, created[field]])),
+          modelName: created.modelName, isDefault: created.isDefault, isActive: created.isActive
+        })
+      });
+    });
+  } catch (error) {
+    const code = (error as { code?: string }).code || 'unknown';
+    console.error('Model config persistence failed; database error code:', code);
+    return { error: '模型测试通过，但数据库保存失败，请稍后重试或联系管理员检查数据库。' };
   }
-
-  await writeAdminAuditLog({
-    adminUserId: admin.id,
-    action: 'llm_model_config.create',
-    targetType: 'llm_model_config',
-    targetId: created.id,
-    metadata: {
-      name: created.name,
-      provider: created.provider,
-      baseUrl: created.baseUrl,
-      prices: Object.fromEntries(priceFields.map(field => [field, created[field]])),
-      modelName: created.modelName,
-      isDefault: created.isDefault,
-      isActive: created.isActive
-    }
-  });
-
   revalidateAdmin();
   return { success: 'Model config created.' };
 }

@@ -24,7 +24,7 @@ export function ModelCreateForm({ children }: { children: ReactNode }) {
         router.refresh();
       }
     } catch {
-      setError('创建失败，请检查必填字段和价格格式，或稍后重试。');
+      setError('创建请求未完成，请刷新页面后重试；若仍失败，请检查网络或登录状态。');
     } finally { setPending(false); }
   }
   return (

@@ -16,14 +16,14 @@ from langchain_core.rate_limiters import BaseRateLimiter
 
 
 class ProviderRateLimiter(BaseRateLimiter):
-    def __init__(self, provider: str, endpoint: str, rpm: float, directory=None):
+    def __init__(self, provider: str, endpoint: str, rpm: float, directory=None, bucket_id=None):
         if not math.isfinite(rpm) or rpm <= 0:
             raise ValueError("Provider RPM must be positive and finite")
         self.interval = 60 / rpm
         root = Path(directory or os.getenv("STOCKDEPTH_RATE_LIMIT_DIR") or
                     Path(tempfile.gettempdir()) / f"stockdepth-rate-limits-{os.getuid()}")
         root.mkdir(mode=0o700, parents=True, exist_ok=True)
-        key = hashlib.sha256(f"{provider}:{endpoint.rstrip('/')}".encode()).hexdigest()
+        key = hashlib.sha256(f"{provider}:{endpoint.rstrip('/')}:{bucket_id or ''}".encode()).hexdigest()
         self.path = root / key
 
     def acquire(self, *, blocking=True):
@@ -57,10 +57,10 @@ class ProviderRateLimiter(BaseRateLimiter):
         return True
 
 
-def provider_runtime_options(provider, endpoint=None):
+def provider_runtime_options(provider, endpoint=None, rpm_override=None, bucket_id=None):
     key = provider.upper().replace("-", "_")
-    rpm = float(os.getenv(f"STOCKDEPTH_PROVIDER_{key}_RPM", os.getenv("STOCKDEPTH_PROVIDER_RPM", "60")))
+    rpm = float(rpm_override or os.getenv(f"STOCKDEPTH_PROVIDER_{key}_RPM", os.getenv("STOCKDEPTH_PROVIDER_RPM", "60")))
     retries = int(os.getenv("STOCKDEPTH_MODEL_MAX_RETRIES", "2"))
     if not 0 <= retries <= 5:
         raise ValueError("Model retries must be between 0 and 5")
-    return {"rate_limiter": ProviderRateLimiter(provider, endpoint or "default", rpm), "max_retries": retries}
+    return {"rate_limiter": ProviderRateLimiter(provider, endpoint or "default", rpm, bucket_id=bucket_id), "max_retries": retries}

@@ -47,9 +47,10 @@ export async function GET(
         'title', r.title, 'updatedAt', r.updated_at at time zone 'UTC') order by r.id)
         from analysis_reports r where r.job_id = analysis_jobs.id and r.user_id = ${currentUser.id}), '[]'::json)`,
       calls: sql`coalesce((select json_agg(json_build_object('callId', c.call_id, 'agent', c.agent,
-        'model', c.model, 'status', c.status, 'startedAt', c.started_at at time zone 'UTC',
+        'model', c.model, 'role', c.role, 'provider', c.provider, 'modelConfigId', c.model_config_id,
+        'status', c.status, 'startedAt', c.started_at at time zone 'UTC',
         'endedAt', c.ended_at at time zone 'UTC', 'inputTokens', c.input_tokens,
-        'outputTokens', c.output_tokens, 'totalTokens', c.total_tokens,
+        'outputTokens', c.output_tokens, 'totalTokens', c.total_tokens, 'cachedInputTokens', c.cached_input_tokens,
         'usageAvailable', c.usage_available, 'isRetry', c.is_retry, 'requestKind', c.request_kind)
         order by c.started_at) from analysis_model_calls c where c.job_id = analysis_jobs.id), '[]'::json)`
     })

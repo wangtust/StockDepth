@@ -43,7 +43,7 @@ async function stopWorker() {
     const [user] = await test`insert into users(email,password_hash) values('capacity@test.invalid','unused') returning id`;
     // Verify that all migrations can initialize an entirely new database.
     const tables = await test`select tablename from pg_tables where schemaname='public'`;
-    if (tables.length !== 16) throw Error('Fresh initialization failed');
+    if (!['analysis_jobs','analysis_model_calls','paper_analysis_runs','paper_model_calls'].every(name => tables.some(table => table.tablename === name))) throw Error('Fresh initialization failed');
     for (const concurrency of [1, 2, 4]) {
       const queued = Date.now();
       const values = Array.from({ length: 8 }, (_, i) => ({ user_id: user.id,
@@ -53,7 +53,7 @@ async function stopWorker() {
       worker = spawn(process.env.STOCKDEPTH_RUNTIME_BIN + '/tsx', ['src/analysis-worker.ts'], {
         cwd: root + '/apps/workers', detached: true,
         env: { ...process.env, POSTGRES_URL: url.toString(), ANALYSIS_WORKER_MOCK: 'true',
-          ANALYSIS_WORKER_MAX_CONCURRENCY: String(concurrency), ANALYSIS_WORKER_POLL_MS: '200',
+          ANALYSIS_WORKER_MAX_CONCURRENCY: String(concurrency), ANALYSIS_WORKER_MOCK_DELAY_MS: '300', ANALYSIS_WORKER_POLL_MS: '200',
           PATH: process.env.STOCKDEPTH_RUNTIME_BIN + ':' + process.env.PATH },
         stdio: ['ignore', 'pipe', 'pipe']
       });
@@ -77,13 +77,14 @@ async function stopWorker() {
         percentile_cont(0.95) within group(order by extract(epoch from completed_at-started_at)) as p95_run_seconds
         from analysis_jobs where run_id like ${'capacity-' + concurrency + '-%'}`;
       if (result.completed !== 8) throw Error('Mock capacity timeout');
+      if (peakRunning > concurrency) throw Error('Worker exceeded local capacity');
       const sample = { concurrency, jobs: 8, ...result, elapsedMs: Date.now() - queued, peakRunning, maxRssKb };
       results.push(sample); console.log(JSON.stringify(sample));
       await stopWorker();
     }
     fs.mkdirSync(root + '/var/performance', { recursive: true });
     fs.writeFileSync(root + '/var/performance/worker-capacity.json', JSON.stringify({
-      mode: 'mock: queue and database persistence only; excludes LLM/Python runner load', freshDatabaseTables: 16, results
+      mode: 'mock: queue and database persistence only; excludes LLM/Python runner load', freshDatabaseTables: tables.length, results
     }, null, 2));
   } finally {
     await stopWorker();

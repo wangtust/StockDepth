@@ -1,8 +1,12 @@
 import '../env';
 import { decryptModelKey } from '@/lib/security/model-key';
-import { readFile, readdir } from 'node:fs/promises';
+import { isAnalysisRunner } from '@/lib/analysis/runner-process';
+import { basename } from 'node:path';
+import { RunPoller, reportValues, reportMatches } from './analysis-polling';
+import { ResourceMonitor } from './resources';
+import { claimAnalysis, ownedAnalysis, assertAnalysisOwner, renewAnalysis, LostOwnershipError, analysisLeaseMs } from './analysis-ownership';
 import { fetchWithBackoff } from './request';
-import { asc, eq, sql } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import { getAnalysisConcurrencySettings } from '@/lib/analysis/concurrency-settings';
 import { db } from '@/lib/db/drizzle';
 import { analysisJobs, analysisReports, analysisModelCalls, llmModelConfigs } from '@/lib/db/schema';
@@ -20,6 +24,7 @@ type StockDepthReport = {
 
 type ModelCall = {
   call_id: string; agent: string; model: string;
+  role?: string; model_config_id?: number | null; provider?: string | null;
   started_at: string; ended_at: string | null; status: string;
   input_tokens: number | null; output_tokens: number | null; total_tokens: number | null;
   cached_input_tokens?: number | null; raw_usage?: object | null;
@@ -29,6 +34,7 @@ type ModelCall = {
 
 type StockDepthRun = {
   status: string;
+  report_version?: string;
   reports?: StockDepthReport[];
   runner_log?: string;
   usage?: { calls: ModelCall[]; history_complete: boolean };
@@ -71,6 +77,7 @@ async function readRuntimeConfig() {
 
   return {
     workerConcurrency: Math.min(settings.systemConcurrency, localConcurrencyCap),
+    systemConcurrency: settings.systemConcurrency,
     userConcurrency: settings.userConcurrency
   };
 }
@@ -83,21 +90,8 @@ async function loadWorkerRuntimeConfig() {
   return cachedRuntimeConfig;
 }
 
-async function memorySnapshot() {
-  const memory = await readFile('/proc/meminfo', 'utf8');
-  const availableMb = Number(memory.match(/MemAvailable:\s+(\d+)/)?.[1] || 0) / 1024;
-  let runnerRssMb = 0;
-  for (const pid of (await readdir('/proc')).filter(value => /^\d+$/.test(value))) {
-    try {
-      const command = await readFile(`/proc/${pid}/cmdline`, 'utf8');
-      if (!command.split('\0').some(arg => arg.endsWith('/analysis_runner.py'))) continue;
-      const status = await readFile(`/proc/${pid}/status`, 'utf8');
-      runnerRssMb += Number(status.match(/VmRSS:\s+(\d+)/)?.[1] || 0) / 1024;
-    } catch { /* Process exited during sampling. */ }
-  }
-  return { availableMb: Math.round(availableMb), runnerRssMb: Math.round(runnerRssMb),
-    workerRssMb: Math.round(process.memoryUsage().rss / 1024 / 1024) };
-}
+const resourceMonitor = new ResourceMonitor();
+const memorySnapshot = () => resourceMonitor.snapshot();
 
 function authHeader(): Record<string, string> {
   if (!tradingAgentsPassword) {
@@ -113,25 +107,13 @@ function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function pidMatchesRun(pid: number, runId: string) {
-  try {
-    const cmdline = await readFile(`/proc/${pid}/cmdline`, 'utf8');
-    const args = cmdline.split('\0').filter(Boolean);
-    return (
-      args.some((arg) => arg.endsWith('analysis_runner.py')) &&
-      args.includes('--run-id') &&
-      args.includes(runId)
-    );
-  } catch {
-    return false;
-  }
-}
+const pidMatchesRun = isAnalysisRunner;
 
 async function terminateExternalRun(job: ClaimedJob) {
   const [freshJob] = await db
     .select()
     .from(analysisJobs)
-    .where(eq(analysisJobs.id, job.id))
+    .where(ownedAnalysis(job))
     .limit(1);
   const pid = freshJob?.externalPid;
   const runId = runIdFor(job);
@@ -144,8 +126,7 @@ async function terminateExternalRun(job: ClaimedJob) {
     process.kill(pid, 'SIGTERM');
     await sleep(5000);
     try {
-      process.kill(pid, 0);
-      process.kill(pid, 'SIGKILL');
+      if (await pidMatchesRun(pid, runId)) process.kill(pid, 'SIGKILL');
     } catch {
       // Process exited after SIGTERM.
     }
@@ -174,55 +155,6 @@ function runIdFor(job: ClaimedJob) {
   return job.runId || `legacy-job-${job.id}`;
 }
 
-async function claimNextJob(userConcurrency: number): Promise<ClaimedJob | null> {
-  const userConcurrencyCondition =
-    userConcurrency <= 0
-      ? sql`true`
-      : sql`(
-          select count(*)
-          from analysis_jobs running_jobs
-          where running_jobs.user_id = ${analysisJobs.userId}
-            and running_jobs.status = 'running'
-        ) < ${userConcurrency}`;
-
-  const [claimed] = await db
-    .update(analysisJobs)
-    .set({
-      status: 'running',
-      startedAt: sql`coalesce(${analysisJobs.startedAt}, now() AT TIME ZONE 'UTC')`,
-      updatedAt: new Date()
-    })
-    .where(
-      eq(
-        analysisJobs.id,
-        sql<number>`(
-          select ${analysisJobs.id}
-          from ${analysisJobs}
-          where ${analysisJobs.status} = 'queued'
-            and ${userConcurrencyCondition}
-            and (select count(*) from analysis_jobs provider_jobs
-              where provider_jobs.status = 'running'
-                and provider_jobs.provider is not distinct from analysis_jobs.provider
-                and provider_jobs.base_url is not distinct from analysis_jobs.base_url) < ${providerConcurrency}
-          order by ${analysisJobs.createdAt} asc
-          for update skip locked
-          limit 1
-        )`
-      )
-    )
-    .returning();
-
-  return claimed ?? null;
-}
-
-async function recoverRunningJobs(): Promise<ClaimedJob[]> {
-  return db
-    .select()
-    .from(analysisJobs)
-    .where(eq(analysisJobs.status, 'running'))
-    .orderBy(asc(analysisJobs.startedAt), asc(analysisJobs.createdAt));
-}
-
 function shouldRestartRecoveredJob(job: ClaimedJob) {
   return (
     !job.externalPid &&
@@ -231,18 +163,44 @@ function shouldRestartRecoveredJob(job: ClaimedJob) {
 }
 
 async function startStockDepth(job: ClaimedJob) {
-  const modelConfig = job.modelConfigId
+  async function configFor(role: 'quick' | 'deep') {
+    const snapshot = role === 'quick' ? job.quickConfigSnapshot : job.deepConfigSnapshot;
+    if (snapshot) return JSON.parse(snapshot) as typeof llmModelConfigs.$inferSelect;
+    const configId = role === 'quick' ? (job.quickModelConfigId || job.modelConfigId) : (job.deepModelConfigId || job.modelConfigId);
+    return configId
     ? (
         await db
           .select()
           .from(llmModelConfigs)
-          .where(eq(llmModelConfigs.id, job.modelConfigId))
+          .where(eq(llmModelConfigs.id, configId))
           .limit(1)
       )[0]
     : null;
+  }
+  const [quickConfig, deepConfig] = await Promise.all([configFor('quick'), configFor('deep')]);
 
-  if (!modelConfig || !modelConfig.isActive || modelConfig.retiredAt) {
-    throw new Error('任务没有可用的数据库模型配置，请管理员配置模型后重新提交分析。');
+  if (!quickConfig || !deepConfig) {
+    throw new Error('任务缺少模型配置快照，无法安全恢复；请重新提交分析。');
+  }
+  if (!job.quickConfigSnapshot || !job.deepConfigSnapshot) {
+    const changedLegacyConfig = [quickConfig, deepConfig].some(config =>
+      !config.isActive || !!config.retiredAt || config.updatedAt > job.createdAt ||
+      config.provider !== job.provider || config.baseUrl !== job.baseUrl ||
+      (config.id === quickConfig.id && job.quickModel && config.modelName !== job.quickModel) ||
+      (config.id === deepConfig.id && job.deepModel && config.modelName !== job.deepModel));
+    if (changedLegacyConfig) {
+      throw new Error('旧任务的模型配置在排队后已变更或停用，系统为避免切换供应商而停止恢复；请重新提交分析。');
+    }
+  }
+  function payloadConfig(config: typeof quickConfig, role: 'quick' | 'deep') {
+    if (!config) throw new Error(`${role} model config unavailable`);
+    return { id: config.id, provider: config.provider, base_url: config.baseUrl || undefined,
+      model: role === 'quick' ? job.quickModel || config.modelName : job.deepModel || config.modelName,
+      options: config.modelOptions || {},
+      api_key: decryptModelKey(config.apiKey), prices: config.inputPrice == null ? null : {
+        currency: 'CNY', unit: 'million_tokens', input: config.inputPrice,
+        cache: config.cachePrice, output: config.outputPrice,
+      } };
   }
 
   // Start is sent once; transient read requests use bounded backoff below.
@@ -254,20 +212,14 @@ async function startStockDepth(job: ClaimedJob) {
     },
     body: JSON.stringify({
       run_id: runIdFor(job),
+      job_id: job.id,
       ticker: job.ticker,
       date: job.tradeDate,
       realtime_data: job.realtimeData,
       language: job.language,
       depth: job.depth,
       analysts: parseAnalysts(job.analysts),
-      provider: modelConfig.provider,
-      base_url: modelConfig.baseUrl || undefined,
-      quick_model: job.quickModel || modelConfig.modelName,
-      deep_model: job.deepModel || modelConfig.modelName,
-      model_prices: {
-        [modelConfig.modelName]: modelConfig.inputPrice == null ? null : { currency: 'CNY', unit: 'million_tokens', input: modelConfig.inputPrice, cache: modelConfig.cachePrice, output: modelConfig.outputPrice },
-      },
-      api_key: decryptModelKey(modelConfig.apiKey)
+      models: { quick: payloadConfig(quickConfig, 'quick'), deep: payloadConfig(deepConfig, 'deep') },
     })
   });
 
@@ -275,6 +227,7 @@ async function startStockDepth(job: ClaimedJob) {
   if (!response.ok || payload.error) {
     throw new Error(payload.error || `StockDepth start failed: ${response.status}`);
   }
+  if (payload.pid) await resourceMonitor.track(payload.pid);
 
   await db
     .update(analysisJobs)
@@ -283,53 +236,41 @@ async function startStockDepth(job: ClaimedJob) {
       externalPid: payload.pid || null,
       updatedAt: new Date()
     })
-    .where(eq(analysisJobs.id, job.id));
+    .where(ownedAnalysis(job));
 }
 
-async function fetchRun(job: ClaimedJob): Promise<StockDepthRun> {
-  const query = new URLSearchParams({
-    run_id: runIdFor(job),
-    ticker: job.ticker,
-    date: job.tradeDate
-  });
-  const response = await fetchWithBackoff(`${tradingAgentsUrl}/api/run?${query}`, {
-    headers: authHeader()
-  });
-  const payload = await response.json();
-  if (!response.ok || payload.error) {
-    throw new Error(payload.error || `StockDepth run fetch failed: ${response.status}`);
-  }
-  return payload;
-}
-
-async function saveReports(job: ClaimedJob, reports: StockDepthReport[]) {
+export async function saveReports(job: ClaimedJob, reports: StockDepthReport[]) {
   await db.transaction(async (tx) => {
-    await tx
-      .delete(analysisReports)
-      .where(eq(analysisReports.jobId, job.id));
-
-    if (reports.length) {
-      await tx.insert(analysisReports).values(
-        reports.map((report) => ({
-          jobId: job.id,
-          userId: job.userId,
-          reportKey: report.key,
-          title: report.title,
-          relativePath: report.relative_path || null,
-          content: report.content || ''
-        }))
-      );
+    await assertAnalysisOwner(tx, job);
+    const existing = await tx.select().from(analysisReports).where(eq(analysisReports.jobId, job.id));
+    const remaining = new Map(reports.map(report => [report.key, report]));
+    for (const row of existing) {
+      const report = remaining.get(row.reportKey);
+      if (!report) {
+        await tx.delete(analysisReports).where(eq(analysisReports.id, row.id));
+        continue;
+      }
+      remaining.delete(row.reportKey);
+      if (!reportMatches(row, report)) {
+        await tx.update(analysisReports).set({ ...reportValues(report), updatedAt: new Date() })
+          .where(eq(analysisReports.id, row.id));
+      }
     }
+    if (remaining.size) await tx.insert(analysisReports).values([...remaining.values()].map(report => ({
+      jobId: job.id, userId: job.userId, ...reportValues(report)
+    })));
   });
 }
 
-async function syncUsage(job: ClaimedJob, run: StockDepthRun, previousCalls: Map<string, string>) {
+export async function syncUsage(job: ClaimedJob, run: StockDepthRun, previousCalls: Map<string, string>) {
   if (!run.usage) return;
   await db.transaction(async (tx) => {
+    await assertAnalysisOwner(tx, job);
     for (const call of run.usage!.calls) {
       if (previousCalls.get(call.call_id) === JSON.stringify(call)) continue;
       const values = {
         jobId: job.id, callId: call.call_id, agent: call.agent, model: call.model,
+        role: call.role || 'legacy', modelConfigId: call.model_config_id ?? null, provider: call.provider ?? null,
         startedAt: new Date(call.started_at), endedAt: call.ended_at ? new Date(call.ended_at) : null,
         status: call.status, inputTokens: call.input_tokens, outputTokens: call.output_tokens,
         totalTokens: call.total_tokens, usageAvailable: call.usage_available,
@@ -352,7 +293,7 @@ async function syncUsage(job: ClaimedJob, run: StockDepthRun, previousCalls: Map
     await tx.update(analysisJobs).set({
       inputTokens: Number(totals.input), outputTokens: Number(totals.output), totalTokens: Number(totals.total),
       tokenUsageComplete: totals.complete && run.usage!.history_complete,
-    }).where(eq(analysisJobs.id, job.id));
+    }).where(ownedAnalysis(job));
   });
   for (const call of run.usage.calls) previousCalls.set(call.call_id, JSON.stringify(call));
 }
@@ -367,6 +308,8 @@ function progressSignature(run: StockDepthRun) {
   return JSON.stringify({
     status: run.status,
     calls: run.usage?.calls,
+    historyComplete: run.usage?.history_complete,
+    reportVersion: run.report_version,
     reports: reports.map((report) => ({
       key: report.key,
       relativePath: report.relative_path,
@@ -383,9 +326,10 @@ async function finishJob(job: ClaimedJob, status: 'complete' | 'failed', errorMe
       status,
       errorMessage: errorMessage || null,
       completedAt: new Date(),
+      workerOwner: null, workerLeaseUntil: null,
       updatedAt: new Date()
     })
-    .where(eq(analysisJobs.id, job.id));
+    .where(ownedAnalysis(job));
 }
 
 function mockReports(job: ClaimedJob): StockDepthReport[] {
@@ -413,6 +357,8 @@ function mockReports(job: ClaimedJob): StockDepthReport[] {
 }
 
 async function processMockJob(job: ClaimedJob) {
+  console.log(JSON.stringify({ event: 'mock_execution_start', jobId: job.id }));
+  await sleep(positiveIntegerFromEnv('ANALYSIS_WORKER_MOCK_DELAY_MS', 1));
   console.log(`Mock-completing analysis job #${job.id}: ${job.ticker} ${job.tradeDate}`);
   await db
     .update(analysisJobs)
@@ -422,13 +368,14 @@ async function processMockJob(job: ClaimedJob) {
       externalPid: null,
       updatedAt: new Date()
     })
-    .where(eq(analysisJobs.id, job.id));
+    .where(ownedAnalysis(job));
   await saveReports(job, mockReports(job));
   await finishJob(job, 'complete');
   console.log(`Mock completed analysis job #${job.id}`);
+  console.log(JSON.stringify({ event: 'mock_execution_end', jobId: job.id }));
 }
 
-async function processJob(job: ClaimedJob, options: { startRun?: boolean } = {}) {
+export async function processJob(job: ClaimedJob, options: { startRun?: boolean } = {}) {
   const startRun = options.startRun ?? true;
   console.log(
     `${startRun ? 'Starting' : 'Monitoring'} analysis job #${job.id}: ${job.ticker} ${job.tradeDate}`
@@ -442,17 +389,27 @@ async function processJob(job: ClaimedJob, options: { startRun?: boolean } = {})
     await startStockDepth(job);
   }
 
-  const startedAt = Date.now();
+  const startedAt = job.startedAt?.getTime() || Date.now();
   let lastProgressAt = startedAt;
   let lastSignature = '';
   let lastReportsSignature = '';
   let lastUsageSignature = '';
   const previousCalls = new Map<string, string>();
+  const query = new URLSearchParams({ run_id: runIdFor(job), ticker: job.ticker, date: job.tradeDate });
+  const poller = new RunPoller<NonNullable<StockDepthRun['usage']>>(`${tradingAgentsUrl}/api/run?${query}`, authHeader());
 
   while (true) {
-    const run = await fetchRun(job);
+    await renewAnalysis(job);
+    const run = await poller.poll();
+    if (!startRun && ['partial', 'empty'].includes(run.status) &&
+        (!job.externalPid || !(await pidMatchesRun(job.externalPid, runIdFor(job))))) {
+      await db.update(analysisJobs).set({ externalPid: null, externalStatus: 'recovery_waiting',
+        workerOwner: null, workerLeaseUntil: null, updatedAt: new Date() }).where(ownedAnalysis(job));
+      return; // Re-admit checkpoint restart through all capacity gates.
+    }
+    if (!startRun && job.externalPid && await pidMatchesRun(job.externalPid, runIdFor(job))) run.status = 'running';
     const reports = run.reports || [];
-    const reportsSignature = JSON.stringify(reports);
+    const reportsSignature = run.report_version ?? JSON.stringify(reports);
     if (reportsSignature !== lastReportsSignature) {
       await saveReports(job, reports);
       lastReportsSignature = reportsSignature;
@@ -470,20 +427,20 @@ async function processJob(job: ClaimedJob, options: { startRun?: boolean } = {})
       await db.update(analysisJobs).set({
         externalStatus: run.status,
         updatedAt: new Date()
-      }).where(eq(analysisJobs.id, job.id));
+      }).where(ownedAnalysis(job));
     }
 
     if (
-      run.status === 'complete' ||
-      (!['running', 'started', 'already-running'].includes(run.status) &&
-        hasFinalDecisionReport(reports))
+      run.reportsConsistent && (run.status === 'complete' ||
+      (run.status !== 'failed' && !['running', 'started', 'already-running'].includes(run.status) &&
+        hasFinalDecisionReport(reports)))
     ) {
       await finishJob(job, 'complete');
       console.log(`Completed analysis job #${job.id}`);
       return;
     }
 
-    if (run.status === 'failed') {
+    if (run.status === 'failed' && run.reportsConsistent) {
       await finishJob(job, 'failed', run.runner_log?.slice(-4000) || 'StockDepth failed');
       console.log(`Failed analysis job #${job.id}`);
       return;
@@ -501,7 +458,7 @@ async function processJob(job: ClaimedJob, options: { startRun?: boolean } = {})
           externalPid: null,
           updatedAt: new Date()
         })
-        .where(eq(analysisJobs.id, job.id));
+        .where(ownedAnalysis(job));
       throw new Error(
         `Analysis job hard timed out after ${Math.round(runHardTimeoutMs / 1000)} seconds`
       );
@@ -516,7 +473,7 @@ async function processJob(job: ClaimedJob, options: { startRun?: boolean } = {})
           externalPid: null,
           updatedAt: new Date()
         })
-        .where(eq(analysisJobs.id, job.id));
+        .where(ownedAnalysis(job));
       throw new Error(
         `Analysis job timed out after ${Math.round(elapsedMs / 1000)} seconds ` +
           `with no progress for ${Math.round(stalledMs / 1000)} seconds`
@@ -528,12 +485,27 @@ async function processJob(job: ClaimedJob, options: { startRun?: boolean } = {})
 }
 
 async function runClaimedJob(job: ClaimedJob, options: { startRun?: boolean } = {}) {
+  let lost = false, renewing = false;
+  const heartbeat = setInterval(async () => {
+    if (renewing) return;
+    renewing = true;
+    try { await renewAnalysis(job); } catch { lost = true; }
+    finally { renewing = false; }
+  }, Math.floor(analysisLeaseMs / 3));
   try {
+    if (lost) throw new LostOwnershipError();
     await processJob(job, options);
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    await finishJob(job, 'failed', message);
-    console.error(`Analysis job #${job.id} failed: ${message}`);
+    if (lost || error instanceof LostOwnershipError) {
+      console.log(`Stopped monitoring analysis job #${job.id}: ownership changed`);
+    } else {
+      const message = error instanceof Error ? error.message : String(error);
+      await finishJob(job, 'failed', message);
+      console.error(`Analysis job #${job.id} failed: ${message}`);
+    }
+  } finally {
+    clearInterval(heartbeat);
+    await db.update(analysisJobs).set({ workerOwner: null, workerLeaseUntil: null }).where(ownedAnalysis(job));
   }
 }
 
@@ -546,18 +518,11 @@ async function main() {
   let lastMetricsAt = 0;
 
   function trackJob(job: ClaimedJob, options: { startRun?: boolean } = {}) {
+    if (job.externalPid) void resourceMonitor.track(job.externalPid);
     const task = runClaimedJob(job, options).finally(() => {
       activeJobs.delete(task);
     });
     activeJobs.add(task);
-  }
-
-  const recoveredJobs = await recoverRunningJobs();
-  if (recoveredJobs.length) {
-    console.log(`Recovering ${recoveredJobs.length} running analysis job(s)`);
-    for (const job of recoveredJobs) {
-      trackJob(job, { startRun: shouldRestartRecoveredJob(job) });
-    }
   }
 
   while (true) {
@@ -577,12 +542,13 @@ async function main() {
     }
 
     while (activeJobs.size < currentConfig.workerConcurrency) {
-      const job = await claimNextJob(currentConfig.userConcurrency);
+      const recovered = await claimAnalysis(currentConfig, providerConcurrency, true);
+      const job = recovered || await claimAnalysis(currentConfig, providerConcurrency);
       if (!job) {
         break;
       }
 
-      trackJob(job);
+      trackJob(job, { startRun: recovered ? shouldRestartRecoveredJob(job) : true });
     }
 
     if (activeJobs.size >= currentConfig.workerConcurrency) {
@@ -594,7 +560,7 @@ async function main() {
   }
 }
 
-main().catch((error) => {
-  console.error(error);
+if (basename(process.argv[1] || '') === 'analysis-worker.ts') main().catch((error) => {
+  console.error('Analysis worker stopped:', error instanceof Error ? error.name : 'Error');
   process.exit(1);
 });

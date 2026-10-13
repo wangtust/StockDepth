@@ -9,10 +9,11 @@ from langchain_core.callbacks import BaseCallbackHandler
 
 
 class UsageRecorder(BaseCallbackHandler):
-    def __init__(self, path: Path):
+    def __init__(self, path: Path, job_id=None):
         self.path = path
         self.lock = threading.RLock()
         self.prices = json.loads(os.environ.get("STOCKDEPTH_MODEL_PRICES", "{}"))
+        self.job_id = job_id
         previous = read_usage(path) if path.exists() else {}
         self.calls = previous.get('calls', [])
         self.history_complete = previous.get('history_complete', not (path.parent / 'reports/progress.json').exists())
@@ -29,11 +30,20 @@ class UsageRecorder(BaseCallbackHandler):
 
     def on_chat_model_start(self, serialized, messages, *, run_id, metadata=None, **kwargs):
         with self.lock:
+            if any(call['call_id'] == str(run_id) for call in self.calls):
+                return  # Constructor and inherited callbacks can share a handler.
             params = kwargs.get('invocation_params') or {}
+            metadata = metadata or {}
+            model = params.get('model') or params.get('model_name') or metadata.get('model_name') or metadata.get('ls_model_name', 'unknown')
+            prices = metadata.get('pricing_snapshot') or self.prices.get(model)
             self.calls.append({
                 'call_id': str(run_id),
-                'agent': (metadata or {}).get('langgraph_node', 'Model'),
-                'model': params.get('model') or params.get('model_name') or (metadata or {}).get('ls_model_name', 'unknown'),
+                'job_id': self.job_id,
+                'agent': metadata.get('langgraph_node', 'Model'),
+                'role': metadata.get('model_role', 'legacy'),
+                'model_config_id': metadata.get('model_config_id'),
+                'provider': metadata.get('model_provider'),
+                'model': model,
                 'started_at': dt.datetime.now(dt.timezone.utc).isoformat(),
                 'ended_at': None, 'status': 'running',
                 'input_tokens': None, 'output_tokens': None, 'total_tokens': None,
@@ -42,7 +52,7 @@ class UsageRecorder(BaseCallbackHandler):
                 'request_kind': (metadata or {}).get('request_kind', 'standard'),
             })
             call = self.calls[-1]
-            call.update(pricing_snapshot=self.prices.get(call['model']), cached_input_tokens=None, raw_usage=None, estimated_cost=None, cost_complete=False)
+            call.update(pricing_snapshot=prices, cached_input_tokens=None, raw_usage=None, estimated_cost=None, cost_complete=False)
             self._save()
 
     def _finish(self, run_id, status, usage=None, raw_usage=None):
@@ -75,16 +85,27 @@ class UsageRecorder(BaseCallbackHandler):
         for group in response.generations:
             for generation in group:
                 message = getattr(generation, 'message', None)
-                raw_usage = (getattr(message, 'response_metadata', {}) or {}).get('token_usage') or (getattr(message, 'response_metadata', {}) or {}).get('usage')
+                metadata_usage = getattr(message, 'response_metadata', {}) or {}
+                raw_usage = (metadata_usage.get('token_usage') or metadata_usage.get('usage') or
+                             metadata_usage.get('usage_metadata') or metadata_usage.get('usageMetadata'))
                 usage = getattr(message, 'usage_metadata', None)
                 if not usage:
-                    usage = (getattr(message, 'response_metadata', {}) or {}).get('token_usage')
+                    usage = (metadata_usage.get('token_usage') or metadata_usage.get('usage') or
+                             metadata_usage.get('usage_metadata') or metadata_usage.get('usageMetadata'))
                 if usage:
                     break
             if usage:
                 break
-        usage = usage or (response.llm_output or {}).get('token_usage') or (response.llm_output or {}).get('usage')
-        raw_usage = raw_usage or (response.llm_output or {}).get('token_usage') or (response.llm_output or {}).get('usage')
+        usage = usage or (response.llm_output or {}).get('token_usage') or (response.llm_output or {}).get('usage') or (response.llm_output or {}).get('usage_metadata') or (response.llm_output or {}).get('usageMetadata')
+        raw_usage = raw_usage or (response.llm_output or {}).get('token_usage') or (response.llm_output or {}).get('usage') or (response.llm_output or {}).get('usage_metadata') or (response.llm_output or {}).get('usageMetadata')
+        if raw_usage and 'input_tokens' in raw_usage and any(k in raw_usage for k in ('cache_read_input_tokens', 'cache_creation_input_tokens')):
+            usage = {**(usage or {}),
+                     'input_tokens': raw_usage.get('input_tokens', 0) + raw_usage.get('cache_read_input_tokens', 0) + raw_usage.get('cache_creation_input_tokens', 0),
+                     'output_tokens': raw_usage.get('output_tokens', (usage or {}).get('output_tokens'))}
+        if usage and 'input_tokens' not in usage and 'prompt_tokens' not in usage:
+            usage = {**usage, 'input_tokens': usage.get('promptTokenCount'),
+                     'output_tokens': usage.get('candidatesTokenCount'),
+                     'cached_tokens': usage.get('cachedContentTokenCount')}
         self._finish(run_id, 'complete', usage, raw_usage)
 
     def on_llm_error(self, error, *, run_id, **kwargs):

@@ -6,6 +6,9 @@ import hmac
 import json
 import os
 import subprocess
+import signal
+import threading
+from stockdepth.api.processes import RunnerRegistry
 import sys
 import time
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
@@ -21,10 +24,10 @@ from stockdepth.providers.model_catalog import MODEL_OPTIONS
 
 ROOT = Path(__file__).resolve().parents[2]
 WEB_DIR = Path(__file__).resolve().parent
-LOGS_DIR = Path.home() / ".stockdepth" / "logs"
+LOGS_DIR = Path(os.environ.get("STOCKDEPTH_RESULTS_DIR", str(Path.home() / ".stockdepth" / "logs")))
 DEFAULT_DATE = time.strftime("%Y-%m-%d")
 
-JOBS: dict[str, subprocess.Popen] = {}
+JOBS = RunnerRegistry()
 
 load_dotenv(ROOT.parents[1] / ".env", override=False)
 WEB_USERNAME = os.environ.get("STOCKDEPTH_WEB_USERNAME", "admin")
@@ -192,35 +195,45 @@ def report_dir_for(run_dir: Path) -> Path:
     return run_dir / "reports"
 
 
-def read_report_files(run_dir: Path) -> list[dict]:
+def read_report_files(run_dir: Path, include_content: bool = True) -> list[dict]:
     reports = []
     report_dir = report_dir_for(run_dir)
     for key, title, candidates in REPORT_ORDER:
         for rel in candidates:
             path = report_dir / rel
             if path.exists():
+                stat = path.stat()
                 reports.append(
                     {
                         "key": key,
                         "title": title,
-                        "path": str(path),
                         "relative_path": str(path.relative_to(report_dir)),
-                        "mtime": path.stat().st_mtime,
-                        "size": path.stat().st_size,
-                        "content": path.read_text(encoding="utf-8", errors="replace"),
+                        "mtime": stat.st_mtime,
+                        "size": stat.st_size,
+                        "version": f"{rel}:{stat.st_mtime_ns}:{stat.st_size}",
+                        **({"path": str(path), "content": path.read_text(encoding="utf-8", errors="replace")} if include_content else {}),
                     }
                 )
                 break
     return reports
 
 
+def report_version(reports: list[dict]) -> str:
+    # Metadata only: no report body reads or hashing on each poll.
+    import hashlib
+    return hashlib.sha256(json.dumps([(r['key'], r['version']) for r in reports], separators=(',', ':')).encode()).hexdigest()
+
+
 def run_status(run_dir: Path, ticker: str, date: str, run_id: str | None = None) -> str:
-    job = JOBS.get(job_key(ticker, date, run_id))
-    if job and job.poll() is None:
+    state, code = JOBS.status(job_key(ticker, date, run_id), run_dir / "runner_exit.json")
+    if state == "running":
         return "running"
+    if code is not None and code != 0:
+        return "failed"
     runner_log = tail_file(run_dir / "web_runner.log", max_bytes=20000)
     failure_markers = (
         "Traceback (most recent call last)",
+        "Analysis failed:",
         "Error code: 402",
         "Error code: 429",
         "RateLimitError",
@@ -294,7 +307,7 @@ class Handler(SimpleHTTPRequestHandler):
             json_response(self, {"runs": list_runs()})
             return
 
-        if parsed.path == "/api/run":
+        if parsed.path in ("/api/run", "/api/run/status"):
             query = parse_qs(parsed.query)
             run_id = (query.get("run_id") or [""])[0].strip()
             ticker = (query.get("ticker") or [""])[0]
@@ -308,18 +321,21 @@ class Handler(SimpleHTTPRequestHandler):
             except ValueError as exc:
                 json_response(self, {"error": str(exc)}, 400)
                 return
-            reports = read_report_files(run_dir)
+            lightweight = parsed.path == "/api/run/status"
+            reports = read_report_files(run_dir, include_content=not lightweight)
+            status = run_status(run_dir, ticker, date, run_id or None)
             json_response(
                 self,
                 {
                     "ticker": ticker,
                     "date": date,
                     "run_id": run_id or None,
-                    "status": run_status(run_dir, ticker, date, run_id or None),
+                    "status": status,
                     "updated_at": max([r["mtime"] for r in reports] + [0]),
                     "reports": reports,
-                    "message_log": tail_file(run_dir / "message_tool.log"),
-                    "runner_log": tail_file(run_dir / "web_runner.log"),
+                    "report_version": report_version(reports),
+                    **({"message_log": tail_file(run_dir / "message_tool.log"),
+                        "runner_log": tail_file(run_dir / "web_runner.log")} if not lightweight else ({"runner_log": tail_file(run_dir / "web_runner.log", max_bytes=16000)[-4000:]} if status == "failed" else {})),
                     "usage": read_usage(run_dir / "usage.json"),
                 },
             )
@@ -347,15 +363,22 @@ class Handler(SimpleHTTPRequestHandler):
             language = str(payload.get("language") or "Chinese")
             depth = int(payload.get("depth") or 1)
             realtime_data = bool(payload.get("realtime_data"))
-            provider = str(payload.get("provider") or "").strip()
-            base_url = str(payload.get("base_url") or "").strip()
-            quick_model = str(payload.get("quick_model") or "").strip()
-            deep_model = str(payload.get("deep_model") or "").strip()
-            api_key = str(payload.get("api_key") or "").strip()
-            if not provider or not quick_model or not deep_model:
-                raise ValueError("分析需要数据库中的 Provider、Quick Model 和 Deep Model 配置")
-            if get_api_key_env(provider) and not api_key:
-                raise ValueError("所选数据库模型缺少 API Key")
+            models = payload.get("models")
+            if models:
+                if not isinstance(models, dict):
+                    raise ValueError("models 必须包含 quick 和 deep 两个配置")
+                for role in ("quick", "deep"):
+                    config = models.get(role) or {}
+                    if not all(config.get(key) for key in ("id", "provider", "model")):
+                        raise ValueError(f"{role} 模型配置不完整")
+                    if get_api_key_env(str(config["provider"])) and not config.get("api_key"):
+                        raise ValueError(f"{role} 模型缺少 API Key")
+            else:
+                provider = str(payload.get("provider") or "").strip()
+                quick_model = str(payload.get("quick_model") or "").strip()
+                deep_model = str(payload.get("deep_model") or "").strip()
+                if not provider or not quick_model or not deep_model:
+                    raise ValueError("分析需要数据库中的 Provider、Quick Model 和 Deep Model 配置")
             analysts = payload.get("analysts") or ["market", "news", "fundamentals"]
             if not ticker:
                 raise ValueError("ticker is required")
@@ -367,19 +390,6 @@ class Handler(SimpleHTTPRequestHandler):
                 run_id = safe_run_id_component(run_id)
 
             key = job_key(ticker, date, run_id or None)
-            existing = JOBS.get(key)
-            if existing and existing.poll() is None:
-                json_response(
-                    self,
-                    {
-                        "ticker": ticker,
-                        "date": date,
-                        "run_id": run_id or None,
-                        "status": "already-running",
-                    },
-                )
-                return
-
             run_dir = safe_run_dir(ticker, date, run_id or None)
             run_dir.mkdir(parents=True, exist_ok=True)
             log_file = run_dir / "web_runner.log"
@@ -398,14 +408,11 @@ class Handler(SimpleHTTPRequestHandler):
                 ",".join(str(a) for a in analysts),
                 "--checkpoint",
             ]
-            if provider:
-                cmd.extend(["--provider", provider])
-            if base_url:
-                cmd.extend(["--base-url", base_url])
-            if quick_model:
-                cmd.extend(["--quick-model", quick_model])
-            if deep_model:
-                cmd.extend(["--deep-model", deep_model])
+            if not models:
+                if provider: cmd.extend(["--provider", provider])
+                if payload.get("base_url"): cmd.extend(["--base-url", str(payload["base_url"])])
+                if quick_model: cmd.extend(["--quick-model", quick_model])
+                if deep_model: cmd.extend(["--deep-model", deep_model])
             if run_id:
                 cmd.extend(["--run-id", run_id])
             if realtime_data:
@@ -413,12 +420,20 @@ class Handler(SimpleHTTPRequestHandler):
             env = os.environ.copy()
             env.setdefault("PYTHONUNBUFFERED", "1")
             env["STOCKDEPTH_MODEL_PRICES"] = json.dumps(payload.get("model_prices") or {})
-            api_key_env = get_api_key_env(provider) if provider else None
-            if api_key and api_key_env:
-                env[api_key_env] = api_key
-            with log_file.open("wb") as out:
-                process = subprocess.Popen(cmd, cwd=str(ROOT), stdout=out, stderr=subprocess.STDOUT, env=env)
-            JOBS[key] = process
+            if payload.get("job_id") is not None:
+                env["STOCKDEPTH_JOB_ID"] = str(int(payload["job_id"]))
+            if models:
+                env["STOCKDEPTH_MODEL_CONFIGS"] = json.dumps(models)
+            else:
+                api_key_env = get_api_key_env(provider) if provider else None
+                if payload.get("api_key") and api_key_env:
+                    env[api_key_env] = payload["api_key"]
+            def spawn():
+                with log_file.open("wb") as out:
+                    return subprocess.Popen(cmd, cwd=str(ROOT), stdout=out, stderr=subprocess.STDOUT, env=env)
+            reports = report_dir_for(run_dir)
+            process, status = JOBS.start(key, run_dir / "runner_exit.json",
+                lambda: (reports / "final_trade_decision.md").exists() or (reports / "5_portfolio/decision.md").exists(), spawn)
             json_response(
                 self,
                 {
@@ -426,20 +441,52 @@ class Handler(SimpleHTTPRequestHandler):
                         "date": date,
                         "run_id": run_id or None,
                         "realtime_data": realtime_data,
-                        "status": "started",
-                    "pid": process.pid,
+                        "status": status,
+                    "pid": process.pid if process else None,
                 },
             )
         except Exception as exc:
-            json_response(self, {"error": str(exc)}, 400)
+            message = str(exc)
+            configs = locals().get("models")
+            for config in configs.values() if isinstance(configs, dict) else []:
+                secret = config.get("api_key") if isinstance(config, dict) else None
+                if secret:
+                    message = message.replace(secret, "[redacted]")
+            request_payload = locals().get("payload")
+            legacy_secret = request_payload.get("api_key") if isinstance(request_payload, dict) else None
+            if legacy_secret:
+                message = message.replace(legacy_secret, "[redacted]")
+            json_response(self, {"error": message}, 400)
 
 
 def main() -> None:
     host = os.environ.get("STOCKDEPTH_WEB_HOST", "0.0.0.0")
     port = int(os.environ.get("STOCKDEPTH_WEB_PORT", "8008"))
     server = ThreadingHTTPServer((host, port), Handler)
+    server.daemon_threads = True
+    stop = threading.Event()
+    def reap():
+        while not stop.wait(1):
+            try:
+                JOBS.reap()
+            except OSError:
+                # Keep reaping after transient filesystem failure; status polling
+                # can also observe the return code and never log payloads.
+                pass
+    reaper = threading.Thread(target=reap, daemon=True, name="runner-reaper")
+    reaper.start()
+    def shutdown(signum, frame):
+        threading.Thread(target=server.shutdown, daemon=True).start()
+    signal.signal(signal.SIGTERM, shutdown)
+    signal.signal(signal.SIGINT, shutdown)
     print(f"StockDepth web viewer running at http://{host}:{port}")
-    server.serve_forever()
+    try:
+        server.serve_forever()
+    finally:
+        stop.set()
+        reaper.join(timeout=2)
+        JOBS.shutdown()
+        server.server_close()
 
 
 if __name__ == "__main__":

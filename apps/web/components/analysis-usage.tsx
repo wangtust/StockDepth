@@ -13,9 +13,10 @@ export type UsageJob = {
   tokenUsageComplete?: boolean;
 };
 export type UsageCall = {
-  callId: string; agent: string; model: string; status: string;
+  callId: string; agent: string; model: string; role?: string; provider?: string | null; modelConfigId?: number | null; status: string;
   startedAt: string | Date; endedAt: string | Date | null;
   inputTokens: number | null; outputTokens: number | null; totalTokens: number | null;
+  cachedInputTokens?: number | null;
   usageAvailable: boolean; isRetry: boolean; requestKind: string;
 };
 
@@ -57,11 +58,11 @@ export function AnalysisUsage({ job, calls, compact = false }: { job: UsageJob; 
       {!!calls?.length && <details className="mt-3">
         <summary className="cursor-pointer">模型调用明细（{calls.length} 次）</summary>
         <div className="mt-2 overflow-x-auto"><table className="w-full text-left">
-          <thead><tr>{['Agent', '模型', '状态', '耗时', '输入', '输出', '总 token'].map(x => <th className="p-2" key={x}>{x}</th>)}</tr></thead>
+          <thead><tr>{['Agent', '角色 / 供应商 / 模型', '状态', '耗时', '输入', '缓存命中', '输出', '总 token'].map(x => <th className="p-2" key={x}>{x}</th>)}</tr></thead>
           <tbody>{calls.map(call => <tr key={call.callId}>
-            <td className="p-2">{call.agent}</td><td className="p-2">{call.model}</td><td className="p-2">{call.status}{call.isRetry ? " · 重试" : ""}<br />{call.requestKind}</td>
+            <td className="p-2">{call.agent}</td><td className="p-2">{call.role || 'legacy'} · {call.provider || '未知'} · {call.model}{call.modelConfigId ? ` (#${call.modelConfigId})` : ''}</td><td className="p-2">{call.status}{call.isRetry ? " · 重试" : ""}<br />{call.requestKind}</td>
             <td className="p-2">{call.endedAt || (call.status === 'running' && now) ? elapsed(call.startedAt, call.endedAt || now!) : '—'}</td>
-            <td className="p-2">{number(call.inputTokens)}</td><td className="p-2">{number(call.outputTokens)}</td><td className="p-2">{number(call.totalTokens)}</td>
+            <td className="p-2">{number(call.inputTokens)}</td><td className="p-2">{number(call.cachedInputTokens)}</td><td className="p-2">{number(call.outputTokens)}</td><td className="p-2">{number(call.totalTokens)}</td>
           </tr>)}</tbody>
         </table></div>
       </details>}

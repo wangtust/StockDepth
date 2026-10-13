@@ -1,3 +1,4 @@
+import { publicAnalysisJob } from '@/lib/analysis/public-job';
 import { and, eq, isNull } from 'drizzle-orm';
 import { NextRequest, NextResponse } from 'next/server';
 import { getUser } from '@/lib/db/queries';
@@ -22,6 +23,7 @@ export async function POST(
     .update(analysisJobs)
     .set({
       status: 'queued',
+      workerOwner: null, workerLeaseUntil: null,
       externalStatus: 'resume-queued',
       externalPid: null,
       errorMessage: null,
@@ -45,5 +47,5 @@ export async function POST(
     );
   }
 
-  return NextResponse.json({ job });
+  return NextResponse.json({ job: publicAnalysisJob(job) });
 }

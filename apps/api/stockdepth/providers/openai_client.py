@@ -139,7 +139,7 @@ class MinimaxChatOpenAI(NormalizedChatOpenAI):
 
 # Kwargs forwarded from user config to ChatOpenAI
 _PASSTHROUGH_KWARGS = (
-    "timeout", "max_retries", "reasoning_effort",
+    "timeout", "max_retries", "reasoning_effort", "temperature", "top_p", "max_tokens", "seed",
     "api_key", "callbacks", "http_client", "http_async_client",
 )
 
@@ -215,7 +215,9 @@ class OpenAIClient(BaseLLMClient):
                     "Set STOCKDEPTH_LLM_BACKEND_URL or choose one in the CLI."
                 )
             api_key_env = get_api_key_env(self.provider)
-            if api_key_env:
+            if self.kwargs.get("api_key"):
+                llm_kwargs["api_key"] = self.kwargs["api_key"]
+            elif api_key_env:
                 api_key = os.environ.get(api_key_env)
                 if api_key:
                     llm_kwargs["api_key"] = api_key
@@ -254,7 +256,8 @@ class OpenAIClient(BaseLLMClient):
             chat_cls = MinimaxChatOpenAI
         else:
             chat_cls = NormalizedChatOpenAI
-        for key, value in provider_runtime_options(self.provider, llm_kwargs.get('base_url') or self.base_url).items():
+        for key, value in provider_runtime_options(self.provider, llm_kwargs.get('base_url') or self.base_url,
+                self.kwargs.get('requests_per_minute'), self.kwargs.get('rate_limit_scope')).items():
             llm_kwargs.setdefault(key, value)
         return chat_cls(**llm_kwargs)
 

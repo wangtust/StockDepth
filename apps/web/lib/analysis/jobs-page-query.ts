@@ -8,7 +8,8 @@ export function jobsPageQuery(userId: number, before?: number) {
       (select analysis_credits from users where id = ${userId}) as credits,
       coalesce((select jsonb_object_agg(depth, credit_cost) from analysis_pricing), '{}'::jsonb) as pricing,
       coalesce((select jsonb_agg(jsonb_build_object('id', id, 'name', name,
-        'modelName', model_name, 'isDefault', is_default) order by is_default desc, id)
+        'modelName', model_name, 'provider', provider, 'isDefault', is_default,
+        'quickEnabled', quick_enabled, 'deepEnabled', deep_enabled) order by is_default desc, id)
         from llm_model_configs where is_active and retired_at is null), '[]'::jsonb) as models,
       coalesce((select jsonb_agg(jsonb_build_object(
         'id', j.id, 'ticker', j.ticker, 'tradeDate', j.trade_date,

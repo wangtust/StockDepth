@@ -53,6 +53,56 @@ class UsageTests(unittest.TestCase):
         self.recorder.on_llm_end(response, run_id=run_id)
         self.assertEqual(read_usage(self.path)['calls'][0]['total_tokens'], 6)
 
+    def test_role_identity_and_immutable_price_snapshot(self):
+        run_id = uuid4()
+        self.recorder.on_chat_model_start({}, [], run_id=run_id, metadata={
+            'langgraph_node': 'Market Analyst', 'model_role': 'quick',
+            'model_config_id': 12, 'model_provider': 'qwen', 'model_name': 'shared-name',
+            'pricing_snapshot': {'currency': 'CNY', 'input': '2', 'cache': '0.5', 'output': '8'},
+        }, invocation_params={'model': 'shared-name'})
+        response = LLMResult(generations=[[ChatGeneration(message=AIMessage(content='ok',
+            usage_metadata={'input_tokens': 100, 'output_tokens': 10, 'total_tokens': 110,
+                            'input_token_details': {'cache_read': 25}}))]])
+        self.recorder.on_llm_end(response, run_id=run_id)
+        call = read_usage(self.path)['calls'][0]
+        self.assertEqual((call['role'], call['model_config_id'], call['provider']), ('quick', 12, 'qwen'))
+        self.assertEqual(call['agent'], 'Market Analyst')
+        self.assertEqual(call['cached_input_tokens'], 25)
+        self.assertEqual(call['estimated_cost'], '0.000242500000')
+        self.assertTrue(call['cost_complete'])
+        self.assertNotIn('api_key', json.dumps(call))
+
+    def test_anthropic_cache_write_usage_is_counted_but_cost_is_incomplete(self):
+        run_id = uuid4()
+        self.recorder.on_chat_model_start({}, [], run_id=run_id, metadata={
+            'model_role': 'deep', 'model_config_id': 25, 'model_provider': 'anthropic',
+            'pricing_snapshot': {'currency': 'CNY', 'input': '3', 'cache': '1', 'output': '10'},
+        }, invocation_params={'model': 'claude-test'})
+        message = AIMessage(content='ok', usage_metadata={'input_tokens': 9, 'output_tokens': 2, 'total_tokens': 11},
+            response_metadata={'usage': {'input_tokens': 4, 'cache_read_input_tokens': 2,
+                                         'cache_creation_input_tokens': 3, 'output_tokens': 2}})
+        self.recorder.on_llm_end(LLMResult(generations=[[ChatGeneration(message=message)]]), run_id=run_id)
+        call = read_usage(self.path)['calls'][0]
+        self.assertEqual(call['input_tokens'], 9)
+        self.assertEqual(call['cached_input_tokens'], 2)
+        self.assertIsNone(call['estimated_cost'])
+        self.assertFalse(call['cost_complete'])
+
+    def test_google_usage_metadata_maps_vendor_token_fields(self):
+        run_id = uuid4()
+        self.recorder.on_chat_model_start({}, [], run_id=run_id, metadata={
+            'model_role': 'quick', 'model_config_id': 4, 'model_provider': 'google',
+            'pricing_snapshot': {'input': '1', 'cache': '0.2', 'output': '4'},
+        }, invocation_params={'model': 'gemini-test'})
+        message = AIMessage(content='ok', response_metadata={'usageMetadata': {
+            'promptTokenCount': 20, 'candidatesTokenCount': 5, 'cachedContentTokenCount': 8,
+        }})
+        self.recorder.on_llm_end(LLMResult(generations=[[ChatGeneration(message=message)]]), run_id=run_id)
+        call = read_usage(self.path)['calls'][0]
+        self.assertEqual((call['input_tokens'], call['output_tokens'], call['cached_input_tokens']), (20, 5, 8))
+        self.assertEqual(call['estimated_cost'], '0.000033600000')
+        self.assertTrue(call['cost_complete'])
+
     def test_graph_callback_propagation_and_fallback_metadata(self):
         from typing import TypedDict
         from langchain_core.language_models.chat_models import BaseChatModel

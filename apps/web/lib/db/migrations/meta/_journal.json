@@ -211,6 +211,41 @@
       "when": 1791835461656,
       "tag": "0029_quiet_virginia_dare",
       "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1791883815425,
+      "tag": "0030_cross_vendor_model_routing",
+      "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1791883935203,
+      "tag": "0031_paper_model_usage",
+      "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1791884109857,
+      "tag": "0032_model_capability_options",
+      "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1791885831619,
+      "tag": "0033_worker_ownership",
+      "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1791887312871,
+      "tag": "0034_worker_lease_indexes",
+      "breakpoints": true
     }
   ]
 }

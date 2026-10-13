@@ -1,5 +1,8 @@
 import time
 import logging
+import tempfile
+import threading
+from collections import OrderedDict
 
 import pandas as pd
 import yfinance as yf
@@ -11,6 +14,19 @@ from .config import get_config
 from .utils import canonical_yahoo_symbol, safe_ticker_component
 
 logger = logging.getLogger(__name__)
+
+# Per-process, bounded OHLCV reuse. Realtime bars expire within 60 seconds.
+_OHLCV_CACHE = OrderedDict()
+_OHLCV_LOCK = threading.RLock()
+
+
+def _file_signature(path):
+    try:
+        stat = os.stat(path)
+        return stat.st_mtime_ns, stat.st_size, stat.st_ino
+    except FileNotFoundError:
+        return None
+
 
 
 def yf_retry(func, max_retries=3, base_delay=2.0):
@@ -48,7 +64,7 @@ def _clean_dataframe(data: pd.DataFrame) -> pd.DataFrame:
 def load_ohlcv(symbol: str, curr_date: str) -> pd.DataFrame:
     """Fetch OHLCV data with caching, filtered to prevent look-ahead bias.
 
-    Downloads 15 years of data up to today and caches per symbol. On
+    Downloads 5 years of data up to today and caches per symbol. On
     subsequent calls the cache is reused. Rows after curr_date are
     filtered out so backtests never see future prices.
     """
@@ -76,6 +92,13 @@ def load_ohlcv(symbol: str, curr_date: str) -> pd.DataFrame:
 
     includes_today = curr_date_dt.normalize() >= today_date.normalize()
 
+    key = (data_file, curr_date_dt.normalize().isoformat(), realtime_data)
+    with _OHLCV_LOCK:
+        cached = _OHLCV_CACHE.get(key)
+        if cached and cached[0] > time.monotonic() and cached[1] == _file_signature(data_file):
+            _OHLCV_CACHE.move_to_end(key)
+            return cached[2].copy(deep=True)
+
     if os.path.exists(data_file) and not includes_today:
         data = pd.read_csv(data_file, on_bad_lines="skip", encoding="utf-8")
     else:
@@ -88,12 +111,28 @@ def load_ohlcv(symbol: str, curr_date: str) -> pd.DataFrame:
             auto_adjust=True,
         ))
         data = data.reset_index()
-        data.to_csv(data_file, index=False, encoding="utf-8")
+        temporary = None
+        try:
+            with tempfile.NamedTemporaryFile(dir=config["data_cache_dir"], suffix=".csv.tmp", delete=False) as file:
+                temporary = file.name
+            data.to_csv(temporary, index=False, encoding="utf-8")
+            os.replace(temporary, data_file)
+        finally:
+            if temporary and os.path.exists(temporary):
+                os.unlink(temporary)
 
-    data = _clean_dataframe(data)
-
-    # Filter to curr_date to prevent look-ahead bias in backtesting
-    data = data[data["Date"] <= curr_date_dt]
+    # Apply the cutoff before filling gaps: future rows must never backfill
+    # missing historical prices. Preserve local trading dates, ignoring timezone.
+    dates = pd.to_datetime(data["Date"], errors="coerce")
+    if dates.dt.tz is not None:
+        dates = dates.dt.tz_localize(None)
+    data["Date"] = dates
+    data = _clean_dataframe(data[dates <= curr_date_dt].copy())
+    with _OHLCV_LOCK:
+        _OHLCV_CACHE[key] = (time.monotonic() + (60 if includes_today else 300), _file_signature(data_file), data.copy(deep=True))
+        _OHLCV_CACHE.move_to_end(key)
+        while len(_OHLCV_CACHE) > 32:
+            _OHLCV_CACHE.popitem(last=False)
 
     return data
 

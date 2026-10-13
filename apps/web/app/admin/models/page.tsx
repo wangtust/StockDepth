@@ -63,7 +63,7 @@ export default async function AdminModelsPage({ searchParams }: PageProps) {
                 <span>
                   <span className="font-semibold">{config.name}</span>
                   <span className="mt-1 block text-sm text-slate-500">
-                    {config.provider} · {config.modelName}
+                    {config.provider} · {config.modelName} · {config.quickEnabled && 'Quick'}{config.quickEnabled && config.deepEnabled && ' / '}{config.deepEnabled && 'Deep'}
                   </span>
                 </span>
                 <span className="flex gap-2">
@@ -100,6 +100,9 @@ function ModelConfigForm({
     provider: string;
     baseUrl: string;
     modelName: string;
+    modelOptions: Record<string, string | number | boolean>;
+    quickEnabled: boolean;
+    deepEnabled: boolean;
     isDefault: boolean;
     isActive: boolean;
     inputPrice: string | null;
@@ -129,6 +132,7 @@ function ModelConfigForm({
           </select>
         </label>
         <p className="text-xs text-slate-500">腾讯等兼容接口的 Provider 请填写 openai-compatible；厂商名称填写在 Name 中。</p>
+        <div className="flex gap-6 text-sm"><label className="flex items-center gap-2"><input type="checkbox" name="quickEnabled" defaultChecked={config?.quickEnabled ?? true} />可用于 Quick</label><label className="flex items-center gap-2"><input type="checkbox" name="deepEnabled" defaultChecked={config?.deepEnabled ?? true} />可用于 Deep</label></div>
         <Field
           label="Base URL"
           name="baseUrl"
@@ -147,6 +151,7 @@ function ModelConfigForm({
           required={requireApiKey}
         />
         <Field label="模型名称（API 使用的标识）" name="modelName" defaultValue={config?.modelName} placeholder="例如 hy3、glm-5.3" required />
+        <label className="block space-y-2 text-sm lg:col-span-2"><span>模型能力与限流参数（JSON，可选）</span><textarea name="modelOptions" defaultValue={JSON.stringify(config?.modelOptions ?? {}, null, 2)} className="min-h-24 w-full rounded-md border border-slate-200 p-3 font-mono text-xs" placeholder={'例如 {"reasoning_effort":"high","max_tokens":4096,"requests_per_minute":30,"request_concurrency":2}'} /><span className="block text-xs text-slate-500">支持 temperature、top_p、max_tokens、timeout、max_retries、reasoning_effort、thinking_level、effort、seed、requests_per_minute、request_concurrency。</span></label>
       </div>
 
       <fieldset className="rounded-md border border-slate-200 p-4">

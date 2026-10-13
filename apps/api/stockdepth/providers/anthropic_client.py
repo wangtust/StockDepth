@@ -8,7 +8,7 @@ from .base_client import BaseLLMClient, normalize_content
 from .validators import validate_model
 
 _PASSTHROUGH_KWARGS = (
-    "timeout", "max_retries", "api_key", "max_tokens",
+    "timeout", "max_retries", "api_key", "max_tokens", "temperature", "top_p",
     "callbacks", "http_client", "http_async_client", "effort",
 )
 
@@ -62,7 +62,8 @@ class AnthropicClient(BaseLLMClient):
                 continue
             llm_kwargs[key] = self.kwargs[key]
 
-        for key, value in provider_runtime_options('anthropic', llm_kwargs.get('base_url') or self.base_url).items():
+        for key, value in provider_runtime_options('anthropic', llm_kwargs.get('base_url') or self.base_url,
+                self.kwargs.get('requests_per_minute'), self.kwargs.get('rate_limit_scope')).items():
             llm_kwargs.setdefault(key, value)
         return NormalizedChatAnthropic(**llm_kwargs)
 

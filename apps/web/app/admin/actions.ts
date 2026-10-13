@@ -2,9 +2,10 @@
 
 import { modelConfigWrite, encryptModelKey } from '@/lib/security/model-key';
 
+import { isAnalysisRunner } from '@/lib/analysis/runner-process';
 import { testModelConnection } from '@/lib/analysis/test-model-server';
 import { revalidatePath } from 'next/cache';
-import { and, eq, inArray, isNull, sql } from 'drizzle-orm';
+import { and, eq, inArray, isNull, or, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { requirePlatformAdmin, requireSuperAdmin, writeAdminAuditLog } from '@/lib/auth/admin';
 import {
@@ -58,6 +59,14 @@ const modelConfigSchema = z.object({
   baseUrl: z.string().trim().max(500),
   apiKey: z.string().trim().max(1000).optional(),
   modelName: z.string().trim().min(1).max(160),
+  modelOptions: z.preprocess(value => {
+    if (typeof value !== 'string' || !value.trim()) return {};
+    try { return JSON.parse(value); } catch { return value; }
+  }, z.record(z.union([z.string().max(100), z.number().finite(), z.boolean()]))
+    .refine(options => Object.keys(options).every(key => ['temperature','top_p','max_tokens','max_retries','timeout','reasoning_effort','thinking_level','effort','seed','requests_per_minute','request_concurrency'].includes(key)), '包含不支持的模型参数')
+    .refine(options => ['requests_per_minute','request_concurrency'].every(key => options[key] == null || (typeof options[key] === 'number' && options[key] > 0 && options[key] <= 10000)), '限流参数须为 1 到 10000 的数字')),
+  quickEnabled: z.coerce.boolean().optional(),
+  deepEnabled: z.coerce.boolean().optional(),
   isDefault: z.coerce.boolean().optional(),
   isActive: z.coerce.boolean().optional()
 });
@@ -86,6 +95,9 @@ export async function createModelConfig(formData: FormData) {
       baseUrl: formData.get('baseUrl'),
       apiKey: formData.get('apiKey'),
       modelName: formData.get('modelName'),
+      modelOptions: formData.get('modelOptions'),
+      quickEnabled: formData.get('quickEnabled') === 'on',
+      deepEnabled: formData.get('deepEnabled') === 'on',
       isDefault: formData.get('isDefault') === 'on',
       isActive: formData.get('isActive') === 'on'
     });
@@ -120,7 +132,7 @@ export async function createModelConfig(formData: FormData) {
         metadata: JSON.stringify({
           name: created.name, provider: created.provider, baseUrl: created.baseUrl,
           prices: Object.fromEntries(priceFields.map(field => [field, created[field]])),
-          modelName: created.modelName, isDefault: created.isDefault, isActive: created.isActive
+          modelName: created.modelName, modelOptions: created.modelOptions, quickEnabled: created.quickEnabled, deepEnabled: created.deepEnabled, isDefault: created.isDefault, isActive: created.isActive
         })
       });
     });
@@ -143,6 +155,9 @@ export async function updateModelConfig(formData: FormData) {
     baseUrl: formData.get('baseUrl'),
     apiKey: formData.get('apiKey') || undefined,
     modelName: formData.get('modelName'),
+    modelOptions: formData.get('modelOptions'),
+    quickEnabled: formData.get('quickEnabled') === 'on',
+    deepEnabled: formData.get('deepEnabled') === 'on',
     isDefault: formData.get('isDefault') === 'on',
     isActive: formData.get('isActive') === 'on'
   });
@@ -160,6 +175,9 @@ export async function updateModelConfig(formData: FormData) {
     provider: data.provider,
     baseUrl: data.baseUrl,
     modelName: data.modelName,
+    modelOptions: data.modelOptions,
+    quickEnabled: !!data.quickEnabled,
+    deepEnabled: !!data.deepEnabled,
     isDefault: !!data.isDefault,
     isActive: !!data.isActive,
     updatedAt: new Date(),
@@ -191,6 +209,9 @@ export async function updateModelConfig(formData: FormData) {
       baseUrl: updated.baseUrl,
       prices: Object.fromEntries(priceFields.map(field => [field, updated[field]])),
       modelName: updated.modelName,
+      modelOptions: updated.modelOptions,
+      quickEnabled: updated.quickEnabled,
+      deepEnabled: updated.deepEnabled,
       isDefault: updated.isDefault,
       isActive: updated.isActive,
       apiKeyChanged: !!data.apiKey
@@ -209,7 +230,7 @@ export async function deleteModelConfig(formData: FormData) {
       .from(llmModelConfigs).where(eq(llmModelConfigs.id, configId)).for('update');
     if (!model) return { error: '模型已不存在，请刷新页面。' };
     const [activeJob] = await tx.select({ id: analysisJobs.id }).from(analysisJobs)
-      .where(and(eq(analysisJobs.modelConfigId, configId), inArray(analysisJobs.status, ['queued', 'running'])))
+      .where(and(or(eq(analysisJobs.modelConfigId, configId), eq(analysisJobs.quickModelConfigId, configId), eq(analysisJobs.deepModelConfigId, configId)), inArray(analysisJobs.status, ['queued', 'running'])))
       .limit(1);
     if (activeJob) return { error: '该模型仍有排队或运行中的任务，请任务结束后再删除。' };
     await tx.update(llmModelConfigs)
@@ -432,6 +453,7 @@ export async function retryAnalysisJob(formData: FormData) {
     .update(analysisJobs)
     .set({
       status: 'queued',
+      workerOwner: null, workerLeaseUntil: null,
       externalStatus: 'admin-retry-queued',
       externalPid: null,
       errorMessage: null,
@@ -472,7 +494,7 @@ export async function cancelAnalysisJob(formData: FormData) {
   }
 
   let killed = false;
-  if (existingJob.externalPid) {
+  if (existingJob.externalPid && await isAnalysisRunner(existingJob.externalPid, existingJob.runId)) {
     try {
       process.kill(existingJob.externalPid, 'SIGTERM');
       killed = true;
@@ -485,6 +507,7 @@ export async function cancelAnalysisJob(formData: FormData) {
     .update(analysisJobs)
     .set({
       status: 'failed',
+      workerOwner: null, workerLeaseUntil: null,
       externalStatus: 'cancelled',
       errorMessage: `Cancelled by admin user #${admin.id}`,
       completedAt: new Date(),

@@ -6,11 +6,14 @@ import json
 import hashlib
 import logging
 import os
+import atexit
 from pathlib import Path
 
 from dotenv import load_dotenv
 
+from stockdepth.api.report_persistence import ReportPersistence, signature
 from stockdepth.api.usage import UsageRecorder
+from stockdepth.api.timing import TimingRecorder, CURRENT_TIMING
 from stockdepth.data.utils import safe_ticker_component
 from stockdepth.default_config import DEFAULT_CONFIG
 from stockdepth.workflows.checkpointer import clear_checkpoint, checkpoint_step, get_checkpointer, thread_id
@@ -28,42 +31,41 @@ REPORT_MAP = {
 }
 
 
-def write_text(path: Path, content: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_suffix(path.suffix + ".tmp")
-    temporary.write_text(content, encoding="utf-8")
-    temporary.replace(path)
+def write_text(path: Path, content: str, persistence: ReportPersistence | None = None) -> None:
+    (persistence or ReportPersistence()).write(path, content)
 
 
-def save_report_parts(state: dict, report_dir: Path) -> None:
+def save_report_parts(state: dict, report_dir: Path, persistence: ReportPersistence | None = None) -> None:
     for key, (filename, _) in REPORT_MAP.items():
         content = state.get(key)
         if content:
-            write_text(report_dir / filename, content)
+            write_text(report_dir / filename, content, persistence)
 
     debate = state.get("investment_debate_state") or {}
     if debate.get("bull_history"):
-        write_text(report_dir / "bull_history.md", debate["bull_history"])
+        write_text(report_dir / "bull_history.md", debate["bull_history"], persistence)
     if debate.get("bear_history"):
-        write_text(report_dir / "bear_history.md", debate["bear_history"])
+        write_text(report_dir / "bear_history.md", debate["bear_history"], persistence)
     if debate.get("judge_decision") and not state.get("investment_plan"):
-        write_text(report_dir / "investment_plan.md", debate["judge_decision"])
+        write_text(report_dir / "investment_plan.md", debate["judge_decision"], persistence)
 
     risk = state.get("risk_debate_state") or {}
     if risk.get("aggressive_history"):
-        write_text(report_dir / "aggressive_history.md", risk["aggressive_history"])
+        write_text(report_dir / "aggressive_history.md", risk["aggressive_history"], persistence)
     if risk.get("conservative_history"):
-        write_text(report_dir / "conservative_history.md", risk["conservative_history"])
+        write_text(report_dir / "conservative_history.md", risk["conservative_history"], persistence)
     if risk.get("neutral_history"):
-        write_text(report_dir / "neutral_history.md", risk["neutral_history"])
+        write_text(report_dir / "neutral_history.md", risk["neutral_history"], persistence)
     if risk.get("judge_decision") and not state.get("final_trade_decision"):
-        write_text(report_dir / "final_trade_decision.md", risk["judge_decision"])
+        write_text(report_dir / "final_trade_decision.md", risk["judge_decision"], persistence)
 
 
-def save_progress(state: dict, report_dir: Path) -> None:
+def save_progress(state: dict, report_dir: Path, persistence: ReportPersistence | None = None) -> None:
     """Persist public replies and tool results, excluding model reasoning."""
     history_path = report_dir / "progress.json"
-    history = json.loads(history_path.read_text(encoding="utf-8")) if history_path.exists() else {}
+    cached = persistence.histories.get(history_path) if persistence else None
+    history = dict(cached[1]) if cached and cached[0] == signature(history_path) else (json.loads(history_path.read_text(encoding="utf-8")) if history_path.exists() else {})
+    changed = not cached or cached[0] != signature(history_path)
     for message in state.get("messages", []):
         kind = getattr(message, "type", "")
         if kind not in ("ai", "tool"):
@@ -86,13 +88,19 @@ def save_progress(state: dict, report_dir: Path) -> None:
             body.append(f"调用工具：{call.get('name', '')}\n\n```json\n{json.dumps(call.get('args', {}), ensure_ascii=False)}\n```")
         entry = {"title": title, "body": "\n\n".join(body)}
         identity = getattr(message, "id", None) or hashlib.sha256(json.dumps(entry, ensure_ascii=False).encode()).hexdigest()
-        history[identity] = entry
+        if history.get(identity) != entry:
+            history[identity] = entry
+            changed = True
+    if not changed and (report_dir / "progress.md").exists():
+        return
     # Keep earlier stages when the graph clears messages between analysts.
     sections = ["# 分析过程"]
     for index, entry in enumerate(history.values(), 1):
         sections.append(f"## {index}. {entry['title']}\n\n{entry['body']}")
-    write_text(history_path, json.dumps(history, ensure_ascii=False))
-    write_text(report_dir / "progress.md", "\n\n".join(sections) + "\n")
+    write_text(history_path, json.dumps(history, ensure_ascii=False), persistence)
+    write_text(report_dir / "progress.md", "\n\n".join(sections) + "\n", persistence)
+    if persistence:
+        persistence.histories[history_path] = (signature(history_path), history)
 
 
 def build_complete_report(state: dict, ticker: str) -> str:
@@ -142,9 +150,9 @@ def build_complete_report(state: dict, ticker: str) -> str:
     return "\n\n".join(sections) + "\n"
 
 
-def save_state_json(state: dict, path: Path) -> None:
+def save_state_json(state: dict, path: Path, persistence: ReportPersistence | None = None) -> None:
     payload = {k: v for k, v in state.items() if k != "messages"}
-    write_text(path, json.dumps(payload, ensure_ascii=False, indent=2, default=str))
+    (persistence or ReportPersistence()).save_state(payload, path)
 
 
 def parse_args() -> argparse.Namespace:
@@ -181,12 +189,22 @@ def main() -> None:
     config["max_risk_discuss_rounds"] = args.depth
     config["output_language"] = args.language
     config["realtime_data"] = args.realtime_data
-    if not args.provider or not args.quick_model or not args.deep_model:
-        raise ValueError("分析模型必须由数据库配置传入")
-    config["llm_provider"] = args.provider
-    config["backend_url"] = args.base_url or None
-    config["quick_think_llm"] = args.quick_model
-    config["deep_think_llm"] = args.deep_model
+    model_configs = json.loads(os.environ.get("STOCKDEPTH_MODEL_CONFIGS", "{}"))
+    if model_configs:
+        if not all(isinstance(model_configs.get(role), dict) for role in ("quick", "deep")):
+            raise ValueError("Quick 和 Deep 模型配置必须同时存在")
+        config["model_configs"] = model_configs
+        config["llm_provider"] = model_configs["quick"]["provider"]
+        config["backend_url"] = model_configs["quick"].get("base_url")
+        config["quick_think_llm"] = model_configs["quick"]["model"]
+        config["deep_think_llm"] = model_configs["deep"]["model"]
+    else:
+        if not args.provider or not args.quick_model or not args.deep_model:
+            raise ValueError("分析模型必须由数据库配置传入")
+        config["llm_provider"] = args.provider
+        config["backend_url"] = args.base_url or None
+        config["quick_think_llm"] = args.quick_model
+        config["deep_think_llm"] = args.deep_model
 
     safe_ticker = safe_ticker_component(ticker)
     if run_id:
@@ -195,14 +213,23 @@ def main() -> None:
         run_dir = Path(config["results_dir"]) / safe_ticker / args.date
     report_dir = run_dir / "reports"
     report_dir.mkdir(parents=True, exist_ok=True)
+    persistence = ReportPersistence()
 
-    graph = StockDepthGraph(selected_analysts=analysts, debug=False, config=config)
+    job_id = os.environ.get("STOCKDEPTH_JOB_ID")
+    callbacks = [UsageRecorder(run_dir / "usage.json", job_id=int(job_id) if job_id else None)]
+    timing = None
+    if os.environ.get('STOCKDEPTH_TIMING_ENABLED', 'true').lower() != 'false':
+        timing = TimingRecorder(run_dir, job_id=int(job_id) if job_id else None)
+        CURRENT_TIMING.set(timing)
+        callbacks.append(timing)
+        atexit.register(timing.close)
+    graph = StockDepthGraph(selected_analysts=analysts, debug=False, config=config, callbacks=callbacks)
     graph.ticker = ticker
     graph._resolve_pending_entries(ticker)
 
     state = graph.propagator.create_initial_state(ticker, args.date, asset_type=args.asset_type)
     graph_args = graph.propagator.get_graph_args()
-    graph_args.setdefault("config", {})["callbacks"] = [UsageRecorder(run_dir / "usage.json")]
+    graph_args.setdefault("config", {})["callbacks"] = callbacks
     checkpointer_ctx = None
     stream_input = state
     final_state = {}
@@ -228,10 +255,12 @@ def main() -> None:
     try:
         for chunk in graph.graph.stream(stream_input, **graph_args):
             final_state.update(chunk)
-            save_progress(final_state, report_dir)
-            save_report_parts(final_state, report_dir)
-            write_text(report_dir / "complete_report.md", build_complete_report(final_state, ticker))
-            save_state_json(final_state, run_dir / "latest_state.json")
+            save_progress(final_state, report_dir, persistence)
+            save_report_parts(final_state, report_dir, persistence)
+            persistence.save_complete(final_state, report_dir / "complete_report.md", ticker, build_complete_report)
+            save_state_json(final_state, run_dir / "latest_state.json", persistence)
+            if timing:
+                timing.flush()
 
         if final_state.get("final_trade_decision"):
             graph.curr_state = final_state
@@ -246,14 +275,30 @@ def main() -> None:
             print(graph.process_signal(final_state["final_trade_decision"]))
     finally:
         if final_state:
-            save_progress(final_state, report_dir)
-            save_report_parts(final_state, report_dir)
-            write_text(report_dir / "complete_report.md", build_complete_report(final_state, ticker))
-            save_state_json(final_state, run_dir / "latest_state.json")
+            save_progress(final_state, report_dir, persistence)
+            save_report_parts(final_state, report_dir, persistence)
+            persistence.save_complete(final_state, report_dir / "complete_report.md", ticker, build_complete_report)
+            save_state_json(final_state, run_dir / "latest_state.json", persistence)
             print(f"Reports saved under: {report_dir}")
         if checkpointer_ctx is not None:
             checkpointer_ctx.__exit__(None, None, None)
+        if timing:
+            timing.close()
+        CURRENT_TIMING.set(None)
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as error:
+        message = str(error)
+        try:
+            configs = json.loads(os.environ.get("STOCKDEPTH_MODEL_CONFIGS", "{}"))
+            for config in configs.values():
+                secret = config.get("api_key") if isinstance(config, dict) else None
+                if secret:
+                    message = message.replace(secret, "[redacted]")
+        except (TypeError, ValueError):
+            pass
+        logging.error("Analysis failed: %s", message)
+        raise SystemExit(1)

@@ -1,0 +1,28 @@
+// Creates its own database and fixtures. Never starts workers on the project DB.
+const path=require('node:path'), fs=require('node:fs'), {spawn}=require('node:child_process'), {randomUUID,randomBytes}=require('node:crypto');
+const root=path.resolve(__dirname,'../..'), modules=root+'/apps/web/node_modules';
+require(modules+'/dotenv').config({path:root+'/.env'});
+if(!['127.0.0.1','localhost','::1','[::1]'].includes(new URL(process.env.POSTGRES_URL).hostname))throw Error('Local isolated DB required');
+const postgres=require(modules+'/postgres'), {drizzle}=require(modules+'/drizzle-orm/postgres-js'), {migrate}=require(modules+'/drizzle-orm/postgres-js/migrator');
+const name='stockdepth_stage2_worker_'+randomUUID().replaceAll('-','');
+const output=root+'/var/performance/stage2-worker'; fs.mkdirSync(output,{recursive:true});
+const runtime=process.env.STOCKDEPTH_RUNTIME_BIN;
+if(!runtime || !fs.existsSync(runtime+'/tsx')) throw Error('Project runtime required');
+const admin=postgres(process.env.POSTGRES_URL,{max:1});let created=false,test;
+(async()=>{try{
+ await admin`create database ${admin(name)}`;created=true;
+ const url=new URL(process.env.POSTGRES_URL);url.pathname='/'+name;
+ test=postgres(url.toString(),{max:1});
+ await migrate(drizzle(test),{migrationsFolder:root+'/apps/web/lib/db/migrations'});
+ const code=await new Promise((resolve,reject)=>{
+  const child=spawn(runtime+'/tsx',['tests/stage2-sync.ts'],{cwd:root+'/apps/workers',env:{...process.env,POSTGRES_URL:url.toString(),
+    STOCKDEPTH_MODEL_KEY_ID:'test',STOCKDEPTH_MODEL_KEYRING:JSON.stringify({test:randomBytes(32).toString('base64url')}),
+    PATH:runtime+':'+process.env.PATH},stdio:['ignore','pipe','pipe']});
+  child.stdout.pipe(process.stdout);child.stderr.pipe(process.stderr);
+  const timer=setTimeout(()=>child.kill('SIGKILL'),60000);
+  child.on('error',reject);child.on('close',value=>{clearTimeout(timer);resolve(value);});
+ });
+ if(code!==0)throw Error('Isolated worker tests failed');
+ console.log('Isolated worker tests passed.');
+}finally{if(test)await test.end();if(created)await admin`drop database ${admin(name)} with (force)`;await admin.end();}
+})().catch(error=>{console.error('Stage-two Worker tests failed:',error.code||error.name);process.exitCode=1;});

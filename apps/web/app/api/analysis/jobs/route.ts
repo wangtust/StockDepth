@@ -1,3 +1,4 @@
+import { publicAnalysisJob } from '@/lib/analysis/public-job';
 import { ensureInstrument } from '@/lib/market/catalogue';
 import { getJobsPage } from '@/lib/analysis/jobs-page';
 import { RequestTiming } from '@/lib/http/request-timing';
@@ -14,6 +15,7 @@ import {
   users
 } from '@/lib/db/schema';
 import { getDepthCreditCostFromDb } from '@/lib/analysis/pricing-server';
+import { encryptModelKey } from '@/lib/security/model-key';
 import { normalizeTicker } from '@/lib/market/tickers';
 
 const createJobSchema = z.object({
@@ -23,7 +25,9 @@ const createJobSchema = z.object({
   language: z.string().trim().min(1).max(40).default('Chinese'),
   depth: z.coerce.number().int().refine((value) => [1, 3, 5].includes(value)),
   analysts: z.array(z.string()).min(1).default(['market', 'news', 'fundamentals']),
-  modelConfigId: z.number().int().positive()
+  modelConfigId: z.number().int().positive().optional(),
+  quickModelConfigId: z.number().int().positive().optional(),
+  deepModelConfigId: z.number().int().positive().optional()
 });
 
 function today() {
@@ -69,14 +73,39 @@ export async function POST(request: NextRequest) {
   const ticker = normalizeTicker(data.ticker);
   const tradeDate = data.tradeDate || today();
   const creditCost = await getDepthCreditCostFromDb(data.depth);
-  const [modelConfig] = await db.select().from(llmModelConfigs)
-    .where(and(eq(llmModelConfigs.id, data.modelConfigId), eq(llmModelConfigs.isActive, true), isNull(llmModelConfigs.retiredAt))).limit(1);
+  const quickId = data.quickModelConfigId ?? data.modelConfigId;
+  const deepId = data.deepModelConfigId ?? data.modelConfigId;
+  if (!quickId || !deepId) return NextResponse.json({ error: '请选择 Quick 和 Deep 模型。' }, { status: 400 });
+  const [quickConfig] = await db.select().from(llmModelConfigs)
+    .where(and(eq(llmModelConfigs.id, quickId), eq(llmModelConfigs.isActive, true), isNull(llmModelConfigs.retiredAt), eq(llmModelConfigs.quickEnabled, true))).limit(1);
+  const [deepConfig] = await db.select().from(llmModelConfigs)
+    .where(and(eq(llmModelConfigs.id, deepId), eq(llmModelConfigs.isActive, true), isNull(llmModelConfigs.retiredAt), eq(llmModelConfigs.deepEnabled, true))).limit(1);
 
-  if (!modelConfig) {
+  if (!quickConfig || !deepConfig) {
     return NextResponse.json(
       { error: '所选模型不可用，请选择其他已启用模型。' },
       { status: 400 }
     );
+  }
+  function immutableSnapshot(config: typeof quickConfig) {
+    try {
+      const apiKey = config.apiKey.startsWith('sdkey:') ? config.apiKey : encryptModelKey(config.apiKey);
+      const options = config.modelOptions || {};
+      if (options.request_concurrency != null && (!Number.isInteger(Number(options.request_concurrency)) || Number(options.request_concurrency) < 1)) {
+        throw new Error('模型并发限制须为正整数。');
+      }
+      return JSON.stringify({ ...config, modelOptions: options, apiKey });
+    } catch {
+      throw new Error('模型密钥加密配置不可用，无法安全创建任务快照。');
+    }
+  }
+  let quickConfigSnapshot: string;
+  let deepConfigSnapshot: string;
+  try {
+    quickConfigSnapshot = immutableSnapshot(quickConfig);
+    deepConfigSnapshot = immutableSnapshot(deepConfig);
+  } catch (error) {
+    return NextResponse.json({ error: (error as Error).message }, { status: 503 });
   }
 
   const job = await db.transaction(async (tx) => {
@@ -111,11 +140,15 @@ export async function POST(request: NextRequest) {
         language: data.language,
         depth: data.depth,
         analysts: JSON.stringify(data.analysts),
-        provider: modelConfig.provider,
-        baseUrl: modelConfig.baseUrl,
-        quickModel: modelConfig.modelName,
-        deepModel: modelConfig.modelName,
-        modelConfigId: modelConfig.id,
+        provider: quickConfig.provider,
+        baseUrl: quickConfig.baseUrl,
+        quickModel: quickConfig.modelName,
+        deepModel: deepConfig.modelName,
+        modelConfigId: quickConfig.id,
+        quickModelConfigId: quickConfig.id,
+        deepModelConfigId: deepConfig.id,
+        quickConfigSnapshot,
+        deepConfigSnapshot,
         status: 'queued'
       })
       .returning();
@@ -141,7 +174,7 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  return NextResponse.json({ job }, { status: 201 });
+  return NextResponse.json({ job: publicAnalysisJob(job) }, { status: 201 });
 }
 
 async function getCurrentUserFromSession() {

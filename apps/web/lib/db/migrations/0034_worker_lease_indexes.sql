@@ -1,0 +1,2 @@
+CREATE INDEX "analysis_jobs_worker_lease_idx" ON "analysis_jobs" USING btree ("status","worker_lease_until","created_at");--> statement-breakpoint
+CREATE INDEX "paper_runs_processing_lease_idx" ON "paper_analysis_runs" USING btree ("processing_state","worker_lease_until","created_at");

@@ -1,4 +1,8 @@
 import '../env';
+import { randomUUID } from 'node:crypto';
+import { basename } from 'node:path';
+import { claimPaperRun, assertPaperOwner, ownedPaper, renewPaper, expireSubmittedRuns, paperLeaseMs } from './paper-ownership';
+import { LostOwnershipError } from './analysis-ownership';
 import { readModelConfig } from '@/lib/security/model-key';
 import { and, asc, eq, isNull, or, sql } from 'drizzle-orm';
 import { db } from '@/lib/db/drizzle';
@@ -7,6 +11,7 @@ import {
   analysisReports,
   llmModelConfigs,
   paperAnalysisRuns,
+  paperModelCalls,
   paperPortfolios,
   paperPositions,
   paperTradeDecisions,
@@ -35,6 +40,7 @@ type DecisionJson = {
 
 const pollIntervalMs = positiveIntegerFromEnv('PAPER_TRADER_WORKER_POLL_MS', 10000);
 const maxReportsChars = positiveIntegerFromEnv('PAPER_TRADER_MAX_REPORT_CHARS', 18000);
+const modelTimeoutMs = positiveIntegerFromEnv('PAPER_TRADER_MODEL_TIMEOUT_MS', 60000);
 const forceAutoExecute = process.env.PAPER_TRADER_AUTO_EXECUTE === 'true';
 const maxPositionBps = positiveIntegerFromEnv('PAPER_TRADER_MAX_POSITION_BPS', 2000);
 const maxTradeBps = positiveIntegerFromEnv('PAPER_TRADER_MAX_TRADE_BPS', 1000);
@@ -59,48 +65,7 @@ async function getDefaultModelConfig() {
   return config ? readModelConfig(config) : null;
 }
 
-async function claimNextRun(): Promise<ClaimedRun | null> {
-  const [run] = await db
-    .select({
-      id: paperAnalysisRuns.id,
-      portfolioId: paperAnalysisRuns.portfolioId,
-      userId: paperAnalysisRuns.userId,
-      watchlistItemId: paperAnalysisRuns.watchlistItemId,
-      analysisJobId: paperAnalysisRuns.analysisJobId,
-      ticker: paperAnalysisRuns.ticker,
-      context: paperAnalysisRuns.context,
-      createdAt: paperAnalysisRuns.createdAt,
-      analysisJob: analysisJobs
-    })
-    .from(paperAnalysisRuns)
-    .innerJoin(analysisJobs, eq(analysisJobs.id, paperAnalysisRuns.analysisJobId))
-    .leftJoin(
-      paperTradeDecisions,
-      eq(paperTradeDecisions.paperAnalysisRunId, paperAnalysisRuns.id)
-    )
-    .where(
-      and(
-        or(
-          eq(analysisJobs.status, 'complete'),
-          and(
-            eq(analysisJobs.status, 'failed'),
-            eq(analysisJobs.externalStatus, 'timeout'),
-            sql`exists (
-              select 1
-              from ${analysisReports} usable_reports
-              where usable_reports.job_id = ${analysisJobs.id}
-                and usable_reports.report_key in ('trader', 'complete')
-            )`
-          )
-        ),
-        isNull(paperTradeDecisions.id)
-      )
-    )
-    .orderBy(asc(paperAnalysisRuns.createdAt))
-    .limit(1);
-
-  return run ?? null;
-}
+const claimNextRun = claimPaperRun;
 
 async function getPortfolio(run: ClaimedRun) {
   const [portfolio] = await db
@@ -192,41 +157,84 @@ function safeJsonParse(value: string) {
   }
 }
 
-async function callDecisionModel(modelConfig: ModelConfig, prompt: string) {
+export async function callDecisionModel(modelConfig: ModelConfig, prompt: string) {
   const baseUrl = modelConfig.baseUrl.replace(/\/$/, '');
-  const response = await fetch(`${baseUrl}/chat/completions`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${modelConfig.apiKey}`
-    },
-    body: JSON.stringify({
-      model: modelConfig.modelName,
-      temperature: 0.1,
+  const provider = modelConfig.provider.toLowerCase();
+  const options = modelConfig.modelOptions || {};
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  let url: string;
+  let body: object;
+  if (provider === 'anthropic') {
+    url = `${baseUrl}/messages`;
+    headers['x-api-key'] = modelConfig.apiKey;
+    headers['anthropic-version'] = '2023-06-01';
+    body = { model: modelConfig.modelName, max_tokens: Number(options.max_tokens || 1200), temperature: Number(options.temperature ?? 0.1),
+      ...(options.top_p != null ? { top_p: Number(options.top_p) } : {}),
+      system: 'You are a conservative paper-trading decision engine. Return valid JSON only.',
+      messages: [{ role: 'user', content: prompt }] };
+  } else if (provider === 'google') {
+    url = `${baseUrl}/models/${encodeURIComponent(modelConfig.modelName)}:generateContent`;
+    headers['x-goog-api-key'] = modelConfig.apiKey;
+    body = { generationConfig: { responseMimeType: 'application/json', temperature: Number(options.temperature ?? 0.1),
+        ...(options.max_tokens != null ? { maxOutputTokens: Number(options.max_tokens) } : {}),
+        ...(options.top_p != null ? { topP: Number(options.top_p) } : {}) },
+      systemInstruction: { parts: [{ text: 'You are a conservative paper-trading decision engine. Return valid JSON only.' }] },
+      contents: [{ role: 'user', parts: [{ text: prompt }] }] };
+  } else {
+    url = `${baseUrl}/chat/completions`;
+    headers.Authorization = `Bearer ${modelConfig.apiKey}`;
+    body = { model: modelConfig.modelName, temperature: Number(options.temperature ?? 0.1),
+      ...(options.top_p != null ? { top_p: Number(options.top_p) } : {}),
+      ...(options.max_tokens != null ? { max_tokens: Number(options.max_tokens) } : {}),
       response_format: { type: 'json_object' },
       messages: [
-        {
-          role: 'system',
-          content:
-            'You are a conservative paper-trading decision engine. Return valid JSON only.'
-        },
+        { role: 'system', content: 'You are a conservative paper-trading decision engine. Return valid JSON only.' },
         { role: 'user', content: prompt }
-      ]
-    })
+      ] };
+  }
+  const response = await fetch(url, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(modelTimeoutMs)
   });
 
   const payload = await response.json();
   if (!response.ok || payload.error) {
+    const detail = String(payload.error?.message || payload.error || `Decision model failed: ${response.status}`)
+      .split(modelConfig.apiKey).join('[redacted]');
     throw new Error(
-      payload.error?.message || payload.error || `Decision model failed: ${response.status}`
+      detail
     );
   }
 
-  const content = payload.choices?.[0]?.message?.content;
+  const content = payload.choices?.[0]?.message?.content ?? payload.content?.find((item: any) => item.type === 'text')?.text ?? payload.candidates?.[0]?.content?.parts?.map((item: any) => item.text || '').join('');
   if (!content || typeof content !== 'string') {
     throw new Error('Decision model returned no content');
   }
-  return content;
+  return { content, usage: payload.usage || payload.usageMetadata || {} };
+}
+
+function paperCost(usage: any, config: ModelConfig) {
+  const input = usage.prompt_tokens ?? (usage.input_tokens == null ? null : Number(usage.input_tokens) + Number(usage.cache_read_input_tokens || 0) + Number(usage.cache_creation_input_tokens || 0)) ?? usage.promptTokenCount ?? null;
+  const output = usage.completion_tokens ?? usage.output_tokens ?? usage.candidatesTokenCount ?? null;
+  const details = usage.prompt_tokens_details || usage.input_tokens_details || {};
+  const cached = usage.prompt_cache_hit_tokens ?? usage.cache_read_input_tokens ?? details.cached_tokens ?? details.cache_read ?? usage.cachedContentTokenCount ?? null;
+  const prices = config.inputPrice != null && config.cachePrice != null && config.outputPrice != null
+    ? { currency: 'CNY', unit: 'million_tokens', input: config.inputPrice, cache: config.cachePrice, output: config.outputPrice } : null;
+  if (!prices || !Number.isSafeInteger(input) || !Number.isSafeInteger(output) ||
+      (cached != null && (!Number.isSafeInteger(cached) || cached < 0 || cached > input)) ||
+      usage.cache_creation_input_tokens || (usage.input_tokens_details || {}).cache_creation) {
+    return { input, output, cached, prices, cost: null, complete: false };
+  }
+  const micros = (value: string) => {
+    const [whole, fraction = ''] = value.split('.');
+    return BigInt(whole) * 1000000n + BigInt((fraction + '000000').slice(0, 6));
+  };
+  const hit = BigInt(cached || 0);
+  const numerator = (BigInt(input - Number(hit)) * micros(String(prices.input))) + hit * micros(String(prices.cache)) + BigInt(output) * micros(String(prices.output));
+  const q = numerator / 1000000000000n; const r = (numerator % 1000000000000n).toString().padStart(12, '0');
+  return { input, output, cached, prices, cost: `${q}.${r}`, complete: cached != null || prices.input === prices.cache };
 }
 
 function parseDecision(raw: string): Required<DecisionJson> {
@@ -275,7 +283,9 @@ async function saveDecision({
   status: string;
   errorMessage?: string;
 }) {
-  const [saved] = await db
+  return db.transaction(async tx => {
+    await assertPaperOwner(tx, run);
+    const [saved] = await tx
     .insert(paperTradeDecisions)
     .values({
       portfolioId: run.portfolioId,
@@ -296,10 +306,13 @@ async function saveDecision({
     })
     .onConflictDoNothing()
     .returning();
-  return saved ?? null;
+    await tx.update(paperAnalysisRuns).set({ processingState: status === 'failed' ? 'failed' : 'complete',
+      workerOwner: null, workerLeaseUntil: null }).where(ownedPaper(run));
+    return saved ?? null;
+  });
 }
 
-async function processRun(run: ClaimedRun, modelConfig: ModelConfig) {
+export async function processRun(run: ClaimedRun, modelConfig: ModelConfig) {
   const [portfolio, positions, reports] = await Promise.all([
     getPortfolio(run),
     getPositions(run),
@@ -336,7 +349,37 @@ async function processRun(run: ClaimedRun, modelConfig: ModelConfig) {
     positions,
     reports: formatReports(reports)
   });
-  const raw = await callDecisionModel(modelConfig, prompt);
+  const callId = randomUUID();
+  const prices = modelConfig.inputPrice == null ? null : JSON.stringify({ currency: 'CNY', unit: 'million_tokens',
+    input: modelConfig.inputPrice, cache: modelConfig.cachePrice, output: modelConfig.outputPrice });
+  await db.transaction(async tx => {
+    await assertPaperOwner(tx, run);
+    const rows = await tx.update(paperAnalysisRuns).set({ processingState: 'submitted', modelSubmittedAt: new Date(), modelCallId: callId })
+      .where(and(ownedPaper(run), eq(paperAnalysisRuns.processingState, 'claimed'))).returning({ id: paperAnalysisRuns.id });
+    if (!rows.length) throw new LostOwnershipError();
+    await tx.insert(paperModelCalls).values({ paperRunId: run.id, callId, modelConfigId: modelConfig.id,
+      provider: modelConfig.provider, model: modelConfig.modelName, status: 'running', pricingSnapshot: prices });
+  });
+  let modelResult: Awaited<ReturnType<typeof callDecisionModel>>;
+  try {
+    modelResult = await callDecisionModel(modelConfig, prompt);
+  } catch (error) {
+    await db.transaction(async tx => {
+      await assertPaperOwner(tx, run);
+      await tx.update(paperModelCalls).set({ status: 'failed', endedAt: new Date(), costComplete: false })
+        .where(and(eq(paperModelCalls.paperRunId, run.id), eq(paperModelCalls.callId, callId)));
+    });
+    throw error;
+  }
+  const raw = modelResult.content;
+  const cost = paperCost(modelResult.usage, modelConfig);
+  await db.transaction(async tx => {
+    await assertPaperOwner(tx, run);
+    await tx.update(paperModelCalls).set({ status: 'complete', endedAt: new Date(), inputTokens: cost.input, outputTokens: cost.output,
+      cachedInputTokens: cost.cached, rawUsage: JSON.stringify(modelResult.usage),
+      estimatedCost: cost.cost, costComplete: cost.complete })
+      .where(and(eq(paperModelCalls.paperRunId, run.id), eq(paperModelCalls.callId, callId)));
+  });
   const decision = parseDecision(raw);
   const confidenceBps = bps(decision.confidence);
   const status =
@@ -398,6 +441,7 @@ async function main() {
   );
 
   while (true) {
+    await expireSubmittedRuns();
     const modelConfig = await getDefaultModelConfig();
     if (!modelConfig) {
       console.log('No active model config available for paper trader worker.');
@@ -411,10 +455,18 @@ async function main() {
       continue;
     }
 
+    let renewing = false;
+    const heartbeat = setInterval(async () => {
+      if (renewing) return;
+      renewing = true;
+      try { await renewPaper(run); } catch { /* Fenced on the next write. */ }
+      finally { renewing = false; }
+    }, Math.floor(paperLeaseMs / 3));
     try {
       await processRun(run, modelConfig);
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+      if (error instanceof LostOwnershipError) continue;
+      const message = (error instanceof Error ? error.message : String(error)).split(modelConfig.apiKey).join('[redacted]');
       console.error(`Paper decision for run #${run.id} failed: ${message}`);
       const decision = fallbackDecision(message);
       await saveDecision({
@@ -424,11 +476,13 @@ async function main() {
         status: 'failed',
         errorMessage: message.slice(0, 4000)
       });
+    } finally {
+      clearInterval(heartbeat);
     }
   }
 }
 
-main().catch((error) => {
-  console.error(error);
+if (basename(process.argv[1] || '') === 'paper-trader-worker.ts') main().catch((error) => {
+  console.error('Paper worker stopped:', error instanceof Error ? error.name : 'Error');
   process.exit(1);
 });

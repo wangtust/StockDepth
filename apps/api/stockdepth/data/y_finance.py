@@ -5,6 +5,7 @@ from functools import lru_cache
 import pandas as pd
 import yfinance as yf
 import os
+import time
 from .config import get_config
 from .stockstats_utils import (
     StockstatsUtils,
@@ -101,6 +102,13 @@ def _get_realtime_data(symbol: str) -> str:
 
     return "\n".join(line for line in lines if line) + "\n\n" + recent.to_csv()
 
+@lru_cache(maxsize=32)
+def _historical_frame(yahoo_symbol: str, start_date: str, exclusive_end: str, cache_scope: str, minute: int):
+    # Process-local TTL, scoped to the configured cache directory. Return copies
+    # to callers because report formatting strips timezones and rounds prices.
+    return yf_retry(lambda: yf.Ticker(yahoo_symbol).history(start=start_date, end=exclusive_end))
+
+
 def get_YFin_data_online(
     symbol: Annotated[str, "ticker symbol of the company"],
     start_date: Annotated[str, "Start date in yyyy-mm-dd format"],
@@ -114,12 +122,11 @@ def get_YFin_data_online(
     end_date_dt = datetime.strptime(end_date, "%Y-%m-%d")
     yf_end_date = (end_date_dt + timedelta(days=1)).strftime("%Y-%m-%d")
 
-    # Create ticker object
+    if datetime.strptime(start_date, "%Y-%m-%d") > end_date_dt:
+        raise ValueError("start_date must not be after end_date")
     yahoo_symbol = canonical_yahoo_symbol(symbol)
-    ticker = yf.Ticker(yahoo_symbol)
-
-    # Fetch historical data for the specified date range
-    data = yf_retry(lambda: ticker.history(start=start_date, end=yf_end_date))
+    scope = os.path.abspath(get_config()["data_cache_dir"])
+    data = _historical_frame(yahoo_symbol, start_date, yf_end_date, scope, int(time.monotonic() // 60)).copy(deep=True)
 
     # Check if data is empty
     if data.empty:

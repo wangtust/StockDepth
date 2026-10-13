@@ -9,7 +9,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { requirePlatformAdmin } from '@/lib/auth/admin';
 import { db } from '@/lib/db/drizzle';
-import { analysisJobs, analysisReports, analysisModelCalls, users } from '@/lib/db/schema';
+import { analysisJobs, analysisReports, analysisModelCalls, paperAnalysisRuns, paperModelCalls, users } from '@/lib/db/schema';
 import { cancelAnalysisJob, retryAnalysisJob } from '@/app/admin/actions';
 import {
   formatAdminDateTime,
@@ -96,6 +96,12 @@ export default async function AdminJobDetailPage({ params, searchParams }: PageP
     total: sql<string>`coalesce(sum(${analysisModelCalls.estimatedCost}), 0)::text`,
     complete: sql<boolean>`coalesce(bool_and(${analysisModelCalls.costComplete}), false)`
   }).from(analysisModelCalls).where(eq(analysisModelCalls.jobId, jobId));
+  const [paperCost] = await db.select({
+    count: sql<number>`count(*)::int`, knownCount: sql<number>`count(${paperModelCalls.estimatedCost})::int`,
+    total: sql<string>`coalesce(sum(${paperModelCalls.estimatedCost}), 0)::text`,
+    complete: sql<boolean>`coalesce(bool_and(${paperModelCalls.costComplete}), false)`
+  }).from(paperModelCalls).innerJoin(paperAnalysisRuns, eq(paperAnalysisRuns.id, paperModelCalls.paperRunId))
+    .where(eq(paperAnalysisRuns.analysisJobId, jobId));
 
   const reports = await db
     .select({
@@ -169,7 +175,7 @@ export default async function AdminJobDetailPage({ params, searchParams }: PageP
         </div>
       </div>
 
-      <ModelCosts jobId={jobId} {...cost} complete={job.tokenUsageComplete && cost.count > 0 && cost.complete} version={job.updatedAt.toISOString()} />
+      <ModelCosts jobId={jobId} {...cost} paper={paperCost} complete={job.tokenUsageComplete && cost.count > 0 && cost.complete} version={job.updatedAt.toISOString()} />
       <AnalysisUsage job={job} />
       <AdminReportViewer
         jobId={jobId}

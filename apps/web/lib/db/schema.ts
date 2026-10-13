@@ -151,6 +151,10 @@ export const analysisJobs = pgTable(
     quickModel: varchar('quick_model', { length: 160 }),
     deepModel: varchar('deep_model', { length: 160 }),
     modelConfigId: integer('model_config_id').references(() => llmModelConfigs.id),
+    quickModelConfigId: integer('quick_model_config_id').references(() => llmModelConfigs.id),
+    deepModelConfigId: integer('deep_model_config_id').references(() => llmModelConfigs.id),
+    quickConfigSnapshot: text('quick_config_snapshot'),
+    deepConfigSnapshot: text('deep_config_snapshot'),
     inputTokens: bigint('input_tokens', { mode: 'number' }).notNull().default(0),
     outputTokens: bigint('output_tokens', { mode: 'number' }).notNull().default(0),
     totalTokens: bigint('total_tokens', { mode: 'number' }).notNull().default(0),
@@ -158,6 +162,8 @@ export const analysisJobs = pgTable(
     status: varchar('status', { length: 30 }).notNull().default('queued'),
     externalStatus: varchar('external_status', { length: 30 }),
     externalPid: integer('external_pid'),
+    workerOwner: varchar('worker_owner', { length: 100 }),
+    workerLeaseUntil: timestamp('worker_lease_until', { withTimezone: true }),
     errorMessage: text('error_message'),
     startedAt: timestamp('started_at'),
     completedAt: timestamp('completed_at'),
@@ -168,6 +174,7 @@ export const analysisJobs = pgTable(
   (table) => [
     uniqueIndex('analysis_jobs_id_owner_idx').on(table.id,table.userId),
     index('analysis_jobs_status_created_at_idx').on(table.status, table.createdAt),
+    index('analysis_jobs_worker_lease_idx').on(table.status, table.workerLeaseUntil, table.createdAt),
     index('analysis_jobs_user_created_at_idx').on(table.userId, table.createdAt),
     index('analysis_jobs_user_visible_id_idx').on(table.userId, table.id).where(sql`hidden_at is null`),
   ]
@@ -187,6 +194,9 @@ export const llmModelConfigs = pgTable('llm_model_configs', {
   baseUrl: text('base_url').notNull(),
   apiKey: text('api_key').notNull(),
   modelName: varchar('model_name', { length: 160 }).notNull(),
+  modelOptions: jsonb('model_options').$type<Record<string, string | number | boolean>>().notNull().default(sql`'{}'::jsonb`),
+  quickEnabled: boolean('quick_enabled').notNull().default(true),
+  deepEnabled: boolean('deep_enabled').notNull().default(true),
   inputPrice: numeric('input_price', { precision: 15, scale: 6 }),
   cachePrice: numeric('cache_price', { precision: 15, scale: 6 }),
   outputPrice: numeric('output_price', { precision: 15, scale: 6 }),
@@ -381,6 +391,11 @@ export const paperAnalysisRuns = pgTable(
       .references(() => analysisJobs.id),
     ticker: varchar('ticker', { length: 40 }).notNull(),
     context: text('context'),
+    processingState: varchar('processing_state', { length: 30 }).notNull().default('queued'),
+    workerOwner: varchar('worker_owner', { length: 100 }),
+    workerLeaseUntil: timestamp('worker_lease_until', { withTimezone: true }),
+    modelSubmittedAt: timestamp('model_submitted_at', { withTimezone: true }),
+    modelCallId: varchar('model_call_id', { length: 100 }),
     createdAt: timestamp('created_at').notNull().defaultNow(),
   },
   (table) => [
@@ -391,8 +406,28 @@ export const paperAnalysisRuns = pgTable(
     uniqueIndex('paper_analysis_runs_job_idx').on(table.analysisJobId),
     index('paper_analysis_runs_portfolio_created_idx').on(table.portfolioId, table.createdAt),
     index('paper_analysis_runs_user_created_idx').on(table.userId, table.createdAt),
+    index('paper_runs_processing_lease_idx').on(table.processingState, table.workerLeaseUntil, table.createdAt),
   ]
 );
+
+export const paperModelCalls = pgTable('paper_model_calls', {
+  id: serial('id').primaryKey(),
+  paperRunId: integer('paper_run_id').notNull().references(() => paperAnalysisRuns.id, { onDelete: 'cascade' }),
+  callId: varchar('call_id', { length: 100 }).notNull(),
+  modelConfigId: integer('model_config_id'),
+  provider: varchar('provider', { length: 80 }).notNull(),
+  model: text('model').notNull(),
+  status: varchar('status', { length: 30 }).notNull(),
+  inputTokens: bigint('input_tokens', { mode: 'number' }),
+  outputTokens: bigint('output_tokens', { mode: 'number' }),
+  cachedInputTokens: bigint('cached_input_tokens', { mode: 'number' }),
+  rawUsage: text('raw_usage'),
+  pricingSnapshot: text('pricing_snapshot'),
+  estimatedCost: numeric('estimated_cost', { precision: 24, scale: 12 }),
+  costComplete: boolean('cost_complete').notNull().default(false),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  endedAt: timestamp('ended_at', { withTimezone: true }),
+}, (table) => [uniqueIndex('paper_model_calls_run_call_idx').on(table.paperRunId, table.callId)]);
 
 export const paperTradeDecisions = pgTable(
   'paper_trade_decisions',
@@ -661,6 +696,9 @@ export const analysisModelCalls = pgTable('analysis_model_calls', {
   callId: varchar('call_id', { length: 100 }).notNull(),
   agent: varchar('agent', { length: 160 }).notNull(),
   model: text('model').notNull(),
+  role: varchar('role', { length: 20 }).notNull().default('legacy'),
+  modelConfigId: integer('model_config_id'),
+  provider: varchar('provider', { length: 80 }),
   startedAt: timestamp('started_at', { withTimezone: true }).notNull(),
   endedAt: timestamp('ended_at', { withTimezone: true }),
   status: varchar('status', { length: 30 }).notNull(),

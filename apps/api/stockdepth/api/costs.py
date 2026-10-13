@@ -3,7 +3,7 @@ from decimal import Decimal, InvalidOperation
 
 
 def cached_tokens(usage):
-    for key in ('prompt_cache_hit_tokens', 'cache_read_input_tokens', 'cached_tokens'):
+    for key in ('prompt_cache_hit_tokens', 'cache_read_input_tokens', 'cached_tokens', 'cachedContentTokenCount'):
         if key in usage:
             return usage[key]
     for key in ('prompt_tokens_details', 'input_token_details', 'input_tokens_details'):

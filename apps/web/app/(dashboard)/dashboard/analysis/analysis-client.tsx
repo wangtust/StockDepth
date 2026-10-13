@@ -58,7 +58,7 @@ export type JobsPayload = {
   nextCursor?: number | null;
   credits: number;
   pricing?: Partial<Record<number, number>>;
-  models?: Array<{ id: number; name: string; modelName: string; isDefault: boolean }>;
+  models?: Array<{ id: number; name: string; modelName: string; provider: string; isDefault: boolean; quickEnabled: boolean; deepEnabled: boolean }>;
   jobs: Job[];
 };
 
@@ -93,7 +93,8 @@ export default function AnalysisClient({ initialPayload }: { initialPayload: Job
   const jobsLoadError = listError?.message || '';
   const [selectedJobId, setSelectedJobId] = useState<number | null>(initialPayload.jobs[0]?.id ?? null);
   const [selectedReportKey, setSelectedReportKey] = useState<string>('');
-  const [modelConfigId, setModelConfigId] = useState<number | null>(null);
+  const [quickModelConfigId, setQuickModelConfigId] = useState<number | null>(null);
+  const [deepModelConfigId, setDeepModelConfigId] = useState<number | null>(null);
   const [ticker, setTicker] = useState('AAPL');
   const [tradeDate, setTradeDate] = useState('');
   useEffect(() => {
@@ -151,7 +152,10 @@ export default function AnalysisClient({ initialPayload }: { initialPayload: Job
   const selectedDepthCost = getDepthCreditCostFromConfig(depth, pricing);
   const hasEnoughCredits = payload.credits >= selectedDepthCost;
   const models = payload.models ?? [];
-  const selectedModelId = models.some(model => model.id === modelConfigId) ? modelConfigId : (models.find(model => model.isDefault) ?? models[0])?.id ?? null;
+  const quickModels = models.filter(model => model.quickEnabled);
+  const deepModels = models.filter(model => model.deepEnabled);
+  const selectedQuickId = quickModels.some(model => model.id === quickModelConfigId) ? quickModelConfigId : (quickModels.find(model => model.isDefault) ?? quickModels[0])?.id ?? null;
+  const selectedDeepId = deepModels.some(model => model.id === deepModelConfigId) ? deepModelConfigId : (deepModels.find(model => model.isDefault) ?? deepModels[0])?.id ?? null;
 
   async function loadJobDetail(_id: number) {
     await Promise.all([refreshDetail(), refreshReport()]);
@@ -190,7 +194,8 @@ export default function AnalysisClient({ initialPayload }: { initialPayload: Job
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          modelConfigId: selectedModelId,
+          quickModelConfigId: selectedQuickId,
+          deepModelConfigId: selectedDeepId,
           ticker,
           tradeDate,
           realtimeData,
@@ -360,12 +365,10 @@ export default function AnalysisClient({ initialPayload }: { initialPayload: Job
                     </div>
                   </div>
                   {models.length ? (
-                    <div>
-                      <Label htmlFor="analysis-model" className="mb-2">分析模型</Label>
-                      <select id="analysis-model" className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm" value={selectedModelId ?? ''} onChange={event => setModelConfigId(Number(event.target.value))} required>
-                        {models.map(model => <option key={model.id} value={model.id}>{model.name} · {model.modelName}</option>)}
-                      </select>
-                      <p className="mt-1 text-xs text-slate-500">所有分析阶段使用所选模型。</p>
+                    <div className="space-y-3">
+                      <div><Label htmlFor="analysis-quick-model" className="mb-2">Quick Model · 基础分析与辩论</Label><select id="analysis-quick-model" className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm" value={selectedQuickId ?? ''} onChange={event => setQuickModelConfigId(Number(event.target.value))} required>{quickModels.map(model => <option key={model.id} value={model.id}>{model.name} · {model.provider} · {model.modelName}</option>)}</select></div>
+                      <div><Label htmlFor="analysis-deep-model" className="mb-2">Deep Model · 综合研究与决策</Label><select id="analysis-deep-model" className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm" value={selectedDeepId ?? ''} onChange={event => setDeepModelConfigId(Number(event.target.value))} required>{deepModels.map(model => <option key={model.id} value={model.id}>{model.name} · {model.provider} · {model.modelName}</option>)}</select></div>
+                      <p className="text-xs text-slate-500">两个角色可使用不同供应商、网关和 API Key。</p>
                     </div>
                   ) : <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">暂无可用模型，请联系管理员。</div>}
                   <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600">
@@ -383,7 +386,7 @@ export default function AnalysisClient({ initialPayload }: { initialPayload: Job
                   <Button
                     type="submit"
                     className="w-full rounded-md"
-                    disabled={submitting || !hasEnoughCredits || !selectedModelId}
+                    disabled={submitting || !hasEnoughCredits || !selectedQuickId || !selectedDeepId}
                   >
                     {submitting ? (
                       <Loader2 className="h-4 w-4 animate-spin" />

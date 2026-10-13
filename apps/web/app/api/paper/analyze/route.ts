@@ -1,3 +1,4 @@
+import { publicAnalysisJob } from '@/lib/analysis/public-job';
 import { AmountRangeError } from '@/lib/paper/amount';
 import { buildPortfolioContext } from '@/lib/paper/portfolio-context';
 import { ensureInstrument } from '@/lib/market/catalogue';
@@ -205,5 +206,5 @@ async function enqueueAnalysis(request: NextRequest) {
     );
   }
 
-  return NextResponse.json(jobs, { status: 201 });
+  return NextResponse.json({ ...jobs, jobs: jobs.jobs.map(publicAnalysisJob) }, { status: 201 });
 }

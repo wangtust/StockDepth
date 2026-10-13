@@ -8,7 +8,7 @@ from .base_client import BaseLLMClient, normalize_content
 from .validators import validate_model
 
 _PASSTHROUGH_KWARGS = (
-    "timeout", "max_retries", "api_key", "reasoning_effort",
+    "timeout", "max_retries", "api_key", "reasoning_effort", "temperature", "top_p", "max_tokens", "seed",
     "callbacks", "http_client", "http_async_client",
 )
 
@@ -41,12 +41,15 @@ class AzureOpenAIClient(BaseLLMClient):
             "model": self.model,
             "azure_deployment": os.environ.get("AZURE_OPENAI_DEPLOYMENT_NAME", self.model),
         }
+        if self.base_url:
+            llm_kwargs["azure_endpoint"] = self.base_url
 
         for key in _PASSTHROUGH_KWARGS:
             if key in self.kwargs:
                 llm_kwargs[key] = self.kwargs[key]
 
-        for key, value in provider_runtime_options('azure', llm_kwargs.get('base_url') or self.base_url).items():
+        for key, value in provider_runtime_options('azure', llm_kwargs.get('base_url') or self.base_url,
+                self.kwargs.get('requests_per_minute'), self.kwargs.get('rate_limit_scope')).items():
             llm_kwargs.setdefault(key, value)
         return NormalizedAzureChatOpenAI(**llm_kwargs)
 

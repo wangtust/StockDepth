@@ -77,27 +77,9 @@ class StockDepthGraph:
         os.makedirs(self.config["results_dir"], exist_ok=True)
 
         # Initialize LLMs with provider-specific thinking configuration
-        llm_kwargs = self._get_provider_kwargs()
-
-        # Add callbacks to kwargs if provided (passed to LLM constructor)
-        if self.callbacks:
-            llm_kwargs["callbacks"] = self.callbacks
-
-        deep_client = create_llm_client(
-            provider=self.config["llm_provider"],
-            model=self.config["deep_think_llm"],
-            base_url=self.config.get("backend_url"),
-            **llm_kwargs,
-        )
-        quick_client = create_llm_client(
-            provider=self.config["llm_provider"],
-            model=self.config["quick_think_llm"],
-            base_url=self.config.get("backend_url"),
-            **llm_kwargs,
-        )
-
-        self.deep_thinking_llm = deep_client.get_llm()
-        self.quick_thinking_llm = quick_client.get_llm()
+        configs = self.config.get("model_configs") or {}
+        self.deep_thinking_llm = self._make_role_llm("deep", configs.get("deep"))
+        self.quick_thinking_llm = self._make_role_llm("quick", configs.get("quick"))
         
         self.memory_log = TradingMemoryLog(self.config)
 
@@ -154,6 +136,42 @@ class StockDepthGraph:
                 kwargs["effort"] = effort
 
         return kwargs
+
+    def _make_role_llm(self, role: str, model_config: Optional[dict] = None):
+        if model_config:
+            provider = str(model_config["provider"])
+            model = str(model_config["model"])
+            base_url = model_config.get("base_url")
+            kwargs = self._get_provider_kwargs_for(provider)
+            kwargs["api_key"] = model_config.get("api_key")
+            kwargs.update(model_config.get("options") or {})
+            kwargs["rate_limit_scope"] = f"model-config-{model_config.get('id')}"
+            prices = model_config.get("prices")
+            metadata = {"model_role": role, "model_config_id": model_config.get("id"),
+                        "model_provider": provider, "model_name": model,
+                        "pricing_snapshot": prices}
+            if prices:
+                metadata["pricing_snapshot"] = prices
+        else:
+            provider = self.config["llm_provider"]
+            model = self.config["deep_think_llm"] if role == "deep" else self.config["quick_think_llm"]
+            base_url = self.config.get("backend_url")
+            kwargs = self._get_provider_kwargs()
+            metadata = {"model_role": role, "model_provider": provider, "model_name": model}
+        if self.callbacks:
+            kwargs["callbacks"] = self.callbacks
+        llm = create_llm_client(provider=provider, model=model, base_url=base_url, **kwargs).get_llm()
+        return llm.with_config(metadata=metadata)
+
+    def _get_provider_kwargs_for(self, provider: str) -> Dict[str, Any]:
+        provider = provider.lower()
+        if provider == "google" and self.config.get("google_thinking_level"):
+            return {"thinking_level": self.config["google_thinking_level"]}
+        if provider == "openai" and self.config.get("openai_reasoning_effort"):
+            return {"reasoning_effort": self.config["openai_reasoning_effort"]}
+        if provider == "anthropic" and self.config.get("anthropic_effort"):
+            return {"effort": self.config["anthropic_effort"]}
+        return {}
 
     def _create_tool_nodes(self) -> Dict[str, ToolNode]:
         """Create tool nodes for different data sources using abstract methods."""

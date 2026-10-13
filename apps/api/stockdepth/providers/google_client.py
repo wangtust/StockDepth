@@ -32,7 +32,7 @@ class GoogleClient(BaseLLMClient):
         if self.base_url:
             llm_kwargs["base_url"] = self.base_url
 
-        for key in ("timeout", "max_retries", "callbacks", "http_client", "http_async_client"):
+        for key in ("timeout", "max_retries", "callbacks", "http_client", "http_async_client", "temperature", "top_p"):
             if key in self.kwargs:
                 llm_kwargs[key] = self.kwargs[key]
 
@@ -46,6 +46,8 @@ class GoogleClient(BaseLLMClient):
         # Gemini 3 Flash: minimal, low, medium, high
         # Gemini 2.5: thinking_budget (0=disable, -1=dynamic)
         thinking_level = self.kwargs.get("thinking_level")
+        if "max_tokens" in self.kwargs:
+            llm_kwargs["max_output_tokens"] = self.kwargs["max_tokens"]
         if thinking_level:
             model_lower = self.model.lower()
             if "gemini-3" in model_lower:
@@ -57,7 +59,8 @@ class GoogleClient(BaseLLMClient):
                 # Gemini 2.5: map to thinking_budget
                 llm_kwargs["thinking_budget"] = -1 if thinking_level == "high" else 0
 
-        for key, value in provider_runtime_options('google', llm_kwargs.get('base_url') or self.base_url).items():
+        for key, value in provider_runtime_options('google', llm_kwargs.get('base_url') or self.base_url,
+                self.kwargs.get('requests_per_minute'), self.kwargs.get('rate_limit_scope')).items():
             llm_kwargs.setdefault(key, value)
         return NormalizedChatGoogleGenerativeAI(**llm_kwargs)
 

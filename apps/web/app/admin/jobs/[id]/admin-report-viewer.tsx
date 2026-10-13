@@ -43,13 +43,16 @@ export function AdminReportViewer({
   );
   const [isFullscreen, setIsFullscreen] = useState(false);
 
-  const { data, error } = useSWR(selectedReportKey ? `/api/admin/jobs/${jobId}/details?report=${encodeURIComponent(selectedReportKey)}&v=${encodeURIComponent(version)}` : null, jsonFetcher);
   const selectedReport = useMemo(
     () =>
       reports.find((report) => report.reportKey === selectedReportKey) ||
       reports[0],
     [reports, selectedReportKey]
   );
+  const reportKey = selectedReport?.reportKey || '';
+  const { data, error } = useSWR(reportKey ? `/api/admin/jobs/${jobId}/details?report=${encodeURIComponent(reportKey)}&v=${encodeURIComponent(version)}` : null, jsonFetcher);
+  const visibleContent = !error && data?.report?.reportKey === reportKey ? data.report.content : '';
+
 
   useEffect(() => {
     if (!isFullscreen) {
@@ -161,7 +164,7 @@ export function AdminReportViewer({
         <CardContent className="min-h-0 flex-1 p-0">
           {selectedReport ? (
             <article
-              key={`${selectedReport.id}-${data?.report?.content || ''.length}`}
+              key={`${jobId}-${selectedReport.id}`}
               className={cn(
                 'overflow-auto bg-white px-5 py-6 sm:px-8 lg:px-12 xl:px-16',
                 isFullscreen
@@ -169,8 +172,8 @@ export function AdminReportViewer({
                   : 'min-h-[620px] lg:h-[calc(100dvh-340px)] lg:min-h-[680px]'
               )}
             >
-              {selectedReport.reportKey === 'progress' ? <AnalysisProgress content={data?.report?.content || ''} /> : <MarkdownRenderer
-                content={data?.report?.content || ''}
+              {selectedReport.reportKey === 'progress' ? <AnalysisProgress content={visibleContent} /> : <MarkdownRenderer
+                content={visibleContent}
                 className="mx-auto max-w-[1180px]"
               />}
             </article>

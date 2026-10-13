@@ -1,11 +1,12 @@
 'use client';
 
-import { useMemo } from 'react';
+import { memo, useMemo } from 'react';
+import { DeferredDetails } from '@/components/deferred-details';
 import { Bot, Database, ArrowDown, CheckCircle2, Clock3 } from 'lucide-react';
 import { MarkdownRenderer } from '@/components/markdown-renderer';
 import { parseProgress, parameterSummary, resultSummary, toolLabel } from '@/lib/analysis/progress-events';
 
-export function AnalysisProgress({ content, running = false }: { content: string; running?: boolean }) {
+export const AnalysisProgress = memo(function AnalysisProgress({ content, running = false }: { content: string; running?: boolean }) {
   const turns = useMemo(() => parseProgress(content), [content]);
   if (!turns.length) return <MarkdownRenderer content={content} />;
   const toolCount = turns.reduce((count, turn) => count + turn.tools.length, 0);
@@ -28,7 +29,7 @@ export function AnalysisProgress({ content, running = false }: { content: string
             <Bot className="size-4 text-emerald-600" />{turn.tools.length ? '模型发起数据查询' : '模型生成分析回复'}
           </div>
           {turn.text && <div className="px-4 py-4 sm:px-5">
-            {turn.text.length > 1200 ? <details><summary className="cursor-pointer text-sm font-medium text-slate-700">查看分析回复 · {turn.text.length.toLocaleString('en-US')} 字符<span className="mt-2 block text-sm font-normal leading-6 text-slate-500">{turn.text.replace(/[#*`]/g, "").slice(0, 180)}…</span></summary><div className="mt-3"><MarkdownRenderer content={turn.text} /></div></details> : <MarkdownRenderer content={turn.text} />}
+            {turn.text.length > 1200 ? <DeferredDetails summary={<span className="cursor-pointer text-sm font-medium text-slate-700">查看分析回复 · {turn.text.length.toLocaleString('en-US')} 字符<span className="mt-2 block text-sm font-normal leading-6 text-slate-500">{turn.text.replace(/[#*`]/g, "").slice(0, 180)}…</span></span>}><div className="mt-3"><MarkdownRenderer content={turn.text} /></div></DeferredDetails> : <MarkdownRenderer content={turn.text} />}
           </div>}
           {!!turn.tools.length && <div className="space-y-3 p-4 sm:p-5">
             {turn.tools.map((tool, toolIndex) => <div key={`${tool.name}-${toolIndex}`} className="rounded-lg border border-slate-200 bg-slate-50/50 p-3">
@@ -42,7 +43,7 @@ export function AnalysisProgress({ content, running = false }: { content: string
               </>}
               {tool.result !== undefined && <div className="mt-3 border-t border-slate-200 pt-3">
                 <div className="mb-2 flex items-center gap-1 text-xs text-slate-500"><ArrowDown className="size-3" />数据源 → 模型 · {resultSummary(tool.result)}</div>
-                <details><summary className="cursor-pointer text-xs font-medium text-blue-700">查看返回内容</summary><div className="mt-3 max-h-96 overflow-auto rounded-lg bg-white p-3"><MarkdownRenderer content={tool.result} /></div></details>
+                <DeferredDetails summary={<span className="cursor-pointer text-xs font-medium text-blue-700">查看返回内容</span>}><div className="mt-3 max-h-96 overflow-auto rounded-lg bg-white p-3"><MarkdownRenderer content={tool.result} /></div></DeferredDetails>
               </div>}
             </div>)}
           </div>}
@@ -51,4 +52,4 @@ export function AnalysisProgress({ content, running = false }: { content: string
     </ol>
     {running && <div role="status" className="flex items-center gap-2 pl-10 text-sm text-slate-500"><Clock3 className="size-4 animate-pulse" />等待下一步分析结果，页面会自动更新。</div>}
   </div>;
-}
+});

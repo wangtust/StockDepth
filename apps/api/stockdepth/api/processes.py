@@ -18,23 +18,30 @@ class RunnerRegistry:
 
     def _finish(self, key, process, marker, code):
         process.wait()
-        self.active.pop(key, None)
-        self.completed[key] = code
-        self.completed.move_to_end(key)
-        while len(self.completed) > self.completed_limit:
-            self.completed.popitem(last=False)
         # Durable exit code survives registry eviction and an API restart. This
         # contains no request payload or credentials and is not a new HTTP API.
         temporary = marker.with_suffix('.tmp')
         temporary.write_text(json.dumps({'returncode': code, 'ended_at': dt.datetime.now(dt.timezone.utc).isoformat()}))
         temporary.replace(marker)
+        # Retain ownership until durable persistence succeeds so reap can retry.
+        self.active.pop(key, None)
+        self.completed[key] = code
+        self.completed.move_to_end(key)
+        while len(self.completed) > self.completed_limit:
+            self.completed.popitem(last=False)
 
     def reap(self):
         with self.lock:
+            failure = None
             for key, (process, marker) in list(self.active.items()):
                 code = process.poll()
                 if code is not None:
-                    self._finish(key, process, marker, code)
+                    try:
+                        self._finish(key, process, marker, code)
+                    except OSError as exc:
+                        failure = exc
+            if failure is not None:
+                raise failure
 
     def status(self, key, marker):
         with self.lock:
@@ -74,6 +81,7 @@ class RunnerRegistry:
     def shutdown(self, grace=2):
         with self.lock:
             self.closing = True
+            failure = None
             deadline = time.monotonic() + grace
             for process, _ in self.active.values():
                 if process.poll() is None:
@@ -84,4 +92,9 @@ class RunnerRegistry:
                 except subprocess.TimeoutExpired:
                     process.kill()
                     code = process.wait()
-                self._finish(key, process, marker, code)
+                try:
+                    self._finish(key, process, marker, code)
+                except OSError as exc:
+                    failure = exc
+            if failure is not None:
+                raise failure

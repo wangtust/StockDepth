@@ -122,9 +122,9 @@ export default function AnalysisClient({ initialPayload }: { initialPayload: Job
       refreshInterval: data => LIVE_JOB_STATUSES.has(data?.job?.status) ? REPORT_POLL_INTERVAL_MS : 0
     }
   );
-  const selectedReports: Report[] = detail?.reports || [];
-  const usageJob: Job | null = detail?.job || null;
-  const calls: UsageCall[] = detail?.calls || [];
+  const selectedReports: Report[] = !detailError ? detail?.reports || [] : [];
+  const usageJob: Job | null = !detailError ? detail?.job || null : null;
+  const calls: UsageCall[] = !detailError ? detail?.calls || [] : [];
   const statusJob = usageJob?.id === selectedJobId ? usageJob : selectedJob;
   const effectiveReportKey = selectedReports.some(r => r.reportKey === selectedReportKey)
     ? selectedReportKey : (selectedReports.find(r => r.reportKey === 'progress') || selectedReports[0])?.reportKey || selectedJob?.defaultReportKey || '';
@@ -134,7 +134,7 @@ export default function AnalysisClient({ initialPayload }: { initialPayload: Job
       refreshInterval: () => LIVE_JOB_STATUSES.has(usageJob?.status || selectedJob?.status || '') ? REPORT_POLL_INTERVAL_MS : 0
     }
   );
-  const selectedReport: Report | undefined = reportData?.report;
+  const selectedReport: Report | undefined = !detailError && !reportError && reportData?.report?.reportKey === effectiveReportKey ? reportData?.report : undefined;
   const previousDetail = useRef<{ id: number; status: string; revision: string; key: string } | null>(null);
   useEffect(() => {
     if (!usageJob) return;

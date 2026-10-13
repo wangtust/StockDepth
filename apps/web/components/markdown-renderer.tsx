@@ -1,3 +1,6 @@
+'use client';
+
+import { memo } from 'react';
 import type { ReactNode } from 'react';
 import { cn } from '@/lib/utils';
 
@@ -17,7 +20,7 @@ const headingClasses = {
   6: 'mt-5 scroll-m-20 text-sm font-semibold uppercase tracking-wide text-slate-500'
 };
 
-export function MarkdownRenderer({ content, className }: MarkdownRendererProps) {
+export const MarkdownRenderer = memo(function MarkdownRenderer({ content, className }: MarkdownRendererProps) {
   const normalizedContent = content.replace(/\r\n/g, '\n').trim();
 
   if (!normalizedContent) {
@@ -38,7 +41,7 @@ export function MarkdownRenderer({ content, className }: MarkdownRendererProps) 
       {renderBlocks(normalizedContent.split('\n'))}
     </div>
   );
-}
+});
 
 function renderBlocks(lines: string[]): ReactNode[] {
   const blocks: ReactNode[] = [];

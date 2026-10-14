@@ -218,7 +218,8 @@ export async function updateModelConfig(formData: FormData) {
     }
   });
 
-  revalidateAdmin();
+  // This dynamic page reads fresh data on navigation. Keep the current editor
+  // mounted so saving one model preserves all other unsaved forms.
   return { success: 'Model config updated.' };
 }
 

@@ -1,3 +1,4 @@
+import { ErrorPresentation } from '@/components/error-presentation';
 import { desc, eq, sql } from 'drizzle-orm';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { requirePlatformAdmin } from '@/lib/auth/admin';
@@ -132,9 +133,9 @@ export default async function AdminOverviewPage() {
                   <div className="mt-1 text-sm text-slate-600">
                     {job.userEmail || 'Unknown user'}
                   </div>
-                  <p className="mt-2 line-clamp-3 text-sm text-red-700">
-                    {job.errorMessage || 'No error message recorded.'}
-                  </p>
+                  <div className="mt-2">
+                    <ErrorPresentation error={job.errorMessage} jobId={job.id} compact />
+                  </div>
                 </div>
               ))
             ) : (

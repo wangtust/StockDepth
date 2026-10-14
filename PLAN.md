@@ -56,3 +56,12 @@
 阶段四独立最终验收完成：Python297项/83子测试、Web/Worker类型、真实迁移链、18浏览器行为、480隔离只读GET、旧Worker稳定性/双模型入队/费用身份/轮询与Handler联合回归通过。两个隔离Worker60秒、在途任务SIGKILL恢复及API60秒优雅重启、图每模式15秒均在资源上限内；仅本机Mock和隔离库。默认图仍串行，不批准真实并行2；首次Markdown挂载长任务、小时级稳定性、硬崩溃API孤儿接管及真实模型未验证，详见最终报告。
 
 双模型和第一阶段前置功能已包含在阶段二5d02c5c，阶段三c37f37f已由调度器验证远端；本次没有未提交前置依赖。阶段四receipt.commit_paths为逐文件审查清单，包含push-verified-dev.py，不含凭据或运行日志。协调者没有commit/push；调度器执行普通origin/dev推送并核验远端SHA，失败必须blocked，不能绕过。停止于阶段四，无下一阶段、部署或main操作。回滚只用覆盖前增量补丁，保留一至三阶段及双模型成果。
+
+
+## 2026-10-14: Frontend UI/UX round
+
+Previous performance round completed and published dev d413d95. Active work now follows [frontend UI plan](docs/frontend-ui-plan.md): frontend-only Phase0 audit plus phases1–4, three-role tmux team, independent acceptance and ordinary origin/dev push after each phase. No deployment or service restart. Preserve current uncommitted frontend changes and freeze admin/actions.ts. User-facing provider/incomplete diagnostics remain hidden per explicit earlier preference. State: var/codex-frontend-team/state.json.
+
+### Frontend Phase1 coordinator checkpoint — 2026-10-14（北京时间）
+
+Phase0审查及Phase1返修独立验收通过：英文Retry可读且内部字段隐藏；HEAD含独立发布7ae2378，actions.ts冻结并等于HEAD；发布工具允许必需frontend测试。四错误页面Mock桌面/移动、独立保存/其他未保存编辑、组件回归、Web tsc及冻结哈希通过，见 docs/frontend-ui-results.md。coordinator仅文档/自身测试，没有commit/push。当前等待调度器按receipt.commit_paths普通发布origin/dev并核验远端SHA；发布失败blocked，在此之前不进入Phase2。管理员移动溢出留Phase3。

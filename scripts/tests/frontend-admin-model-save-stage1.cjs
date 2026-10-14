@@ -1,0 +1,27 @@
+// admin-layout repair regression: synthetic model-save browser action; committed action is read as text only.
+const fs=require('node:fs'),path=require('node:path'),assert=require('node:assert/strict');
+const root=path.resolve(__dirname,'../..'),web=root+'/apps/web',out=root+'/var/codex-frontend-team/stage1-admin-layout-repair-evidence';
+const {execFileSync}=require('node:child_process');
+const actionPath='apps/web/app/admin/actions.ts';
+execFileSync('git',['merge-base','--is-ancestor','7ae2378','HEAD'],{cwd:root});
+const committed=execFileSync('git',['show','HEAD:'+actionPath],{cwd:root,encoding:'utf8'});
+assert.equal(fs.readFileSync(root+'/'+actionPath,'utf8'),committed,'Frozen action must match HEAD');
+const update=committed.split('export async function updateModelConfig(')[1].split('export async function deleteModelConfig(')[0];
+assert(!/revalidateAdmin\s*\(|revalidatePath\s*\(|redirect\s*\(/.test(update));
+assert(update.includes("return { success: 'Model config updated.' }"));
+console.log('PASS committed dependency: HEAD contains 7ae2378; frozen action equals HEAD; updateModelConfig has no navigation/revalidation');
+const esbuild=require(root+'/node_modules/.pnpm/esbuild@0.25.12/node_modules/esbuild');
+const http=require('node:http'),{spawn}=require('node:child_process');
+(async()=>{fs.mkdirSync(out,{recursive:true});
+const source=`import React from 'react';import {createRoot} from 'react-dom/client';import {ModelEditForm,ModelSaveButton} from './app/admin/models/model-edit-form';
+const r=createRoot(document.getElementById('root'));window.mount=(kind)=>r.render(kind==='forms'?<div>{[1,2].map(i=><ModelEditForm key={i}><input name='name' defaultValue={'model'+i}/><input name='apiKey' defaultValue={'synthetic-key'+i}/><ModelSaveButton/></ModelEditForm>)}</div>:null);window.mount('forms');`;
+const bundle=(await esbuild.build({stdin:{contents:source,resolveDir:web,loader:'tsx'},bundle:true,write:false,platform:'browser',jsx:'automatic',tsconfig:web+'/tsconfig.json',plugins:[{name:'mock-action',setup(b){b.onResolve({filter:/^@\/app\/admin\/actions$/},()=>({path:'action',namespace:'mock'}));b.onLoad({filter:/.*/,namespace:'mock'},()=>({contents:`export async function updateModelConfig(data){window.saves=(window.saves||0)+1;await new Promise(r=>setTimeout(r,100));return {success:'Mock saved'}}`,loader:'js'}));}}]})).outputFiles[0].text;
+
+const server=http.createServer((req,res)=>{res.setHeader('Content-Type',req.url.endsWith('.js')?'text/javascript':'text/html');res.end(req.url.endsWith('.js')?bundle:'<div id="root"></div><script src="/bundle.js"></script>')});await new Promise(r=>server.listen(0,'127.0.0.1',r));
+const profile=fs.mkdtempSync(out+'/chrome-');const browser=spawn('/home/ubuntu/.cache/ms-playwright/chromium-1248/chrome-linux64/chrome',['--headless','--no-sandbox','--remote-debugging-port=0','--user-data-dir='+profile,'about:blank'],{stdio:['ignore','ignore','pipe']});let ws;
+try{const endpoint=await new Promise(resolve=>{let log='';browser.stderr.on('data',x=>{log+=x;const m=log.match(/DevTools listening on (ws:\/\/[^\s]+)/);if(m)resolve(m[1])})});ws=new WebSocket(endpoint);await new Promise(r=>ws.addEventListener('open',r,{once:true}));let id=0;const pending=new Map(),errors=[];ws.addEventListener('message',e=>{const m=JSON.parse(e.data);if(m.method==='Runtime.exceptionThrown'||m.method==='Runtime.consoleAPICalled'&&m.params.type==='error')errors.push(m.params);if(m.id){const p=pending.get(m.id);pending.delete(m.id);m.error?p.reject(Error(JSON.stringify(m.error))):p.resolve(m.result)}});const call=(method,params={},sessionId)=>new Promise((resolve,reject)=>{const n=++id;pending.set(n,{resolve,reject});ws.send(JSON.stringify({id:n,method,params,sessionId}))});const {targetId}=await call('Target.createTarget',{url:'about:blank'});const {sessionId}=await call('Target.attachToTarget',{targetId,flatten:true});const c=(m,p)=>call(m,p,sessionId);await c('Runtime.enable');await c('Page.enable');const evaluate=async expression=>{const r=await c('Runtime.evaluate',{expression,returnByValue:true,awaitPromise:true});assert(!r.exceptionDetails,JSON.stringify(r.exceptionDetails));return r.result.value};const pause=()=>new Promise(r=>setTimeout(r,400));await c('Page.navigate',{url:'http://127.0.0.1:'+server.address().port+'/'});await pause();
+await evaluate(`const f=document.querySelectorAll('form');const input=f[1].elements.name;Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input,'unsaved second');input.dispatchEvent(new Event('input',{bubbles:true}));f[0].querySelector('button').click();`);await pause();assert.deepEqual(await evaluate(`Array.from(document.querySelectorAll('form')).map(f=>({name:f.elements.name.value,key:f.elements.apiKey.value}))`),[{name:'model1',key:''},{name:'unsaved second',key:'synthetic-key2'}]);assert.equal(await evaluate('window.saves'),1);assert((await evaluate('document.body.innerText')).includes('已保存'));
+assert.deepEqual(errors,[]);
+fs.writeFileSync(out+'/model-save.json',JSON.stringify({status:'passed',modelIndependentSave:true,otherUnsavedEditRetained:true,consoleErrors:errors,limitations:['Synthetic browser action; no real server/DB call. Static committed dependency assertions run separately.']},null,2));console.log('PASS admin-layout model save: peer edit retained, own key cleared, no console errors');
+}finally{ws?.close();browser.kill();await new Promise(r=>server.close(r));}
+})().catch(e=>{console.error(e);process.exitCode=1});

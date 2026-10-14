@@ -15,6 +15,7 @@ import dynamic from 'next/dynamic';
 import useSWR from 'swr';
 import { jsonFetcher } from '@/lib/http/json-fetcher';
 import { pollingDefaults } from '@/lib/http/polling';
+import { ErrorPresentation } from '@/components/error-presentation';
 import { analysisStatusMessage } from '@/lib/analysis/client-status-message';
 const AnalysisProgress = dynamic(() => import('@/components/analysis-progress').then(m => m.AnalysisProgress));
 const MarkdownRenderer = dynamic(() => import('@/components/markdown-renderer').then(m => m.MarkdownRenderer));
@@ -280,9 +281,7 @@ export default function AnalysisClient({ initialPayload }: { initialPayload: Job
         </div>
 
         {(error || requestError) && (
-          <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-            {error || requestError}
-          </div>
+          <ErrorPresentation error={error || requestError} context="request" />
         )}
 
         <div className="grid min-h-0 gap-6 xl:grid-cols-[340px_minmax(0,1fr)] 2xl:grid-cols-[380px_minmax(0,1fr)]">
@@ -366,9 +365,9 @@ export default function AnalysisClient({ initialPayload }: { initialPayload: Job
                   </div>
                   {models.length ? (
                     <div className="space-y-3">
-                      <div><Label htmlFor="analysis-quick-model" className="mb-2">Quick Model · 基础分析与辩论</Label><select id="analysis-quick-model" className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm" value={selectedQuickId ?? ''} onChange={event => setQuickModelConfigId(Number(event.target.value))} required>{quickModels.map(model => <option key={model.id} value={model.id}>{model.name} · {model.provider} · {model.modelName}</option>)}</select></div>
-                      <div><Label htmlFor="analysis-deep-model" className="mb-2">Deep Model · 综合研究与决策</Label><select id="analysis-deep-model" className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm" value={selectedDeepId ?? ''} onChange={event => setDeepModelConfigId(Number(event.target.value))} required>{deepModels.map(model => <option key={model.id} value={model.id}>{model.name} · {model.provider} · {model.modelName}</option>)}</select></div>
-                      <p className="text-xs text-slate-500">两个角色可使用不同供应商、网关和 API Key。</p>
+                      <div><Label htmlFor="analysis-quick-model" className="mb-2">Quick Model · 基础分析与辩论</Label><select id="analysis-quick-model" className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm" value={selectedQuickId ?? ''} onChange={event => setQuickModelConfigId(Number(event.target.value))} required>{quickModels.map(model => <option key={model.id} value={model.id}>{model.name} · {model.modelName}</option>)}</select></div>
+                      <div><Label htmlFor="analysis-deep-model" className="mb-2">Deep Model · 综合研究与决策</Label><select id="analysis-deep-model" className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm" value={selectedDeepId ?? ''} onChange={event => setDeepModelConfigId(Number(event.target.value))} required>{deepModels.map(model => <option key={model.id} value={model.id}>{model.name} · {model.modelName}</option>)}</select></div>
+                      <p className="text-xs text-slate-500">选择适合基础研究和深入决策的模型组合。</p>
                     </div>
                   ) : <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">暂无可用模型，请联系管理员。</div>}
                   <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600">
@@ -417,7 +416,7 @@ export default function AnalysisClient({ initialPayload }: { initialPayload: Job
                   {loading && <p role="status" className="py-3 text-sm text-slate-500">正在加载任务列表…</p>}
                   {jobsLoadError && (
                     <div role="alert" className="rounded-md bg-red-50 p-3 text-sm text-red-700">
-                      <p>任务列表加载失败：{jobsLoadError}</p>
+                      <ErrorPresentation error={jobsLoadError} context="request" compact />
                       <Button type="button" variant="outline" className="mt-2" onClick={() => loadJobs()}>重试加载</Button>
                     </div>
                   )}
@@ -451,7 +450,7 @@ export default function AnalysisClient({ initialPayload }: { initialPayload: Job
                         创建于 <time dateTime={job.createdAt}>{formatAnalysisDate(new Date(job.createdAt))}</time>
                       </div>
                       {analysisStatusMessage(job) && <p className="mt-2 text-xs text-slate-600">{analysisStatusMessage(job)}</p>}
-                      {job.errorMessage && <p className="mt-1 text-xs text-red-700">{job.errorMessage}</p>}
+                      {(job.status === 'failed' || job.errorMessage) && <ErrorPresentation error={job.errorMessage} jobId={job.id} compact />}
                       <AnalysisUsage job={job} compact />
                     </button>
                     <DropdownMenu>
@@ -561,7 +560,7 @@ export default function AnalysisClient({ initialPayload }: { initialPayload: Job
               </div>
 
               {statusJob && analysisStatusMessage(statusJob) && <p role="status" className="text-sm text-slate-600">{analysisStatusMessage(statusJob)}</p>}
-              {statusJob?.errorMessage && <p role="alert" className="text-sm text-red-700">{statusJob.errorMessage}</p>}
+              {statusJob && (statusJob.status === 'failed' || statusJob.errorMessage) && <ErrorPresentation error={statusJob.errorMessage} jobId={statusJob.id} />}
               {selectedReports.length > 0 && (
                 <div
                   className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1"

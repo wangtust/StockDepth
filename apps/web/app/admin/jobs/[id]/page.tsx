@@ -1,3 +1,4 @@
+import { ErrorPresentation } from '@/components/error-presentation';
 import { LiveAnalysisRefresh } from '@/components/live-analysis-refresh';
 import { ModelCosts } from '@/app/admin/_components/model-costs';
 import { AnalysisUsage, AnalysisTimer } from '@/components/analysis-usage';
@@ -6,7 +7,6 @@ import { notFound } from 'next/navigation';
 import { and, eq, sql } from 'drizzle-orm';
 import { ArrowLeft, RefreshCcw, XCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { requirePlatformAdmin } from '@/lib/auth/admin';
 import { db } from '@/lib/db/drizzle';
 import { analysisJobs, analysisReports, analysisModelCalls, paperAnalysisRuns, paperModelCalls, users } from '@/lib/db/schema';
@@ -176,7 +176,7 @@ export default async function AdminJobDetailPage({ params, searchParams }: PageP
       </div>
 
       <ModelCosts jobId={jobId} {...cost} paper={paperCost} complete={job.tokenUsageComplete && cost.count > 0 && cost.complete} version={job.updatedAt.toISOString()} />
-      <AnalysisUsage job={job} />
+      <AnalysisUsage showDiagnostics job={job} />
       <AdminReportViewer
         jobId={jobId}
         version={job.updatedAt.toISOString()}
@@ -199,17 +199,8 @@ export default async function AdminJobDetailPage({ params, searchParams }: PageP
         ]}
       />
 
-      {job.errorMessage && (
-        <Card className="rounded-md border-red-200 bg-red-50">
-          <CardHeader>
-            <CardTitle className="text-red-800">Error Message</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <pre className="whitespace-pre-wrap break-words text-sm text-red-800">
-              {job.errorMessage}
-            </pre>
-          </CardContent>
-        </Card>
+      {(job.status === 'failed' || job.errorMessage) && (
+        <ErrorPresentation error={job.errorMessage} jobId={job.id} />
       )}
     </div>
   );

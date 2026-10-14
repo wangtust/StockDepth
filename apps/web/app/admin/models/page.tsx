@@ -1,7 +1,7 @@
 import { ModelCreateForm } from './model-create-form';
 import { ModelConfigCard } from './model-config-card';
 import { ModelActionsMenu } from './model-actions-menu';
-import { redirect } from 'next/navigation';
+import { ModelEditForm, ModelSaveButton } from './model-edit-form';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -10,7 +10,6 @@ import {
   getModelConfigsForAdmin,
   maskApiKey
 } from '@/lib/analysis/model-configs-server';
-import { updateModelConfig } from '@/app/admin/actions';
 import { formatAdminDateTime, StatusBadge } from '@/app/admin/_components/admin-ui';
 
 export const dynamic = 'force-dynamic';
@@ -18,12 +17,6 @@ export const dynamic = 'force-dynamic';
 type PageProps = {
   searchParams: Promise<{ saved?: string; created?: string }>;
 };
-
-async function updateModelConfigAction(formData: FormData) {
-  'use server';
-  await updateModelConfig(formData);
-  redirect('/admin/models?saved=1');
-}
 
 export default async function AdminModelsPage({ searchParams }: PageProps) {
   await requirePlatformAdmin();
@@ -73,7 +66,6 @@ export default async function AdminModelsPage({ searchParams }: PageProps) {
               </span>
             }>
                 <ModelConfigForm
-                  action={updateModelConfigAction}
                   config={{
                     ...config,
                     apiKeyLabel: maskApiKey(config.apiKey),
@@ -89,11 +81,9 @@ export default async function AdminModelsPage({ searchParams }: PageProps) {
 }
 
 function ModelConfigForm({
-  action,
   config,
   requireApiKey = false
 }: {
-  action?: (formData: FormData) => Promise<void>;
   config?: {
     id: number;
     name: string;
@@ -151,7 +141,7 @@ function ModelConfigForm({
           required={requireApiKey}
         />
         <Field label="模型名称（API 使用的标识）" name="modelName" defaultValue={config?.modelName} placeholder="例如 hy3、glm-5.3" required />
-        <label className="block space-y-2 text-sm lg:col-span-2"><span>模型能力与限流参数（JSON，可选）</span><textarea name="modelOptions" defaultValue={JSON.stringify(config?.modelOptions ?? {}, null, 2)} className="min-h-24 w-full rounded-md border border-slate-200 p-3 font-mono text-xs" placeholder={'例如 {"reasoning_effort":"high","max_tokens":4096,"requests_per_minute":30,"request_concurrency":2}'} /><span className="block text-xs text-slate-500">支持 temperature、top_p、max_tokens、timeout、max_retries、reasoning_effort、thinking_level、effort、seed、requests_per_minute、request_concurrency。</span></label>
+        <label className="block space-y-2 text-sm lg:col-span-2"><span>模型高级参数（可选，通常无需填写）</span><textarea name="modelOptions" defaultValue={JSON.stringify(Object.fromEntries(Object.entries(config?.modelOptions ?? {}).filter(([key]) => !['requests_per_minute', 'request_concurrency'].includes(key))), null, 2)} className="min-h-24 w-full rounded-md border border-slate-200 p-3 font-mono text-xs" placeholder={'例如 {"reasoning_effort":"high","max_tokens":4096}'} /><span className="block text-xs text-slate-500">支持 temperature、top_p、max_tokens、timeout、max_retries、reasoning_effort、thinking_level、effort、seed。请求频率与并发由系统自动管理，无需配置。</span></label>
       </div>
 
       <fieldset className="rounded-md border border-slate-200 p-4">
@@ -189,11 +179,11 @@ function ModelConfigForm({
             Active
           </label>
         </div>
-        <Button type="submit">{config ? 'Save Model' : '测试并添加模型'}</Button>
+        {config ? <ModelSaveButton /> : <Button type="submit">测试并添加模型</Button>}
       </div>
     </>
   );
-  return config ? <form action={action} className="space-y-4">{fields}</form> : <ModelCreateForm>{fields}</ModelCreateForm>;
+  return config ? <ModelEditForm>{fields}</ModelEditForm> : <ModelCreateForm>{fields}</ModelCreateForm>;
 }
 
 function Field({

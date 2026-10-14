@@ -1,3 +1,4 @@
+import { ErrorPresentation } from '@/components/error-presentation';
 import { LiveAnalysisRefresh } from '@/components/live-analysis-refresh';
 import { AnalysisUsage } from '@/components/analysis-usage';
 import Link from 'next/link';
@@ -173,13 +174,13 @@ export default async function AdminJobsPage({ searchParams }: PageProps) {
                       {job.completedAt && (
                         <div>Completed {formatAdminDate(job.completedAt)}</div>
                       )}
-                      <AnalysisUsage job={job} compact />
+                      <AnalysisUsage showDiagnostics job={job} compact />
                       <div className="mt-1">费用 {job.costTotal != null ? `¥${job.costTotal}` : '未知'}{(!job.costComplete || !job.tokenUsageComplete) && ' · 统计不完整'}</div>
                     </td>
                     <td className="max-w-[320px] py-3 pr-4">
-                      <p className="line-clamp-4 text-xs text-red-700">
-                        {job.errorMessage || ''}
-                      </p>
+                      {(job.status === 'failed' || job.errorMessage) && (
+                        <ErrorPresentation error={job.errorMessage} jobId={job.id} compact />
+                      )}
                     </td>
                     <td className="py-3 pr-4">
                       <div className="flex flex-wrap gap-2">

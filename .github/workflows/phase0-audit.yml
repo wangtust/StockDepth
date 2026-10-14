@@ -1,0 +1,30 @@
+name: Phase 0 audit bootstrap
+on:
+  push:
+    branches: [dev]
+    paths: [.github/workflows/phase0-audit.yml, scripts/ci/env-audit.py, package.json, pnpm-workspace.yaml, pnpm-lock.yaml, apps/web/package.json, apps/web/pnpm-lock.yaml, apps/workers/package.json, apps/api/pyproject.toml]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: phase0-audit-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  phase0-audit:
+    name: Phase 0 static audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Assert bootstrap runtime
+        run: |
+          node -e "if (process.versions.node.split('.')[0] !== '22') process.exit(1)"
+          python -c "import sys; assert sys.version_info[:2] == (3, 11)"
+      - name: Static manifest inventory (no suite execution)
+        run: python scripts/ci/env-audit.py

@@ -101,3 +101,8 @@ stage4-coordinator-repair-integrity.json独立确认231个冻结tracked/依赖�
 专用stage4-coordinator.rollback.patch已按最终三文档重新生成，只恢复到本阶段coordinator-before并删除自身新增frontend-coordinator测试；experience/admin-layout完整阶段补丁和admin-layout repair-only补丁均只撤销对应所有者范围，保留Phase1–3、7ae2378、initial-before及其他角色成果。stage4-coordinator-repair-checks.json记录diff及四份rollback apply-check全部通过，均未应用；未来同文件变化需重新检查，禁止whole-tree reset。
 
 协调仅交付complete receipt和明确commit_paths。调度器才可普通提交/推送origin/dev并核验远端SHA；发布或SHA核验失败必须blocked。此处不宣称已发布，没有后续阶段操作。
+
+
+## 2026-10-14: CI engineering round
+
+Active work: [CI execution plan](docs/ci-plan.md), Phase0–6, Node22/Python3.11/PG16, three roles environment/tests/coordinator. Dev only, actual Actions URL/SHA/jobs required at each acceptance. No main updates, production access, LLMs, trades, deployment or restarts. Pending validation pushes explicitly precede remote acceptance; remote unavailable must block, never fake pass. Previous frontend round complete. State: var/codex-ci-team/state.json.

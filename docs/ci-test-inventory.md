@@ -1,6 +1,6 @@
 # Phase 0 test environment inventory
 
-日期：2026-10-14（北京时间）。审查完成；远端 bootstrap 验收待运行。所有候选业务测试命令均未在本阶段执行。
+日期：2026-10-14（北京时间）。审查完成；远端静态 bootstrap 已真实验收，见 [结果](ci-results.md)。所有候选业务测试命令均未在本阶段执行。
 
 根锁独立复核：两个 YAML 文档，第二文档含 apps/web、apps/workers importers；旧 tests handoff 的 importer 缺失判断已纠正。
 

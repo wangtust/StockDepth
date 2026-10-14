@@ -14,7 +14,7 @@ Tools baseline: gh is not installed/authenticated on the host; no GH_TOKEN/GITHU
 
 | Phase | Work | Deliverable | Status |
 | --- | --- | --- | --- |
-| 0 | Package/workspace/lock/Python/Drizzle/tests audit; path/network/var dependencies and eligible push suites | docs/ci-test-inventory.md; minimal audit workflow if needed to satisfy real-run gate | Assigned |
+| 0 | Package/workspace/lock/Python/Drizzle/tests audit; path/network/var dependencies and eligible push suites | docs/ci-test-inventory.md; minimal audit workflow if needed to satisfy real-run gate | Accepted: static bootstrap run 38518651341 / source 0c9848e; later suites pending |
 | 1 | Clean clone install, Node22/pnpm/Python3.11 locks, unified entry, portable synthetic fixtures/browser, cleanup | reproducible environment and local/remote evidence | Pending |
 | 2 | ci.yml: push dev, PR dev/main, manual; independent Web+Worker type/Python offline/build jobs; caches/timeouts | real jobs and nonempty test reports | Pending |
 | 3 | integration.yml: PostgreSQL16 service, migration new/repeat/constraints, atomic claims/lease/crash/recovery/usage/cost/paper idempotency | isolated random DB suites with timeouts/finally cleanup | Pending |

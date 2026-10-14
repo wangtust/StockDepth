@@ -1,6 +1,6 @@
 // admin-layout Phase2 regression: synthetic model-save browser action; committed action is read as text only.
 const fs=require('node:fs'),path=require('node:path'),assert=require('node:assert/strict');
-const root=path.resolve(__dirname,'../..'),web=root+'/apps/web',out=root+'/var/codex-frontend-team/stage3-admin-layout-navigation-evidence';
+const root=path.resolve(__dirname,'../..'),web=root+'/apps/web',out=process.env.FRONTEND_TEST_OUTPUT || root+'/var/codex-frontend-team/stage3-admin-layout-navigation-evidence';
 const mode=process.argv[2]||'after';
 const {execFileSync}=require('node:child_process');
 const actionPath='apps/web/app/admin/actions.ts';
@@ -11,15 +11,15 @@ const update=committed.split('export async function updateModelConfig(')[1].spli
 assert(!/revalidateAdmin\s*\(|revalidatePath\s*\(|redirect\s*\(/.test(update));
 assert(update.includes("return { success: 'Model config updated.' }"));
 console.log('PASS committed dependency: HEAD contains 7ae2378; frozen action equals HEAD; updateModelConfig has no navigation/revalidation');
-const esbuild=require(root+'/node_modules/.pnpm/esbuild@0.25.12/node_modules/esbuild');
+const esbuild=require('./frontend-runtime.cjs').dependency('esbuild');
 const http=require('node:http'),{spawn}=require('node:child_process');
 (async()=>{fs.mkdirSync(out,{recursive:true});
 const source=`import React from 'react';import {createRoot} from 'react-dom/client';import Layout from './app/(dashboard)/dashboard/layout';createRoot(document.getElementById('root')).render(<Layout><div className="p-4"><h1>Synthetic dashboard</h1><p>{'longword'.repeat(150)}</p><div className="max-w-full overflow-x-auto"><table style={{minWidth:1200}}><tbody><tr><td>Synthetic wide table</td></tr></tbody></table></div></div></Layout>);`;
 const bundle=(await esbuild.build({stdin:{contents:source,resolveDir:web,loader:'tsx'},bundle:true,write:false,platform:'browser',jsx:'automatic',tsconfig:web+'/tsconfig.json',plugins:[{name:'navigation-fixtures',setup(b){b.onResolve({filter:/^next\/(link|navigation)$/},a=>({path:a.path,namespace:'mock'}));b.onLoad({filter:/.*/,namespace:'mock'},a=>({contents:a.path==='next/navigation'?`export const usePathname=()=>'/dashboard/analysis';`:`import React from 'react';export default function Link({children,passHref,...props}){return <a {...props}>{children}</a>}`,loader:'tsx',resolveDir:web}));}}]})).outputFiles[0].text;
 
-const postcss=require(web+'/node_modules/postcss'),tailwind=require(web+'/node_modules/@tailwindcss/postcss/dist/index.js');const css=(await postcss([tailwind({base:web})]).process(fs.readFileSync(web+'/app/globals.css','utf8'),{from:web+'/app/globals.css'})).css;
+const postcss=require(web+'/node_modules/postcss'),tailwind=require('./frontend-runtime.cjs').dependency('@tailwindcss/postcss');const css=(await postcss([tailwind({base:web})]).process(fs.readFileSync(web+'/app/globals.css','utf8'),{from:web+'/app/globals.css'})).css;
 const server=http.createServer((req,res)=>{res.setHeader('Content-Type',req.url.endsWith('.js')?'text/javascript':'text/html');res.end(req.url.endsWith('.js')?bundle:'<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><style>'+css+'</style><div id="root" ></div><script src="/bundle.js"></script>')});await new Promise(r=>server.listen(0,'127.0.0.1',r));
-const profile=fs.mkdtempSync(out+'/chrome-');const browser=spawn('/home/ubuntu/.cache/ms-playwright/chromium-1248/chrome-linux64/chrome',['--headless','--no-sandbox','--remote-debugging-port=0','--user-data-dir='+profile,'about:blank'],{stdio:['ignore','ignore','pipe']});let ws;
+const profile=fs.mkdtempSync(out+'/chrome-');const browser=spawn(require('./frontend-runtime.cjs').chromium(),['--headless','--no-sandbox','--remote-debugging-port=0','--user-data-dir='+profile,'about:blank'],{stdio:['ignore','ignore','pipe']});let ws;
 try{const endpoint=await new Promise(resolve=>{let log='';browser.stderr.on('data',x=>{log+=x;const m=log.match(/DevTools listening on (ws:\/\/[^\s]+)/);if(m)resolve(m[1])})});ws=new WebSocket(endpoint);await new Promise(r=>ws.addEventListener('open',r,{once:true}));let id=0;const pending=new Map(),errors=[];ws.addEventListener('message',e=>{const m=JSON.parse(e.data);if(m.method==='Runtime.exceptionThrown'||m.method==='Runtime.consoleAPICalled'&&m.params.type==='error')errors.push(m.params);if(m.id){const p=pending.get(m.id);pending.delete(m.id);m.error?p.reject(Error(JSON.stringify(m.error))):p.resolve(m.result)}});const call=(method,params={},sessionId)=>new Promise((resolve,reject)=>{const n=++id;pending.set(n,{resolve,reject});ws.send(JSON.stringify({id:n,method,params,sessionId}))});const {targetId}=await call('Target.createTarget',{url:'about:blank'});const {sessionId}=await call('Target.attachToTarget',{targetId,flatten:true});const c=(m,p)=>call(m,p,sessionId);await c('Runtime.enable');await c('Page.enable');const evaluate=async expression=>{const r=await c('Runtime.evaluate',{expression,returnByValue:true,awaitPromise:true});assert(!r.exceptionDetails,JSON.stringify(r.exceptionDetails));return r.result.value};const pause=()=>new Promise(r=>setTimeout(r,400));await c('Page.navigate',{url:'http://127.0.0.1:'+server.address().port+'/'});await pause();
 const checks=[];
 for(const [width,height] of [[390,844],[768,1024],[1440,900],[1920,1080],[2560,1440]]){

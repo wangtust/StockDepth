@@ -1,0 +1,54 @@
+name: Phase 1 reproducibility
+on:
+  push:
+    branches: [dev]
+    paths:
+      - '.github/workflows/phase1-reproducibility.yml'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
+      - 'apps/**'
+      - 'scripts/ci/**'
+      - 'scripts/tests/**'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: phase1-reproducibility-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  phase1-reproducibility:
+    name: Phase 1 clean clone offline regression
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install exact root packageManager
+        shell: bash
+        run: |
+          set -euo pipefail
+          manager=$(node -p "require('./package.json').packageManager")
+          npm view "$manager" version engines --json
+          npm install --global "$manager"
+          python scripts/ci/env-check.py
+      - name: Frozen and hashed clean install
+        run: python scripts/ci/env-install.py --venv "${{ runner.temp }}/stockdepth-phase1-venv"
+      - name: Install CI browser and system dependencies
+        run: node scripts/ci/test-frontend.cjs --install-browser --with-deps
+      - name: Web and Worker types
+        run: |
+          pnpm --dir apps/web exec tsc --noEmit --incremental false
+          pnpm --dir apps/workers exec tsc --noEmit --incremental false
+      - name: Nonempty offline Python and frontend suites
+        run: '"${{ runner.temp }}/stockdepth-phase1-venv/bin/python" scripts/ci/test-all.py'
+      - name: Remove disposable Python environment
+        if: always()
+        run: rm -rf -- "${{ runner.temp }}/stockdepth-phase1-venv"

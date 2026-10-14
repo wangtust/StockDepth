@@ -19,8 +19,8 @@ def main():
     print(json.dumps({"phase": 0, "scope": "static manifest inventory; not install or test validation",
                       "files": {name: hashlib.sha256((root / name).read_bytes()).hexdigest()
                                 for name in paths},
-                      "findings": ["Root lock contains two YAML documents; workspace importers exist in the second document and require single-document reconciliation",
-                                   "Python dependency ranges are not a reproducible lock",
+                      "findings": ["Root lock uses pnpm12 two-document format; workspace importers exist in the second document",
+                                   "Python dependency ranges require the separate hash-pinned requirements-ci.lock for CI installation",
                                    "Legacy DB/browser scripts require portability and isolation review"]},
                      indent=2))
 

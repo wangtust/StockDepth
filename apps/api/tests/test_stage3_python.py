@@ -226,21 +226,25 @@ def test_before_stage_serial_checkpoint_compatible(tmp_path):
     import importlib.util
     import sys
     original=sys.modules[__name__].setup
-    source=Path(__file__).resolve().parents[3]/'var/codex-performance-team/stage3-python-before/apps/api/stockdepth/workflows/setup.py'
-    if not source.exists():
-        pytest.skip('archived before-stage source is local handoff evidence, not shipped code')
-    spec=importlib.util.spec_from_file_location('stockdepth.workflows.stage3_before_setup',source)
-    before=importlib.util.module_from_spec(spec);spec.loader.exec_module(before)
-    model=MockModel();model._fail.add('news')
-    config={'configurable':{'thread_id':'legacy-serial'}}
-    with patch.object(sys.modules[__name__],'setup',before):
-        workflow=mock_workflow(1,model)
-    with SqliteSaver.from_conn_string(str(tmp_path/'legacy.sqlite')) as saver:
-        with pytest.raises(RuntimeError):
-            workflow.compile(checkpointer=saver).invoke(initial(),config)
-    resumed=MockModel()
-    with SqliteSaver.from_conn_string(str(tmp_path/'legacy.sqlite')) as saver:
-        result=mock_workflow(1,resumed).compile(checkpointer=saver).invoke(None,config)
-    assert resumed._calls['market']==0 and resumed._calls['news']==1
-    assert result['market_report']=='market: deterministic report'
-    assert sys.modules[__name__].setup is original
+    # Generate the independent Mock legacy graph within pytest's temporary workspace.
+    template=Path(__file__).parent/'fixtures/legacy_serial_graph.py'
+    source=tmp_path/'legacy_serial_graph.py'
+    source.write_text(template.read_text())
+    try:
+        spec=importlib.util.spec_from_file_location('stockdepth.workflows.stage3_before_setup',source)
+        before=importlib.util.module_from_spec(spec);spec.loader.exec_module(before)
+        model=MockModel();model._fail.add('news')
+        config={'configurable':{'thread_id':'legacy-serial'}}
+        with patch.object(sys.modules[__name__],'setup',before):
+            workflow=mock_workflow(1,model)
+        with SqliteSaver.from_conn_string(str(tmp_path/'legacy.sqlite')) as saver:
+            with pytest.raises(RuntimeError):
+                workflow.compile(checkpointer=saver).invoke(initial(),config)
+        resumed=MockModel()
+        with SqliteSaver.from_conn_string(str(tmp_path/'legacy.sqlite')) as saver:
+            result=mock_workflow(1,resumed).compile(checkpointer=saver).invoke(None,config)
+        assert resumed._calls['market']==0 and resumed._calls['news']==1
+        assert result['market_report']=='market: deterministic report'
+        assert sys.modules[__name__].setup is original
+    finally:
+        source.unlink(missing_ok=True)

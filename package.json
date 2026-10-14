@@ -2,7 +2,9 @@
   "name": "stockdepth",
   "private": true,
   "packageManager": "pnpm@12.11.2",
+  "engines": { "node": "22.x" },
   "scripts": {
+    "ci:env": "python3.11 scripts/ci/env-install.py",
     "dev": "pnpm --dir apps/web dev",
     "build": "./bin/stockdepth build",
     "start": "./bin/stockdepth start",

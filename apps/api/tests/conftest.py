@@ -1,6 +1,8 @@
 """Shared pytest fixtures that prevent CI hangs when API keys are absent."""
 
 import os
+import ipaddress
+import socket
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -32,7 +34,48 @@ _API_KEY_ENV_VARS = (
 @pytest.fixture(autouse=True)
 def _dummy_api_keys(monkeypatch):
     for env_var in _API_KEY_ENV_VARS:
-        monkeypatch.setenv(env_var, os.environ.get(env_var, "placeholder"))
+        monkeypatch.setenv(env_var, "placeholder" if os.environ.get('STOCKDEPTH_TEST_OFFLINE') == '1'
+                           else os.environ.get(env_var, "placeholder"))
+
+
+@pytest.fixture(autouse=True)
+def _offline_network(monkeypatch):
+    if os.environ.get('STOCKDEPTH_TEST_OFFLINE') != '1':
+        return
+    connect, connect_ex = socket.socket.connect, socket.socket.connect_ex
+    bind = socket.socket.bind
+    bound_ports = set()
+
+    def guarded_bind(self, address):
+        if isinstance(address, tuple) and not ipaddress.ip_address(address[0]).is_loopback:
+            raise AssertionError('Offline fixtures must bind loopback')
+        result = bind(self, address)
+        if isinstance(address, tuple):
+            bound_ports.add(self.getsockname()[1])
+        return result
+
+    def check(address):
+        if isinstance(address, tuple):
+            # Only loopback synthetic HTTP fixtures; never resolve external hosts.
+            host = address[0]
+            try:
+                allowed = ipaddress.ip_address(host).is_loopback
+            except ValueError:
+                allowed = host == 'localhost'
+            if not allowed or address[1] not in bound_ports:
+                raise AssertionError(f'Offline test attempted connection outside its synthetic fixture: {address}')
+
+    def guarded(self, address):
+        check(address)
+        return connect(self, address)
+
+    def guarded_ex(self, address):
+        check(address)
+        return connect_ex(self, address)
+
+    monkeypatch.setattr(socket.socket, 'connect', guarded)
+    monkeypatch.setattr(socket.socket, 'connect_ex', guarded_ex)
+    monkeypatch.setattr(socket.socket, 'bind', guarded_bind)
 
 
 @pytest.fixture()

@@ -28,7 +28,7 @@ export default async function AdminModelsPage({ searchParams }: PageProps) {
       <div>
         <h1 className="text-2xl font-semibold text-slate-950">Models</h1>
         <p className="mt-1 text-sm text-slate-600">
-          配置可供用户选择的模型、接口和价格。点击列表展开编辑。
+          Configure the models, endpoints, and prices available to users. Expand a model to edit it.
         </p>
       </div>
 
@@ -114,15 +114,15 @@ function ModelConfigForm({
           <span>Provider</span>
           <select name="provider" defaultValue={config?.provider || 'qwen'} required className="w-full rounded-md border border-slate-200 px-3 py-2">
             {config && !['openai', 'openai-compatible', 'anthropic', 'google', 'azure', 'xai', 'deepseek', 'qwen', 'qwen-us', 'qwen-cn', 'glm', 'glm-cn', 'minimax', 'minimax-cn', 'openrouter', 'ollama'].includes(config.provider) && (
-              <option value={config.provider} disabled>{config.provider}（不支持，请重新选择）</option>
+              <option value={config.provider} disabled>{config.provider} (unsupported; select another provider)</option>
             )}
             {['openai', 'openai-compatible', 'anthropic', 'google', 'azure', 'xai', 'deepseek', 'qwen', 'qwen-us', 'qwen-cn', 'glm', 'glm-cn', 'minimax', 'minimax-cn', 'openrouter', 'ollama'].map((provider) => (
               <option key={provider} value={provider}>{provider}</option>
             ))}
           </select>
         </label>
-        <p className="text-xs text-slate-500">腾讯等兼容接口的 Provider 请填写 openai-compatible；厂商名称填写在 Name 中。</p>
-        <div className="flex gap-6 text-sm"><label className="flex items-center gap-2"><input type="checkbox" name="quickEnabled" defaultChecked={config?.quickEnabled ?? true} />可用于 Quick</label><label className="flex items-center gap-2"><input type="checkbox" name="deepEnabled" defaultChecked={config?.deepEnabled ?? true} />可用于 Deep</label></div>
+        <p className="text-xs text-slate-500">For OpenAI-compatible endpoints, select openai-compatible and enter the provider name in Name.</p>
+        <div className="flex gap-6 text-sm"><label className="flex items-center gap-2"><input type="checkbox" name="quickEnabled" defaultChecked={config?.quickEnabled ?? true} />Available for Quick</label><label className="flex items-center gap-2"><input type="checkbox" name="deepEnabled" defaultChecked={config?.deepEnabled ?? true} />Available for Deep</label></div>
         <Field
           label="Base URL"
           name="baseUrl"
@@ -131,7 +131,7 @@ function ModelConfigForm({
               ? 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1'
               : config.baseUrl
           }
-          placeholder="例如 https://tokenhub.tencentmaas.com/v1；不要包含 /chat/completions"
+          placeholder="For example, https://tokenhub.tencentmaas.com/v1; omit /chat/completions"
         />
         <Field
           label={config ? `API Key (${config.apiKeyLabel})` : 'API Key'}
@@ -140,17 +140,17 @@ function ModelConfigForm({
           placeholder={config ? 'Leave blank to keep existing key' : ''}
           required={requireApiKey}
         />
-        <Field label="模型名称（API 使用的标识）" name="modelName" defaultValue={config?.modelName} placeholder="例如 hy3、glm-5.3" required />
-        <label className="block space-y-2 text-sm lg:col-span-2"><span>模型高级参数（可选，通常无需填写）</span><textarea name="modelOptions" defaultValue={JSON.stringify(Object.fromEntries(Object.entries(config?.modelOptions ?? {}).filter(([key]) => !['requests_per_minute', 'request_concurrency'].includes(key))), null, 2)} className="min-h-24 w-full rounded-md border border-slate-200 p-3 font-mono text-xs" placeholder={'例如 {"reasoning_effort":"high","max_tokens":4096}'} /><span className="block text-xs text-slate-500">支持 temperature、top_p、max_tokens、timeout、max_retries、reasoning_effort、thinking_level、effort、seed。请求频率与并发由系统自动管理，无需配置。</span></label>
+        <Field label="Model name (API identifier)" name="modelName" defaultValue={config?.modelName} placeholder="For example, hy3 or glm-5.3" required />
+        <label className="block space-y-2 text-sm lg:col-span-2"><span>Advanced model options (optional)</span><textarea name="modelOptions" defaultValue={JSON.stringify(Object.fromEntries(Object.entries(config?.modelOptions ?? {}).filter(([key]) => !['requests_per_minute', 'request_concurrency'].includes(key))), null, 2)} className="min-h-24 w-full rounded-md border border-slate-200 p-3 font-mono text-xs" placeholder={'For example, {"reasoning_effort":"high","max_tokens":4096}'} /><span className="block text-xs text-slate-500">Supported options: temperature, top_p, max_tokens, timeout, max_retries, reasoning_effort, thinking_level, effort, and seed. The system manages request frequency and concurrency automatically.</span></label>
       </div>
 
       <fieldset className="rounded-md border border-slate-200 p-4">
-        <legend className="px-2 text-sm font-medium">模型价格（人民币元 / 百万 tokens）</legend>
-        <p className="mb-3 text-xs text-slate-500">全部填写或全部留空；0 表示免费。修改价格不会影响已记录调用。</p>
+        <legend className="px-2 text-sm font-medium">Model pricing (CNY per million tokens)</legend>
+        <p className="mb-3 text-xs text-slate-500">Fill in all prices or leave them all blank. Use 0 for free usage. Price changes do not affect previously recorded calls.</p>
         <div className="grid gap-3 sm:grid-cols-3">
-          <Field label="输入" name="inputPrice" type="number" defaultValue={config?.inputPrice ?? ''} />
-          <Field label="缓存命中" name="cachePrice" type="number" defaultValue={config?.cachePrice ?? ''} />
-          <Field label="输出" name="outputPrice" type="number" defaultValue={config?.outputPrice ?? ''} />
+          <Field label="Input" name="inputPrice" type="number" defaultValue={config?.inputPrice ?? ''} />
+          <Field label="Cache hit" name="cachePrice" type="number" defaultValue={config?.cachePrice ?? ''} />
+          <Field label="Output" name="outputPrice" type="number" defaultValue={config?.outputPrice ?? ''} />
         </div>
       </fieldset>
 
@@ -179,7 +179,7 @@ function ModelConfigForm({
             Active
           </label>
         </div>
-        {config ? <ModelSaveButton /> : <Button type="submit">测试并添加模型</Button>}
+        {config ? <ModelSaveButton /> : <Button type="submit">Test and add model</Button>}
       </div>
     </>
   );

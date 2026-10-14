@@ -44,8 +44,8 @@ export function formatAdminDate(value?: Date | null) {
     return 'not set';
   }
 
-  return new Intl.DateTimeFormat('zh-CN', {
-    month: '2-digit',
+  return new Intl.DateTimeFormat('en-US', {
+    month: 'short',
     day: '2-digit',
     hour: '2-digit',
     minute: '2-digit'
@@ -57,9 +57,9 @@ export function formatAdminDateTime(value?: Date | null) {
     return 'not set';
   }
 
-  return new Intl.DateTimeFormat('zh-CN', {
+  return new Intl.DateTimeFormat('en-US', {
     year: 'numeric',
-    month: '2-digit',
+    month: 'short',
     day: '2-digit',
     hour: '2-digit',
     minute: '2-digit'

@@ -1,5 +1,7 @@
 'use client';
 
+import { presentError } from '@/lib/analysis/error-presentation';
+
 import { createContext, useContext, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { Button } from '@/components/ui/button';
 import { updateModelConfig } from '@/app/admin/actions';
@@ -23,14 +25,14 @@ export function ModelEditForm({ children }: { children: ReactNode }) {
     setError('');
     try {
       const result = await updateModelConfig(data);
-      if (result.error) setError(result.error);
+      if (result.error) setError(presentError(result.error, 'request').description);
       else if (result.success) {
-        setSuccess(`${String(data.get('name') || '模型')} 已保存`);
+        setSuccess(`${String(data.get('name') || 'Model')} saved.`);
         const key = form.elements.namedItem('apiKey');
         if (key instanceof HTMLInputElement) key.value = '';
-      } else setError('未确认保存结果，请重试。');
+      } else setError('The save could not be confirmed. Please try again.');
     } catch {
-      setError('保存未完成，请检查填写内容、网络或登录状态后重试。');
+      setError('Unable to save. Check your entries, connection, and sign-in status, then try again.');
     } finally {
       submitting.current = false;
       setPending(false);
@@ -52,7 +54,7 @@ export function ModelSaveButton() {
     <div className="flex flex-wrap items-center gap-3">
       <Button type="submit" disabled={pending}>{pending ? 'Saving…' : 'Save Model'}</Button>
       <span role={error ? 'alert' : 'status'} aria-live="polite" className={`text-sm ${error ? 'text-red-700' : 'text-emerald-700'}`}>
-        {pending ? '正在保存…' : error || success}
+        {pending ? 'Saving…' : error || success}
       </span>
     </div>
   );

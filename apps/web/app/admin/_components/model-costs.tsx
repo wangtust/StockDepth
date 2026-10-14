@@ -4,10 +4,10 @@ export function ModelCosts({ jobId, count, knownCount, total, complete, version,
   paper?: { count: number; knownCount: number; total: string; complete: boolean };
 }) {
   return <section className="rounded-lg border border-slate-200 bg-white p-5">
-    <h2 className="text-base font-semibold">模型费用（仅管理员可见）</h2>
-    <div className="mt-3 text-xl font-semibold">{knownCount ? `¥${total}` : '费用未知'}<span className="ml-2 text-xs font-normal text-slate-500">{complete ? '总估算费用' : '已记录调用费用 · 统计不完整'}</span></div>
-    {!!paper?.count && <p className="mt-2 text-sm text-slate-700">Paper Trader：{paper.knownCount ? `¥${paper.total}` : '费用未知'} · {paper.complete ? '统计完整' : '统计不完整'}（{paper.count} 次调用）</p>}
-    <p className="mt-2 text-xs leading-5 text-slate-500">按调用时保存的人民币单价计算，包含已记录重试。缓存用量未知时按普通输入价计算上限估算；价格或用量缺失的调用不计入金额。厂商账单可能另含折扣等项目，以实际账单为准。</p>
+    <h2 className="text-base font-semibold">Model costs (administrators only)</h2>
+    <div className="mt-3 text-xl font-semibold">{knownCount ? `¥${total}` : 'Cost unknown'}<span className="ml-2 text-xs font-normal text-slate-500">{complete ? 'Total estimated cost' : 'Recorded call costs · Incomplete statistics'}</span></div>
+    {!!paper?.count && <p className="mt-2 text-sm text-slate-700">Paper Trader: {paper.knownCount ? `¥${paper.total}` : 'Cost unknown'} · {paper.complete ? 'Complete statistics' : 'Incomplete statistics'} ({paper.count} {paper.count === 1 ? 'call' : 'calls'})</p>}
+    <p className="mt-2 text-xs leading-5 text-slate-500">Calculated from CNY prices saved at the time of each call, including recorded retries. When cached usage is unknown, the regular input price provides an upper estimate. Calls with missing prices or usage are excluded. Provider invoices may include discounts or other adjustments; refer to the actual invoice.</p>
     {!!count && <ModelCostDetails jobId={jobId} count={count} version={version} />}
   </section>;
 }

@@ -65,7 +65,7 @@ async function build(before){
       }
     }
     await evaluate(`window.showUsage(${JSON.stringify({...usageFixture,showDiagnostics:true})})`);await pause();await evaluate('document.querySelector("details").open=true');
-    const diagnostics=await evaluate('document.body.innerText');assert(/PRIVATE_PROVIDER_FIXTURE/.test(diagnostics));assert(/PRIVATE_REQUEST_FIXTURE/.test(diagnostics));assert(/987654/.test(diagnostics));assert(/重试/.test(diagnostics));assert(/统计不完整/.test(diagnostics));
+    const diagnostics=await evaluate('document.body.innerText');assert(/PRIVATE_PROVIDER_FIXTURE/.test(diagnostics));assert(/PRIVATE_REQUEST_FIXTURE/.test(diagnostics));assert(/987654/.test(diagnostics));assert(/Retry/.test(diagnostics));assert(/Statistics incomplete/.test(diagnostics));
     fs.writeFileSync(dir+'/repair-retry-results.json',JSON.stringify({status:'passed',retryResults,adminDiagnosticsPreserved:true,rawFixtureUnchanged:usageFixture.calls[0].isRetry===true},null,2));
     await c('Page.navigate',{url:`http://127.0.0.1:${server.address().port}/`});await pause();
     fail=true;await evaluate(`Array.from(document.querySelectorAll('button')).find(b=>b.textContent.trim()==='Refresh').click()`);await pause();const failedText=await evaluate('document.body.innerText');assert(failedText.includes('Unable to Complete Request'));assert(!/Traceback|synthetic-secret|\/srv\/private/.test(failedText));fail=false;

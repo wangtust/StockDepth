@@ -162,7 +162,7 @@ export default async function AdminJobsPage({ searchParams }: PageProps) {
                     </td>
                     <td className="py-3 pr-4">
                         <StatusBadge status={job.status} />
-                        {job.hiddenAt && <span className="ml-2 text-xs text-slate-500">用户已删除</span>}
+                        {job.hiddenAt && <span className="ml-2 text-xs text-slate-500">Deleted by user</span>}
                       <div className="text-xs text-slate-500">
                         {job.externalStatus || 'no external status'}
                         {job.externalPid ? ` · pid ${job.externalPid}` : ''}
@@ -175,7 +175,7 @@ export default async function AdminJobsPage({ searchParams }: PageProps) {
                         <div>Completed {formatAdminDate(job.completedAt)}</div>
                       )}
                       <AnalysisUsage showDiagnostics job={job} compact />
-                      <div className="mt-1">费用 {job.costTotal != null ? `¥${job.costTotal}` : '未知'}{(!job.costComplete || !job.tokenUsageComplete) && ' · 统计不完整'}</div>
+                      <div className="mt-1">Cost {job.costTotal != null ? `¥${job.costTotal}` : 'Unknown'}{(!job.costComplete || !job.tokenUsageComplete) && ' · Incomplete statistics'}</div>
                     </td>
                     <td className="max-w-[320px] py-3 pr-4">
                       {(job.status === 'failed' || job.errorMessage) && (

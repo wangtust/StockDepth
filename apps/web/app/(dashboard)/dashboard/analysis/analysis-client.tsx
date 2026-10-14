@@ -365,11 +365,11 @@ export default function AnalysisClient({ initialPayload }: { initialPayload: Job
                   </div>
                   {models.length ? (
                     <div className="space-y-3">
-                      <div><Label htmlFor="analysis-quick-model" className="mb-2">Quick Model · 基础分析与辩论</Label><select id="analysis-quick-model" className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm" value={selectedQuickId ?? ''} onChange={event => setQuickModelConfigId(Number(event.target.value))} required>{quickModels.map(model => <option key={model.id} value={model.id}>{model.name} · {model.modelName}</option>)}</select></div>
-                      <div><Label htmlFor="analysis-deep-model" className="mb-2">Deep Model · 综合研究与决策</Label><select id="analysis-deep-model" className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm" value={selectedDeepId ?? ''} onChange={event => setDeepModelConfigId(Number(event.target.value))} required>{deepModels.map(model => <option key={model.id} value={model.id}>{model.name} · {model.modelName}</option>)}</select></div>
-                      <p className="text-xs text-slate-500">选择适合基础研究和深入决策的模型组合。</p>
+                      <div><Label htmlFor="analysis-quick-model" className="mb-2">Quick Model · Research and debate</Label><select id="analysis-quick-model" className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm" value={selectedQuickId ?? ''} onChange={event => setQuickModelConfigId(Number(event.target.value))} required>{quickModels.map(model => <option key={model.id} value={model.id}>{model.name} · {model.modelName}</option>)}</select></div>
+                      <div><Label htmlFor="analysis-deep-model" className="mb-2">Deep Model · In-depth research and decisions</Label><select id="analysis-deep-model" className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm" value={selectedDeepId ?? ''} onChange={event => setDeepModelConfigId(Number(event.target.value))} required>{deepModels.map(model => <option key={model.id} value={model.id}>{model.name} · {model.modelName}</option>)}</select></div>
+                      <p className="text-xs text-slate-500">Choose models for initial research and in-depth decisions.</p>
                     </div>
-                  ) : <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">暂无可用模型，请联系管理员。</div>}
+                  ) : <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">No models are available. Contact your administrator.</div>}
                   <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600">
                     <div className="flex items-center justify-between gap-3">
                       <span>{getDepthLabel(depth)} analysis</span>
@@ -409,18 +409,18 @@ export default function AnalysisClient({ initialPayload }: { initialPayload: Job
               </CardHeader>
               <CardContent className="px-5">
                 <div className="mb-3 flex gap-2">
-                  {before !== null && <Button variant="outline" size="sm" onClick={() => { setBefore(null); }}>第一页</Button>}
-                  {payload.nextCursor && <Button variant="outline" size="sm" onClick={() => setBefore(payload.nextCursor!)}>下一页</Button>}
+                  {before !== null && <Button variant="outline" size="sm" onClick={() => { setBefore(null); }}>First page</Button>}
+                  {payload.nextCursor && <Button variant="outline" size="sm" onClick={() => setBefore(payload.nextCursor!)}>Next page</Button>}
                 </div>
                 <div className="max-h-[420px] space-y-2 overflow-auto pr-1">
-                  {loading && <p role="status" className="py-3 text-sm text-slate-500">正在加载任务列表…</p>}
+                  {loading && <p role="status" className="py-3 text-sm text-slate-500">Loading jobs…</p>}
                   {jobsLoadError && (
                     <div role="alert" className="rounded-md bg-red-50 p-3 text-sm text-red-700">
                       <ErrorPresentation error={jobsLoadError} context="request" compact />
-                      <Button type="button" variant="outline" className="mt-2" onClick={() => loadJobs()}>重试加载</Button>
+                      <Button type="button" variant="outline" className="mt-2" onClick={() => loadJobs()}>Retry loading</Button>
                     </div>
                   )}
-                  {!loading && !jobsLoadError && payload.jobs.length === 0 && <p className="py-3 text-sm text-slate-500">暂无任务。</p>}
+                  {!loading && !jobsLoadError && payload.jobs.length === 0 && <p className="py-3 text-sm text-slate-500">No jobs yet.</p>}
                   {payload.jobs.map((job) => (
                     <div key={job.id} className="relative">
                     <button
@@ -442,12 +442,12 @@ export default function AnalysisClient({ initialPayload }: { initialPayload: Job
                         {job.realtimeData ? 'Realtime' : job.tradeDate} · {getDepthLabel(job.depth)} · {job.reportCount || 0} reports
                       </div>
                       <div className="mt-1 text-xs text-muted-foreground">
-                        模型：{job.quickModel && job.deepModel && job.quickModel !== job.deepModel
-                          ? `快速 ${job.quickModel} · 深度 ${job.deepModel}`
-                          : job.deepModel || job.quickModel || '未记录'}
+                        Models: {job.quickModel && job.deepModel && job.quickModel !== job.deepModel
+                          ? `Quick ${job.quickModel} · Deep ${job.deepModel}`
+                          : job.deepModel || job.quickModel || 'Not recorded'}
                       </div>
                       <div className="mt-1 text-xs text-muted-foreground">
-                        创建于 <time dateTime={job.createdAt}>{formatAnalysisDate(new Date(job.createdAt))}</time>
+                        Created <time dateTime={job.createdAt}>{formatAnalysisDate(new Date(job.createdAt))}</time>
                       </div>
                       {analysisStatusMessage(job) && <p className="mt-2 text-xs text-slate-600">{analysisStatusMessage(job)}</p>}
                       {(job.status === 'failed' || job.errorMessage) && <ErrorPresentation error={job.errorMessage} jobId={job.id} compact />}
@@ -460,7 +460,7 @@ export default function AnalysisClient({ initialPayload }: { initialPayload: Job
                           variant="ghost"
                           size="icon"
                           className="absolute right-1.5 top-1.5 h-8 w-8"
-                          aria-label={`${job.ticker} 任务操作`}
+                          aria-label={`${job.ticker} job actions`}
                           disabled={deletingJobId !== null}
                         >
                           <MoreHorizontal className="h-4 w-4" />
@@ -473,7 +473,7 @@ export default function AnalysisClient({ initialPayload }: { initialPayload: Job
                           onSelect={() => handleDeleteJob(job.id)}
                         >
                           <Trash2 className="h-4 w-4" />
-                          删除
+                          Delete
                         </DropdownMenuItem>
                       </DropdownMenuContent>
                     </DropdownMenu>
@@ -595,7 +595,7 @@ export default function AnalysisClient({ initialPayload }: { initialPayload: Job
                       : 'min-h-[520px] lg:h-[calc(100dvh-280px)] lg:min-h-[640px]'
                   )}
                 >
-                  {!selectedReport ? <p role="status">正在加载报告…</p> : selectedReport.reportKey === 'progress' ? <AnalysisProgress content={selectedReport.content} running={selectedJob?.status === 'running'} /> : <MarkdownRenderer
+                  {!selectedReport ? <p role="status">Loading report…</p> : selectedReport.reportKey === 'progress' ? <AnalysisProgress content={selectedReport.content} running={selectedJob?.status === 'running'} /> : <MarkdownRenderer
                     content={selectedReport?.content || ''}
                     className="max-w-none"
                   />}

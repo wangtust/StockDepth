@@ -2,10 +2,10 @@ export type ProgressTool = { name: string; args: string; result?: string };
 export type ProgressTurn = { id: number; text: string; tools: ProgressTool[]; result?: string };
 
 const labels: Record<string, string> = {
-  get_stock_data: '查询股票行情', get_indicators: '计算技术指标',
-  get_news: '检索公司新闻', get_global_news: '检索市场新闻',
-  get_fundamentals: '查询公司基本面', get_income_statement: '查询利润表',
-  get_balance_sheet: '查询资产负债表', get_cashflow: '查询现金流',
+  get_stock_data: 'Fetch stock prices', get_indicators: 'Calculate technical indicators',
+  get_news: 'Search company news', get_global_news: 'Search market news',
+  get_fundamentals: 'Fetch company fundamentals', get_income_statement: 'Fetch income statement',
+  get_balance_sheet: 'Fetch balance sheet', get_cashflow: 'Fetch cash flow',
 };
 export function toolLabel(name: string) { return labels[name] || name; }
 
@@ -40,8 +40,8 @@ export function parameterSummary(args: string): string {
 }
 
 export function resultSummary(result: string): string {
-  if (!result.trim()) return '返回为空';
-  if (/^(error|exception|failed|错误|失败)/im.test(result)) return '返回包含错误信息，请展开查看';
+  if (!result.trim()) return 'Empty result';
+  if (/^(error|exception|failed|错误|失败)/im.test(result)) return 'Result contains an error. Expand to view details.';
   const lines = result.split('\n').filter(line => line.trim());
-  return `${lines.length} 行数据 · ${result.length.toLocaleString('en-US')} 字符`;
+  return `${lines.length} data ${lines.length === 1 ? 'line' : 'lines'} · ${result.length.toLocaleString('en-US')} characters`;
 }

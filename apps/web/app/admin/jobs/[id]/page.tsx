@@ -146,7 +146,7 @@ export default async function AdminJobDetailPage({ params, searchParams }: PageP
               Trading Analysis Report: {job.ticker}
             </h1>
             <StatusBadge status={job.status} />
-            {job.hiddenAt && <span className="text-sm text-slate-500">用户已删除（仅用户列表隐藏）</span>}
+            {job.hiddenAt && <span className="text-sm text-slate-500">Deleted by user (hidden from user lists only)</span>}
           </div>
           <p className="mt-1 text-sm text-slate-600">
             Job #{job.id} · {job.tradeDate} · {reports.length} sections · <AnalysisTimer job={job} />

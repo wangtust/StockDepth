@@ -1,5 +1,6 @@
 'use client';
 
+import { ErrorPresentation } from '@/components/error-presentation';
 import { useState } from 'react';
 import useSWR from 'swr';
 import { Button } from '@/components/ui/button';
@@ -10,7 +11,7 @@ type DeletedJob = { id: number; ticker: string; tradeDate: string; status: strin
 async function fetcher(url: string) {
   const response = await fetch(url, { cache: 'no-store' });
   const data = await response.json();
-  if (!response.ok) throw new Error(data.error || '无法加载最近删除的任务');
+  if (!response.ok) throw new Error(data.error || 'Unable to load recently deleted jobs.');
   return data as { jobs: DeletedJob[] };
 }
 
@@ -27,9 +28,9 @@ export function RecentlyDeletedJobs() {
     try {
       const response = await fetch(`/api/analysis/jobs/${id}/restore`, { method: 'POST' });
       const result = await response.json();
-      if (!response.ok) throw new Error(result.error || '恢复失败');
+      if (!response.ok) throw new Error(result.error || 'Unable to restore this job.');
       await mutate();
-      setNotice('已恢复，可在 Analysis 的 Jobs 列表查看。');
+      setNotice('Job restored. Find it in the Analysis jobs list.');
     } catch (err) {
       setActionError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -40,22 +41,22 @@ export function RecentlyDeletedJobs() {
   return (
     <Card className="mt-8">
       <CardHeader>
-        <CardTitle>最近删除</CardTitle>
-        <p className="text-sm text-muted-foreground">显示最近删除的 50 条任务。恢复保留原任务状态和报告，不会重新执行分析。</p>
+        <CardTitle>Recently deleted</CardTitle>
+        <p className="text-sm text-muted-foreground">The 50 most recently deleted jobs. Restoring preserves their status and reports without running the analysis again.</p>
       </CardHeader>
       <CardContent className="space-y-3">
-        {(error || actionError) && <p role="alert" className="text-sm text-red-600">{actionError || error.message}</p>}
+        {(error || actionError) && <ErrorPresentation error={actionError || error.message} context="request" compact />}
         {notice && <p role="status" className="text-sm text-emerald-700">{notice}</p>}
-        {isLoading && <p className="text-sm text-muted-foreground">加载中…</p>}
-        {!isLoading && !error && data?.jobs.length === 0 && <p className="text-sm text-muted-foreground">暂无已删除任务。</p>}
+        {isLoading && <p className="text-sm text-muted-foreground">Loading…</p>}
+        {!isLoading && !error && data?.jobs.length === 0 && <p className="text-sm text-muted-foreground">No deleted jobs.</p>}
         {data?.jobs.map(job => (
           <div key={job.id} className="flex items-center justify-between gap-4 rounded-md border p-3">
             <div className="min-w-0">
               <p className="truncate font-medium">{job.ticker} · {job.tradeDate} · {job.status}</p>
-              <p className="text-xs text-muted-foreground">删除时间：{new Date(job.hiddenAt).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}</p>
+              <p className="text-xs text-muted-foreground">Deleted: {new Date(job.hiddenAt).toLocaleString('en-US', { timeZone: 'Asia/Shanghai' })}</p>
             </div>
             <Button variant="outline" size="sm" disabled={restoringId !== null} onClick={() => restore(job.id)}>
-              {restoringId === job.id ? '恢复中…' : '恢复'}
+              {restoringId === job.id ? 'Restoring…' : 'Restore'}
             </Button>
           </div>
         ))}

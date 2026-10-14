@@ -40,7 +40,7 @@ function getRelativeTime(date: Date) {
     return `${Math.floor(diffInSeconds / 3600)} hours ago`;
   if (diffInSeconds < 604800)
     return `${Math.floor(diffInSeconds / 86400)} days ago`;
-  return date.toLocaleDateString();
+  return date.toLocaleDateString('en-US');
 }
 
 function formatAction(action: ActivityType): string {

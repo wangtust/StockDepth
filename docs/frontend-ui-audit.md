@@ -26,3 +26,7 @@
 当前 HEAD 与只读 origin/dev 查询均为 7ae2378d5b1a89076ad55e42607f7ea35b4a90c9。三旧问题已解决：用户 isRetry 显示英文 Retry 且 provider/config/request/completeness 仍隐藏；updateModelConfig 独立保存依赖已单独发布且冻结文件等于 HEAD；发布工具允许 scripts/tests/frontend-*，已只读执行 AST 白名单断言，拒绝 actions/API/runtime/credentials 路径，不执行发布函数。该明确授权的发布工具例外纳入审查，未修改 Python。
 
 coordinator返修快照 stage1-coordinator-repair-before/hashes.json；全部已跟踪产品文件在本轮协调审查期间哈希不变，见 stage1-coordinator-repair-integrity.json。前置 models/model-edit-form、模型选择标签、usage/showDiagnostics 均审查保留。Chinese Progress 协议、模型/角色/报告语言选择保留，未修改实现。新增admin独立保存测试纳入清单。当前安全展示验收通过；响应级原始错误风险及移动溢出仍如上，仅本阶段前端展示通过。
+
+## Phase2 recheck — 2026-10-14 Beijing
+
+Static Chinese UI/date/call-table findings addressed and independently reviewed; historical Chinese parser/report content preserved. User Retry/privacy and administrator diagnostics preserved. No new business/API defects modified. Actual mock UI and residual mobile overflow limits: see frontend-ui-results Phase2.

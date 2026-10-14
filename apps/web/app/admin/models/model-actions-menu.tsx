@@ -1,5 +1,7 @@
 'use client';
 
+import { presentError } from '@/lib/analysis/error-presentation';
+
 import { useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import { MoreHorizontal, Trash2 } from 'lucide-react';
@@ -21,10 +23,10 @@ export function ModelActionsMenu({ configId }: { configId: number }) {
         const formData = new FormData();
         formData.set('configId', String(configId));
         const result = await deleteModelConfig(formData);
-        if (result.error) setError(result.error);
+        if (result.error) setError(presentError(result.error, 'request').description);
         else router.refresh();
       } catch {
-        setError('删除失败，请稍后重试。');
+        setError('Unable to delete the model. Please try again.');
       }
     });
   }
@@ -34,13 +36,13 @@ export function ModelActionsMenu({ configId }: { configId: number }) {
       <div className="absolute right-3 top-3 z-10">
         <DropdownMenu>
           <DropdownMenuTrigger asChild id={`model-menu-trigger-${configId}`} aria-controls={`model-menu-content-${configId}`}>
-            <Button variant="ghost" size="icon" disabled={pending} aria-label="模型操作菜单">
+            <Button variant="ghost" size="icon" disabled={pending} aria-label="Model actions">
               <MoreHorizontal className="h-5 w-5" />
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" id={`model-menu-content-${configId}`} aria-labelledby={`model-menu-trigger-${configId}`}>
             <DropdownMenuItem onSelect={removeModel} disabled={pending} className="text-red-600 focus:text-red-600">
-              <Trash2 className="mr-2 h-4 w-4" />删除模型（弃用）
+              <Trash2 className="mr-2 h-4 w-4" />Delete model (deprecate)
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>

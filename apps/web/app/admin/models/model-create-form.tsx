@@ -1,5 +1,7 @@
 'use client';
 
+import { presentError } from '@/lib/analysis/error-presentation';
+
 import { useState, type ReactNode, type FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { createModelConfig } from '@/app/admin/actions';
@@ -17,22 +19,22 @@ export function ModelCreateForm({ children }: { children: ReactNode }) {
     setPending(true); setError(''); setSuccess('');
     try {
       const result = await createModelConfig(data);
-      if (result.error) setError(result.error);
+      if (result.error) setError(presentError(result.error, 'request').description);
       else {
         form.reset();
-        setSuccess('模型调用测试成功，配置已保存。');
+        setSuccess('Model test succeeded. Configuration saved.');
         router.refresh();
       }
     } catch {
-      setError('创建请求未完成，请刷新页面后重试；若仍失败，请检查网络或登录状态。');
+      setError('Unable to create the model. Refresh the page and try again. If the problem persists, check your connection and sign-in status.');
     } finally { setPending(false); }
   }
   return (
     <form onSubmit={submit} className="space-y-4">
-      <p className="text-xs text-slate-500">保存前会进行一次真实模型调用测试，可能产生少量 token 费用。测试成功后才会保存。</p>
+      <p className="text-xs text-slate-500">Adding a model makes a real test call that may incur a small token charge. The configuration is saved only if the test succeeds.</p>
       {error && <p role="alert" className="rounded-md bg-red-50 p-3 text-sm text-red-700">{error}</p>}
       {success && <p role="status" className="text-sm text-emerald-700">{success}</p>}
-      {pending && <p role="status" className="text-sm text-slate-600">正在测试模型调用，请稍候…</p>}
+      {pending && <p role="status" className="text-sm text-slate-600">Testing the model. Please wait…</p>}
       <fieldset disabled={pending} className="space-y-4 disabled:opacity-60">{children}</fieldset>
     </form>
   );

@@ -15,8 +15,8 @@ User's earlier explicit preferences take precedence over conflicting generic tex
 | Phase | Work | State |
 | --- | --- | --- |
 | 0 | Git/remote baseline, page inventory, mock desktop/mobile screenshots, protocol review; docs/frontend-ui-audit.md | Complete; audit and synthetic before/after evidence |
-| 1 | Shared safe deterministic ErrorPresentation; all four failure surfaces; no raw traces/paths/secrets; tests | Independent repair acceptance complete; scheduler publication/SHA gate pending |
-| 2 | English static UI; historical Chinese progress parsing remains compatible; Agent/Role/Model split; user Cache Hit column removed | Queued |
+| 1 | Shared safe deterministic ErrorPresentation; all four failure surfaces; no raw traces/paths/secrets; tests | Published and remote SHA verified b119d06 |
+| 2 | English static UI; historical Chinese progress parsing remains compatible; Agent/Role/Model split; user Cache Hit column removed | Independent acceptance complete; scheduler publication/SHA gate pending |
 | 3 | Responsive layouts at 390/768/1440/1920/2560 widths, consistent visual treatment, readable reports and local table scrolling | Queued |
 | 4 | Loading/empty/error/retry feedback, modal focus/ESC, state races, accessibility, final browser regression | Queued |
 

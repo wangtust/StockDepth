@@ -22,7 +22,7 @@ export type UsageCall = {
 
 function elapsed(start: string | Date, end: string | Date | number) {
   const delta = new Date(end).getTime() - new Date(start).getTime();
-  if (!Number.isFinite(delta) || delta < 0) return '时间异常';
+  if (!Number.isFinite(delta) || delta < 0) return 'Invalid duration';
   const seconds = Math.floor(delta / 1000);
   return `${Math.floor(seconds / 3600)}:${String(Math.floor(seconds / 60) % 60).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`;
 }
@@ -36,7 +36,7 @@ export function AnalysisTimer({ job }: { job: UsageJob }) {
     return () => clearInterval(timer);
   }, [job.status]);
   const end = job.completedAt || (job.status === 'running' ? now : job.updatedAt);
-  return <span>{job.startedAt && end ? elapsed(job.startedAt, end) : job.status === 'queued' ? '等待开始' : '—'}</span>;
+  return <span>{job.startedAt && end ? elapsed(job.startedAt, end) : job.status === 'queued' ? 'Waiting to start' : '—'}</span>;
 }
 
 export function AnalysisUsage({ job, calls, compact = false, showDiagnostics = false }: { job: UsageJob; calls?: UsageCall[]; compact?: boolean; showDiagnostics?: boolean }) {
@@ -48,21 +48,24 @@ export function AnalysisUsage({ job, calls, compact = false, showDiagnostics = f
     return () => clearInterval(timer);
   }, [job.status]);
   const end = job.completedAt || (job.status === 'running' ? now : job.updatedAt);
-  const duration = job.startedAt && end ? elapsed(job.startedAt, end) : job.status === 'queued' ? '等待开始' : '—';
-  const number = (value?: number | null) => value == null ? (showDiagnostics ? '未知' : '—') : value.toLocaleString('en-US');
+  const duration = job.startedAt && end ? elapsed(job.startedAt, end) : job.status === 'queued' ? 'Waiting to start' : '—';
+  const number = (value?: number | null) => value == null ? (showDiagnostics ? 'Unknown' : '—') : value.toLocaleString('en-US');
   return <div className="mt-2 text-xs text-slate-600">
-    <div>耗时 {duration} · {job.tokenUsageComplete ? '总 token' : '已记录 token'} {number(job.totalTokens)}{showDiagnostics && !job.tokenUsageComplete && '（统计不完整）'}</div>
+    <div>Duration {duration} · {job.tokenUsageComplete ? 'Total tokens' : 'Recorded tokens'} {number(job.totalTokens)}{showDiagnostics && !job.tokenUsageComplete && ' (Statistics incomplete)'}</div>
     {!compact && <>
-      <div className="mt-1">输入 {number(job.inputTokens)} · 输出 {number(job.outputTokens)}</div>
-      <p className="mt-1">{showDiagnostics ? '耗时从首次开始到结束，继续任务时包含中间等待时间。Token 累计所有已记录调用，包含重复请求；供应商未返回用量的调用标为未知。' : '查看各分析环节使用的模型、耗时和已记录用量。'}</p>
+      <div className="mt-1">Input {number(job.inputTokens)} · Output {number(job.outputTokens)}</div>
+      <p className="mt-1">{showDiagnostics ? 'Duration includes pauses before continuing. Tokens include all recorded calls and retries. Calls without provider usage are marked Unknown.' : 'View the models, duration and recorded usage for each analysis step.'}</p>
       {!!calls?.length && <details className="mt-3">
-        <summary className="cursor-pointer">模型调用明细（{calls.length} 次）</summary>
+        <summary className="cursor-pointer">Model calls ({calls.length})</summary>
         <div className="mt-2 overflow-x-auto"><table className="w-full text-left">
-          <thead><tr>{['分析环节', showDiagnostics ? '角色 / 供应商 / 模型' : '角色 / 模型', '状态', '耗时', '输入', '缓存命中', '输出', '总 token'].map(x => <th className="p-2" key={x}>{x}</th>)}</tr></thead>
+          <thead><tr>{['Agent', 'Role', 'Model', 'Status', 'Duration', 'Input', ...(showDiagnostics ? ['Cache Hit'] : []), 'Output', 'Total Tokens'].map(x => <th className="p-2" key={x}>{x}</th>)}</tr></thead>
           <tbody>{calls.map(call => <tr key={call.callId}>
-            <td className="p-2">{call.agent}</td><td className="p-2">{showDiagnostics ? `${call.role || 'legacy'} · ${call.provider || '未知'} · ` : call.role === 'quick' ? 'Quick · ' : call.role === 'deep' ? 'Deep · ' : ''}{call.model}{showDiagnostics && call.modelConfigId ? ` (#${call.modelConfigId})` : ''}</td><td className="p-2">{showDiagnostics ? call.status : ({ complete: '已完成', completed: '已完成', running: '进行中', failed: '未完成', interrupted: '已中断' }[call.status] || '处理中')}{call.isRetry ? (showDiagnostics ? ' · 重试' : ' · Retry') : ''}{showDiagnostics && <><br />{call.requestKind}</>}</td>
+            <td className="p-2">{call.agent || '—'}</td>
+            <td className="p-2">{showDiagnostics ? call.role || 'legacy' : call.role === 'quick' ? 'Quick' : call.role === 'deep' ? 'Deep' : '—'}</td>
+            <td className="p-2">{call.model || '—'}{showDiagnostics && <> · {call.provider || 'Unknown'}{call.modelConfigId ? ` (#${call.modelConfigId})` : ''}</>}</td>
+            <td className="p-2">{showDiagnostics ? call.status : ({ complete: 'Completed', completed: 'Completed', running: 'Running', queued: 'Queued', failed: 'Failed', interrupted: 'Interrupted' }[call.status] || 'Processing')}{call.isRetry ? ' · Retry' : ''}{showDiagnostics && <><br />{call.requestKind}</>}</td>
             <td className="p-2">{call.endedAt || (call.status === 'running' && now) ? elapsed(call.startedAt, call.endedAt || now!) : '—'}</td>
-            <td className="p-2">{number(call.inputTokens)}</td><td className="p-2">{number(call.cachedInputTokens)}</td><td className="p-2">{number(call.outputTokens)}</td><td className="p-2">{number(call.totalTokens)}</td>
+            <td className="p-2">{number(call.inputTokens)}</td>{showDiagnostics && <td className="p-2">{number(call.cachedInputTokens)}</td>}<td className="p-2">{number(call.outputTokens)}</td><td className="p-2">{number(call.totalTokens)}</td>
           </tr>)}</tbody>
         </table></div>
       </details>}

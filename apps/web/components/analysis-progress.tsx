@@ -13,7 +13,7 @@ export const AnalysisProgress = memo(function AnalysisProgress({ content, runnin
   const toolCount = turns.reduce((count, turn) => count + turn.tools.length, 0);
   return <div className="mx-auto w-full max-w-[1200px] min-w-0 space-y-5 [overflow-wrap:anywhere] [&_pre]:max-w-full [&_pre]:[overflow-wrap:normal] [&_table]:[overflow-wrap:normal]">
     <header className="rounded-xl border border-emerald-100 bg-emerald-50/60 p-5">
-      <h2 className="text-lg font-semibold text-slate-950">Analysis Progress</h2>
+      <h2 className="text-lg font-semibold text-slate-950">Interactions</h2>
       <p className="mt-1 text-sm text-slate-600">Follow model queries, data retrieval and analysis. Expand entries to view source data and query parameters.</p>
       <div className="mt-3 flex flex-wrap gap-2 text-xs text-emerald-800">
         <span className="rounded-full bg-white px-3 py-1">{responseCount} model {responseCount === 1 ? 'response' : 'responses'}</span>
@@ -27,7 +27,7 @@ export const AnalysisProgress = memo(function AnalysisProgress({ content, runnin
         <div className="absolute left-0 top-0 flex size-8 items-center justify-center rounded-full bg-slate-900 text-xs font-semibold text-white">{index + 1}</div>
         <div className="min-w-0 overflow-hidden rounded-xl border border-slate-200 bg-white">
           <div className="flex items-center gap-2 border-b border-slate-100 bg-slate-50 px-4 py-3 text-sm font-medium text-slate-800">
-            <Bot className="size-4 text-emerald-600" />{turn.tools.length ? 'Model queries data' : 'Model generates analysis'}
+            <Bot className="size-4 text-emerald-600" /><span>{turn.agent || (turn.tools.length ? 'Model queries data' : 'Model generates analysis')}{turn.model && <span className="mt-1 block text-xs font-normal text-slate-500">{turn.model}</span>}</span>
           </div>
           {turn.text && <div className="mx-auto max-w-[80ch] px-3 py-4 sm:px-5">
             {turn.text.length > 1200 ? <DeferredDetails summary={<span className="cursor-pointer text-sm font-medium text-slate-700">View analysis response · {turn.text.length.toLocaleString('en-US')} characters<span className="mt-2 block text-sm font-normal leading-6 text-slate-500">{turn.text.replace(/[#*`]/g, "").slice(0, 180)}…</span></span>}><div className="mt-3"><MarkdownRenderer content={turn.text} /></div></DeferredDetails> : <MarkdownRenderer content={turn.text} />}

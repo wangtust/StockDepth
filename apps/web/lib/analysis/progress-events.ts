@@ -1,5 +1,5 @@
 export type ProgressTool = { name: string; args: string; result?: string };
-export type ProgressTurn = { id: number; text: string; tools: ProgressTool[]; result?: string };
+export type ProgressTurn = { id: number; agent?: string; model?: string; text: string; tools: ProgressTool[]; result?: string };
 
 const labels: Record<string, string> = {
   get_stock_data: 'Fetch stock prices', get_indicators: 'Calculate technical indicators',
@@ -17,10 +17,20 @@ export function parseProgress(content: string): ProgressTurn[] {
     const body = content.slice(heading.index! + heading[0].length, headings[index + 1]?.index ?? content.length).trim();
     if (heading[1] === '模型回复') {
       const tools: ProgressTool[] = [];
-      const text = body.replace(/调用工具：([^\n]+)\s*\n```json\s*\n([\s\S]*?)\n```/g, (_, name, args) => {
+      const marker = body.match(/^<!-- stockdepth-interaction (.+?) -->\s*/);
+      let identity: { agent?: string; model?: string } = {};
+      if (marker) {
+        try {
+          const value = JSON.parse(marker[1]);
+          if (typeof value.agent === 'string') identity.agent = value.agent;
+          if (typeof value.model === 'string') identity.model = value.model;
+        } catch { /* Old or malformed metadata must not break progress. */ }
+      }
+
+      const text = (marker ? body.slice(marker[0].length) : body).replace(/调用工具：([^\n]+)\s*\n```json\s*\n([\s\S]*?)\n```/g, (_, name, args) => {
         tools.push({ name: name.trim(), args: args.trim() }); return '';
       }).trim();
-      turns.push({ id: index, text, tools });
+      turns.push({ id: index, ...identity, text, tools });
     } else {
       const name = heading[1].slice('工具结果：'.length).trim();
       const turn = [...turns].reverse().find(t => t.tools.some(tool => tool.name === name && tool.result === undefined));

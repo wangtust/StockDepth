@@ -637,7 +637,7 @@ export default function AnalysisClient({ initialPayload }: { initialPayload: Job
                       className="max-w-[240px] shrink-0 overflow-hidden text-ellipsis rounded-md"
                       onClick={() => setSelectedReportKey(report.reportKey)}
                     >
-                      {report.title}
+                      {report.reportKey === 'progress' ? 'Interactions' : report.title}
                     </Button>
                   ))}
                 </div>

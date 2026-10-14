@@ -86,6 +86,12 @@ def save_progress(state: dict, report_dir: Path, persistence: ReportPersistence 
             body.append(str(content))
         for call in calls:
             body.append(f"调用工具：{call.get('name', '')}\n\n```json\n{json.dumps(call.get('args', {}), ensure_ascii=False)}\n```")
+        public_identity = (getattr(message, 'response_metadata', {}) or {}).get('stockdepth_interaction')
+        if kind == 'ai' and isinstance(public_identity, dict):
+            safe_identity = {key: public_identity[key] for key in ('agent', 'model')
+                             if isinstance(public_identity.get(key), str)}
+            if safe_identity:
+                body.insert(0, '<!-- stockdepth-interaction ' + json.dumps(safe_identity, ensure_ascii=True).replace('--', r'\u002d\u002d') + ' -->')
         entry = {"title": title, "body": "\n\n".join(body)}
         identity = getattr(message, "id", None) or hashlib.sha256(json.dumps(entry, ensure_ascii=False).encode()).hexdigest()
         if history.get(identity) != entry:

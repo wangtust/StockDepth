@@ -80,6 +80,19 @@ class UsageRecorder(BaseCallbackHandler):
             self._save()
 
     def on_llm_end(self, response, *, run_id, **kwargs):
+        # Attach only known public identity to the returned message. It survives
+        # Checkpoint serialization and does not alter token/cost accounting.
+        with self.lock:
+            identity = next((c for c in self.calls if c['call_id'] == str(run_id)), None)
+            public_identity = ({'agent': identity['agent'], 'model': identity['model']}
+                               if identity and identity['agent'] != 'Model' else None)
+        if public_identity:
+            for group in response.generations:
+                for generation in group:
+                    message = getattr(generation, 'message', None)
+                    if message is not None and hasattr(message, 'response_metadata'):
+                        message.response_metadata = {**(message.response_metadata or {}),
+                                                     'stockdepth_interaction': public_identity}
         usage = None
         raw_usage = None
         for group in response.generations:

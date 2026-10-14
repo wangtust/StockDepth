@@ -58,10 +58,10 @@ export function AnalysisUsage({ job, calls, compact = false, showDiagnostics = f
       {!!calls?.length && <details className="mt-3">
         <summary className="cursor-pointer">Model calls ({calls.length})</summary>
         <div className="mt-2 max-w-full overflow-x-auto rounded-md border border-slate-200"><table className="w-full min-w-[760px] text-left [&_th]:whitespace-nowrap [&_th]:bg-slate-50 [&_td]:align-top [&_tbody_tr]:border-t [&_tbody_tr]:border-slate-100">
-          <thead><tr>{['Agent', 'Role', 'Model', 'Status', 'Duration', 'Input', ...(showDiagnostics ? ['Cache Hit'] : []), 'Output', 'Total Tokens'].map(x => <th className="p-2" key={x}>{x}</th>)}</tr></thead>
+          <thead><tr>{['Agent', ...(showDiagnostics ? ['Role'] : []), 'Model', 'Status', 'Duration', 'Input', ...(showDiagnostics ? ['Cache Hit'] : []), 'Output', 'Total Tokens'].map(x => <th className="p-2" key={x}>{x}</th>)}</tr></thead>
           <tbody>{calls.map(call => <tr key={call.callId}>
-            <td className="max-w-[220px] p-2">{call.agent || '—'}</td>
-            <td className="p-2">{showDiagnostics ? call.role || 'legacy' : call.role === 'quick' ? 'Quick' : call.role === 'deep' ? 'Deep' : '—'}</td>
+            <td className="max-w-[220px] p-2">{!showDiagnostics && (!call.agent || call.agent === 'Model') ? 'Analysis' : call.agent || '—'}</td>
+            {showDiagnostics && <td className="p-2">{call.role || 'legacy'}</td>}
             <td className="max-w-[260px] p-2">{call.model || '—'}{showDiagnostics && <> · {call.provider || 'Unknown'}{call.modelConfigId ? ` (#${call.modelConfigId})` : ''}</>}</td>
             <td className="p-2">{showDiagnostics ? call.status : ({ complete: 'Completed', completed: 'Completed', running: 'Running', queued: 'Queued', failed: 'Failed', interrupted: 'Interrupted' }[call.status] || 'Processing')}{call.isRetry ? ' · Retry' : ''}{showDiagnostics && <><br />{call.requestKind}</>}</td>
             <td className="p-2">{call.endedAt || (call.status === 'running' && now) ? elapsed(call.startedAt, call.endedAt || now!) : '—'}</td>

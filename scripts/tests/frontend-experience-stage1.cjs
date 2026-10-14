@@ -57,7 +57,7 @@ async function build(before){
         const usageText=await evaluate('document.body.innerText');
         assert.equal(usageText.includes('Retry'),!before);
         assert(!/PRIVATE_PROVIDER_FIXTURE|PRIVATE_REQUEST_FIXTURE|987654|legacy|统计不完整/.test(usageText));
-        assert(usageText.includes('Quick')&&usageText.includes('Deep'));
+        if(before)assert(usageText.includes('Quick')&&usageText.includes('Deep'));else assert(!Array.from(usageText.matchAll(/\b(?:Quick|Deep)\b/g)).length);
         const rows=await evaluate('Array.from(document.querySelectorAll("tbody tr")).map(r=>r.innerText)');
         assert.equal(rows[0].includes('Retry'),!before);assert(!rows[1].includes('Retry'));assert(rows[0].includes('—'));
         const metrics=await c('Page.getLayoutMetrics');const shot=await c('Page.captureScreenshot',{format:'png',captureBeyondViewport:true,clip:{x:0,y:0,width,height:metrics.cssContentSize.height,scale:1}});fs.writeFileSync(`${dir}/repair-${before?'before':'after'}-usage-${width}.png`,Buffer.from(shot.data,'base64'));

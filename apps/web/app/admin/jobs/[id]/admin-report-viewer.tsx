@@ -181,7 +181,7 @@ export function AdminReportViewer({
                   className="max-w-[260px] shrink-0 overflow-hidden text-ellipsis rounded-md"
                   onClick={() => setSelection({ jobId, key: report.reportKey })}
                 >
-                  {report.title}
+                  {report.reportKey === 'progress' ? 'Interactions' : report.title}
                 </Button>
               ))}
             </div>

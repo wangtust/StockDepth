@@ -84,7 +84,7 @@ export default function HomePage() {
                 size="lg"
                 className="h-12 rounded-md bg-emerald-400 px-6 text-base text-slate-950 hover:bg-emerald-300"
               >
-                <Link href="/sign-up">
+                <Link href="/dashboard/analysis">
                   Start analysis
                   <ArrowRight className="h-5 w-5" />
                 </Link>

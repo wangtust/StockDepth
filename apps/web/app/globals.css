@@ -273,3 +273,10 @@
     @apply bg-background text-foreground;
   }
 }
+
+/* Admin shell: constrain intrinsic widths while keeping wide tables locally scrollable. */
+.admin-workspace main { overflow-wrap: anywhere; }
+.admin-workspace main :where([data-slot="card"], [data-slot="card-header"], [data-slot="card-content"], form, input, textarea, select) { min-width: 0; max-width: 100%; }
+.admin-workspace main .overflow-x-auto { min-width: 0; max-width: 100%; overscroll-behavior-x: contain; }
+.admin-workspace main pre { max-width: 100%; overflow-x: auto; overflow-wrap: normal; }
+.admin-workspace main table { overflow-wrap: normal; }

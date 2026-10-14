@@ -1,12 +1,14 @@
 # Frontend UI results
 
-2026-10-14（北京时间）。Phase0完成；Phase1返修独立验收 **complete**，等待调度器发布并验证远端SHA。未commit/push/部署/重启，未进入Phase2。
+2026-10-14（北京时间）。Phase1/2已由调度器发布并验证 b119d06 / 431349c。Phase3独立验收 **complete**，等待调度器发布及远端SHA门禁；coordinator未commit/push/部署/重启、未进入Phase4。下文保留各阶段历史记录。
 
 | 阶段 | 实际状态 |
 | --- | --- |
 | 0 | 页面/数据协议审查、合成桌面移动基线截图完成，见 frontend-ui-audit.md |
 | 1 | 三旧问题已解决；四处安全英文错误展示、Retry隐私、独立保存回归、tsc、冻结哈希通过 |
-| 2–4 | 未开始；后续仅调度器发布验证成功后放行 |
+| 2 | 英文展示、用户八列表格、旧协议兼容及独立保存验收通过，已发布431349c |
+| 3 | 响应式独立验收通过，待调度器发布/SHA门禁 |
+| 4 | 未开始 |
 
 本轮独立执行，以下命令最终退出0，日志均在 var/codex-frontend-team/：
 
@@ -51,3 +53,31 @@ Initial parallel experience/model browser assertions ran before mounts and faile
 Limits: mock SSR/hydration do not prove live authorization, server saves/restore, production dynamic imports or paid execution. AnalysisClient dynamic imports stubbed; standalone progress/Markdown rendering exercised. Existing admin mobile horizontal overflow remains explicitly Phase3; no responsive acceptance claimed. Full menu/keyboard/focus interactions remain Phase4. Raw server errors remain in transport; safe UI is not a backend exposure fix. No added dependencies.
 
 Rollback: `stage2-coordinator.rollback.patch` restores only coordinator docs/PLAN and removes own stage2 test; apply-check only, never applied. Product dedicated patches: stage2-admin-layout.rollback.patch and stage2-experience.rollback.patch, disjoint ownership; apply-check before each, preserve Phase1/7ae2378 and initial UI, no whole-tree reset. Later same-file changes require renewed review. Scheduler alone publishes receipt.commit_paths, ordinary origin/dev push then SHA verification; failure blocked. Stop at current Phase2 gate.
+
+## Phase3 independent acceptance — 2026-10-14 Beijing
+
+当前HEAD/dev 431349c，与stage2-push.json一致并含7ae2378。先读Phase3两角色contract/checkpoint/handoff/receipt，state为Phase3 repair_round1；无既存协调Phase3交付可恢复，因此从未完成的独立验收开始，未重复Phase1返修或Phase2已完成重构。覆盖前副本/哈希在stage3-coordinator-before/manifest.json；initial-before保持。只更新本报告、frontend-ui-plan、PLAN和两个frontend-coordinator测试，所有incoming产品及其他角色测试字节不变。
+
+审查13个产品文件：AnalysisClient、PortfolioPage仅响应式className；StocksClient/StockDetailClient长标识换行、分页换行及日价表间距/960px局部滚动；AnalysisProgress的1200px时间线/80ch响应/移动gutter及长参数；AnalysisUsage局部760px表、字号行高/行分隔/长模型名；ErrorPresentation只新增overflow-wrap。AdminLayout/AdminNav修复grid intrinsic width与身份栏换行并将shell上限1800→2400px；dashboard Header上限2560px与gap，DashboardLayout保留桌面72/256px折叠并补移动aria/Escape；ModelConfigForm只改Quick/Deep checkbox换行；AdminReportViewer正文80ch；globals.css只新增admin-workspace约束及局部pre/table规则。业务fetch/SWR key/版本/handler、模型角色和语言值、额度/交易/保存逻辑均未改。MarkdownRenderer、DeferredDetails、Progress协议及状态/错误helper等于HEAD。冻结actions.ts等于HEAD，7ae2378是已完成前置，不纳入本次。
+
+真实测量：390px管理员四页before scrollWidth=711/clientWidth=375，after均375/375，nav约677/325局部滚动；五视口无整页横向溢出。用户2560px工作区1800→2400px，报告正文1314→667.375px；1440px报告915→667.375px；移动390px正文316→324px，768px639→655px。Portfolio短positions卡不再沿表单拉伸。代码、宽表留局部横滚。用户八列、Retry及内部字段隐藏、管理员诊断、中文/英文报告内容与选择、中文旧Progress、关闭响应/结果延迟挂载均通过。
+
+协调独立运行命令（根目录），以下最终全部exit0：
+
+- `node scripts/tests/frontend-admin-stage3.cjs after` → stage3-coordinator-admin.log：四实际SSR页×五视口，18安全错误分类回归，移动导航/Jobs表局部横滚，无console错误。
+- `node scripts/tests/frontend-coordinator-admin-extra-stage3.cjs after` → stage3-coordinator-admin-extra.log：补充Users/Accounts/Pricing/System实际SSR×五视口，document/nav/table约束；DB/auth/actions/settings/fs/net/os/service-health全Mock，process.env定义为空，没有真实TCP探测或表单提交。stdout及JSON scope继承旧模板措辞较宽，验收仅按真实断言；已修正脚本的输出说明，未重跑不变的布局断言。
+- `node scripts/tests/frontend-coordinator-stage3.cjs` → stage3-coordinator-regression-passed.log：组合实际DashboardLayout/AdminReportViewer/MarkdownRenderer，Mock SWR/Next，五视口报告<850px、代码/二十列宽表局部滚动、移动展开/Escape关闭、桌面sidebar宽度，零console/runtime错误。组合为隔离布局探针，不声称真实路由结构/端到端导航。
+- `node scripts/tests/frontend-experience-stage3.cjs` → stage3-coordinator-experience.log：独立复验当前真实用户组件，五视口报告/长usage/Progress，延迟挂载、Retry/privacy、八列/管理员诊断、历史中文协议、报告语言、11错误分类及Mock恢复反馈，零console/runtime错误。脚本内置before/after采集，没有重做旧阶段实现。Portfolio/stocks三页×五视口的既有最终未变化验收未重跑，审查脚本/JSON/截图与incoming hash确认有效。
+- `node apps/web/node_modules/typescript/bin/tsc -p apps/web/tsconfig.json --noEmit --incremental false` → stage3-coordinator-tsc.log：exit0空日志。
+- 只读snapshot/HEAD哈希、ancestor及publisher AST path-validator → stage3-coordinator-integrity.json：24审查路径通过，actions/API/DB/Worker/migrations/env/var/node_modules反例拒绝；没有执行publisher main。
+- `git diff --check`及三角色`git apply --check` → stage3-coordinator-diff-check.log / rollback-check.log：通过，未应用。
+
+协调测试首次两列表格可容纳而未触发overflow，修正自身fixture为二十列宽表；第二次发现自身Next Link替身把passHref漏到DOM，过滤该仅Next参数后最终passed。两份失败日志stage3-coordinator-regression.log及regression-final.log保留，未伪装通过；无产品/他人测试变更。补充SSR脚本仅最终stdout/scope说明纠正，不影响已通过断言。
+
+截图在var/codex-frontend-team下：已实际查看admin-layout-evidence/{before,after}-jobs-390.png、after-models-2560.png；experience-evidence/{before,after}-report-content-2560.png及after-report-content-390.png；experience-pages-evidence/after-portfolio-2560.png；coordinator-evidence/after-report-{390,2560}.png；coordinator-admin-extra-evidence/after-system-390.png。全部合成非敏感数据，移动Jobs header及卡片保持页内，大屏报告居中，长词换行；极端二十列探针的列可很窄但滚动仍局部，不能用其布局推断真实报告表格可读性。JSON记录五种指定尺寸，含15px滚动条的clientWidth小于emulated width属正常。
+
+风险/限制：Mock SSR与hydration不证明真实权限、数据库写入、生产Next分块或真实账号菜单。未调用运行服务、真实用户凭据/付费模型/交易；账户/计费/权限表单仅渲染未提交。报告cache/deferred实现字节未改，未新增真实性能收益主张。admin报告加载错误直接error.message为既有旁路，Phase4错误覆盖仍需关注；焦点/全屏modal/状态竞争和完整交互留Phase4，当前不提前修复。三角色before/after evidence详细目录见各handoff。
+
+发布清单为stage3-coordinator-reviewed-paths.json及receipt.commit_paths，共24项：13前端产品、5角色frontend测试、2协调frontend测试、3文档/计划、已修正的前端publisher。发布工具本轮未变化但必须纳入审查；Phase1/2已发布模块无需重复提交。排除actions/API/Python/Worker/schema/migrations/.env/凭据/var/log/node_modules。coordinator不commit/push；调度器普通origin/dev发布并验证本阶段SHA后才放行Phase4，失败blocked，不force。
+
+专用回滚：stage3-coordinator.rollback.patch只还原三文档到协调覆盖前、删除两协调测试；stage3-admin-layout.rollback.patch及stage3-experience.rollback.patch只还原各自Phase3产品/测试，保留Phase1/2、7ae2378、initial-before和其他角色成果。三个补丁apply-check通过且未应用，未来同文件改动须重新check/review；不whole-tree reset。handoff列出全部命令、路径、截图与24项发布清单。

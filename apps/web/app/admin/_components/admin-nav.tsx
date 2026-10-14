@@ -28,7 +28,7 @@ export function AdminNav() {
   const pathname = usePathname();
 
   return (
-    <nav className="flex gap-1 overflow-x-auto lg:block">
+    <nav aria-label="Admin navigation" className="flex min-w-0 gap-1 overflow-x-auto lg:block">
       {navItems.map((item) => {
         const active =
           pathname === item.href || (item.href !== '/admin' && pathname.startsWith(`${item.href}/`));

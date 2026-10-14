@@ -451,7 +451,7 @@ export default function PortfolioPage() {
 
   if (!data) {
     return (
-      <section className="flex-1 bg-slate-50 p-4 sm:p-6 lg:p-8">
+      <section className="min-w-0 flex-1 bg-slate-50 p-4 sm:p-6 lg:p-8">
         <h1 className="text-xl font-semibold text-slate-950">Paper Portfolio</h1>
         {loading ? <p role="status">Loading portfolio…</p> : <p role="alert">{visibleError || 'Portfolio data is unavailable.'}</p>}
         <Button variant="outline" disabled={loading} onClick={async () => {
@@ -463,8 +463,8 @@ export default function PortfolioPage() {
   }
 
   return (
-    <section className="flex-1 bg-slate-50 p-4 sm:p-6 lg:p-8">
-      <div className="mx-auto flex w-full max-w-[1800px] flex-col gap-6">
+    <section className="min-w-0 flex-1 bg-slate-50 p-4 sm:p-6 lg:p-8">
+      <div className="mx-auto flex w-full max-w-[2400px] flex-col gap-6">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
           <div>
             <h1 className="text-xl font-semibold tracking-tight text-slate-950 lg:text-2xl">
@@ -549,8 +549,8 @@ export default function PortfolioPage() {
           </div>
         )}
 
-        <div className="grid gap-6 xl:grid-cols-[360px_minmax(0,1fr)]">
-          <div className="space-y-5 xl:sticky xl:top-6 xl:self-start">
+        <div className="grid min-w-0 items-start gap-6 xl:grid-cols-[360px_minmax(0,1fr)]">
+          <div className="min-w-0 space-y-5 xl:sticky xl:top-6 xl:self-start">
             {!portfolio && (
               <Card className="rounded-lg border-slate-200 py-5 shadow-sm">
                 <CardHeader className="px-5">
@@ -604,7 +604,7 @@ export default function PortfolioPage() {
               </CardHeader>
               <CardContent className="px-5">
                 <form className="space-y-3" onSubmit={handleAddWatchlist}>
-                  <div className="grid grid-cols-[1fr_1.2fr] gap-3">
+                  <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)] gap-3">
                     <div>
                       <Label htmlFor="watchTicker" className="mb-2">
                         Ticker
@@ -783,7 +783,7 @@ export default function PortfolioPage() {
               </CardHeader>
               <CardContent className="px-5">
                 <form className="space-y-4" onSubmit={handleTrade}>
-                  <div className="grid grid-cols-[1fr_120px] gap-3">
+                  <div className="grid grid-cols-[minmax(0,1fr)_120px] gap-3">
                     <div>
                       <Label htmlFor="tradeTicker" className="mb-2">
                         Ticker
@@ -884,7 +884,7 @@ export default function PortfolioPage() {
             </Card>
           </div>
 
-          <div className="grid min-w-0 gap-6 2xl:grid-cols-[minmax(0,1fr)_420px]">
+          <div className="grid min-w-0 items-start gap-6 2xl:grid-cols-[minmax(0,1fr)_420px]">
             <Card className="min-w-0 rounded-lg border-slate-200 py-5 shadow-sm">
               <CardHeader className="px-5">
                 <CardTitle className="text-base">Positions</CardTitle>

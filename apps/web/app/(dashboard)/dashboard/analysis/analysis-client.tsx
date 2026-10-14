@@ -258,8 +258,8 @@ export default function AnalysisClient({ initialPayload }: { initialPayload: Job
   }
 
   return (
-    <section className="flex-1 bg-slate-50 p-4 sm:p-6 lg:p-8">
-      <div className="mx-auto flex w-full max-w-[1800px] flex-col gap-6">
+    <section className="min-w-0 flex-1 bg-slate-50 p-4 sm:p-6 lg:p-8">
+      <div className="mx-auto flex w-full max-w-[2400px] flex-col gap-6">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
           <div>
             <h1 className="text-xl font-semibold tracking-tight text-slate-950 lg:text-2xl">
@@ -284,8 +284,8 @@ export default function AnalysisClient({ initialPayload }: { initialPayload: Job
           <ErrorPresentation error={error || requestError} context="request" />
         )}
 
-        <div className="grid min-h-0 gap-6 xl:grid-cols-[340px_minmax(0,1fr)] 2xl:grid-cols-[380px_minmax(0,1fr)]">
-          <div className="space-y-5 xl:sticky xl:top-6 xl:self-start">
+        <div className="grid min-h-0 min-w-0 gap-6 xl:grid-cols-[340px_minmax(0,1fr)] 2xl:grid-cols-[380px_minmax(0,1fr)]">
+          <div className="min-w-0 space-y-5 xl:sticky xl:top-6 xl:self-start">
             <Card className="rounded-lg border-slate-200 py-5 shadow-sm">
               <CardHeader className="px-5">
                 <CardTitle className="text-base">New Analysis</CardTitle>
@@ -512,7 +512,7 @@ export default function AnalysisClient({ initialPayload }: { initialPayload: Job
                       : 'Select a completed or running job to view saved reports.'}
                   </p>
                 </div>
-                <div className="flex shrink-0 items-center gap-3">
+                <div className="flex flex-wrap items-center gap-3">
                   {statusJob?.status === 'failed' && (
                     <Button
                       className="rounded-md"
@@ -589,7 +589,7 @@ export default function AnalysisClient({ initialPayload }: { initialPayload: Job
                   ref={reportScrollRef}
                   key={`${selectedJobId}-${selectedReport?.reportKey || selectedReportKey}`}
                   className={cn(
-                    'overflow-auto bg-white px-5 py-6 sm:px-8 lg:px-10',
+                    'min-w-0 overflow-auto bg-white px-4 py-5 sm:px-6 sm:py-6 lg:px-8',
                     isReportFullscreen
                       ? 'h-full min-h-0'
                       : 'min-h-[520px] lg:h-[calc(100dvh-280px)] lg:min-h-[640px]'
@@ -597,7 +597,7 @@ export default function AnalysisClient({ initialPayload }: { initialPayload: Job
                 >
                   {!selectedReport ? <p role="status">Loading report…</p> : selectedReport.reportKey === 'progress' ? <AnalysisProgress content={selectedReport.content} running={selectedJob?.status === 'running'} /> : <MarkdownRenderer
                     content={selectedReport?.content || ''}
-                    className="max-w-none"
+                    className="mx-auto w-full max-w-[80ch] min-w-0 [overflow-wrap:anywhere] [&_pre]:max-w-full [&_pre]:[overflow-wrap:normal] [&_figure]:min-w-0 [&_table]:[overflow-wrap:normal]"
                   />}
                 </article>
               ) : (

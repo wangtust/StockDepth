@@ -122,7 +122,7 @@ function ModelConfigForm({
           </select>
         </label>
         <p className="text-xs text-slate-500">For OpenAI-compatible endpoints, select openai-compatible and enter the provider name in Name.</p>
-        <div className="flex gap-6 text-sm"><label className="flex items-center gap-2"><input type="checkbox" name="quickEnabled" defaultChecked={config?.quickEnabled ?? true} />Available for Quick</label><label className="flex items-center gap-2"><input type="checkbox" name="deepEnabled" defaultChecked={config?.deepEnabled ?? true} />Available for Deep</label></div>
+        <div className="flex flex-wrap gap-x-6 gap-y-2 text-sm"><label className="flex items-center gap-2"><input type="checkbox" name="quickEnabled" defaultChecked={config?.quickEnabled ?? true} />Available for Quick</label><label className="flex items-center gap-2"><input type="checkbox" name="deepEnabled" defaultChecked={config?.deepEnabled ?? true} />Available for Deep</label></div>
         <Field
           label="Base URL"
           name="baseUrl"

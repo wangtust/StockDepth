@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { Button } from '@/components/ui/button';
@@ -26,6 +26,15 @@ export default function DashboardLayout({
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
 
+  useEffect(() => {
+    if (!isSidebarOpen) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setIsSidebarOpen(false);
+    };
+    window.addEventListener('keydown', closeOnEscape);
+    return () => window.removeEventListener('keydown', closeOnEscape);
+  }, [isSidebarOpen]);
+
   const navItems = [
     { href: '/dashboard/analysis', icon: BarChart3, label: 'Analysis' },
     { href: '/dashboard/stocks', icon: BarChart3, label: 'Shared Stocks' },
@@ -44,6 +53,8 @@ export default function DashboardLayout({
           <span className="font-medium">Dashboard</span>
         </div>
         <Button
+          aria-expanded={isSidebarOpen}
+          aria-controls="dashboard-sidebar"
           className="-mr-2 rounded-md"
           variant="ghost"
           size="icon"
@@ -66,8 +77,9 @@ export default function DashboardLayout({
 
         {/* Sidebar */}
         <aside
+          id="dashboard-sidebar"
           className={cn(
-            'absolute inset-y-0 left-0 z-40 w-64 transform transition-[transform,width] duration-300 ease-out lg:relative lg:inset-auto lg:z-auto lg:translate-x-0',
+            'absolute inset-y-0 left-0 z-40 w-64 shrink-0 transform transition-[transform,width] duration-300 ease-out lg:relative lg:inset-auto lg:z-auto lg:translate-x-0',
             isSidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0',
             isSidebarCollapsed ? 'lg:w-[72px]' : 'lg:w-64'
           )}
@@ -104,7 +116,7 @@ export default function DashboardLayout({
               </Button>
             </div>
 
-            <nav className="flex-1 overflow-y-auto p-3">
+            <nav aria-label="Workspace navigation" className="flex-1 overflow-y-auto p-3">
               {navItems.map((item) => {
                 const isActive = pathname === item.href || (item.href === '/dashboard/stocks' && pathname.startsWith('/dashboard/stocks/'));
 
@@ -141,7 +153,7 @@ export default function DashboardLayout({
         </aside>
 
         {/* Main content */}
-        <main className="min-w-0 flex-1 overflow-y-auto p-0">{children}</main>
+        <main className="min-w-0 flex-1 overflow-y-auto p-0 [overflow-wrap:anywhere]">{children}</main>
       </div>
     </div>
   );

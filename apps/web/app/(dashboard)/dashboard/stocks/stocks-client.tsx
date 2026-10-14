@@ -22,7 +22,7 @@ export function StocksClient() {
   if (cursor) params.set('before', cursor);
   const { data, error, isLoading, mutate } = useSWR<{ instruments: Instrument[]; nextCursor: string | null }>(`/api/market/instruments?${params}`, jsonFetcher, readOptions);
   const changing = input.trim().slice(0, 80) !== query;
-  return <section className="space-y-5 p-6">
+  return <section className="min-w-0 space-y-5 p-4 text-sm leading-6 [overflow-wrap:anywhere] sm:p-6 lg:p-8">
     <h1 className="text-2xl font-semibold">Shared Stocks</h1>
     <p>Shared read-only identities and stored market data. Portfolio holdings remain private.</p>
     <label htmlFor="stock-search">Search symbol or name</label>
@@ -36,7 +36,7 @@ export function StocksClient() {
         <Link className="font-semibold underline" href={`/dashboard/stocks/${item.id}`}>{item.symbol} · {item.exchange}</Link>
         <p>{item.name || 'Name unavailable'} · {item.currency || 'Currency unknown'} · {item.timezone || 'Timezone unknown'} · {item.status}</p>
       </li>)}</ul>
-      <div className="flex gap-3">
+      <div className="flex flex-wrap items-center gap-3">
         <Button disabled={!cursors.length || isLoading} onClick={() => setCursors(current => current.slice(0, -1))}>Previous stocks</Button>
         <Button disabled={!data.nextCursor || isLoading || cursors.length >= 99 || data.nextCursor === cursor} onClick={() => { if (data.nextCursor) setCursors(current => [...current, data.nextCursor!]); }}>Next stocks</Button>
         <span>Page {cursors.length + 1} / max 100</span>
@@ -50,7 +50,7 @@ type Sync = { category?: string; status?: string; lastSuccessAt?: string | null;
 export function StockDetailClient({ id }: { id: string }) {
   const validId = /^\d{1,10}$/.test(id) && Number(id) >= 1 && Number(id) <= 2147483647;
   const { data, error, isLoading, mutate } = useSWR<{ instrument: Instrument; latestQuote: Quote | null; dailyPrices: DailyPrice[]; sync: Sync | Sync[] | null }>(validId ? `/api/market/instruments/${id}?limit=30` : null, jsonFetcher, { ...readOptions, refreshInterval: 30000 });
-  return <section className="space-y-5 p-6">
+  return <section className="min-w-0 space-y-5 p-4 text-sm leading-6 [overflow-wrap:anywhere] sm:p-6 lg:p-8">
     <Link className="underline" href="/dashboard/stocks">Back to Shared Stocks</Link>
     <h1 className="text-2xl font-semibold">Stock details</h1>
     {!validId && <p role="alert">Invalid instrument ID.</p>}
@@ -63,7 +63,7 @@ export function StockDetailClient({ id }: { id: string }) {
       <QuoteDisplay quote={data.latestQuote} timezone={data.instrument.timezone || 'UTC'} />
       <p>Freshness is supplied by the market service; stored quotes are not a live price stream.</p>
       <h2 className="text-lg font-semibold">Recent daily prices (up to 30)</h2>
-      {!data.dailyPrices.length ? <p>No daily prices available.</p> : <div className="overflow-x-auto"><table className="w-full text-left"><thead><tr>{['Trading date', 'Open', 'High', 'Low', 'Close', 'Volume', 'Source / adjustment', 'Fetched (UTC)'].map(label => <th key={label}>{label}</th>)}</tr></thead>
+      {!data.dailyPrices.length ? <p>No daily prices available.</p> : <div className="max-w-full overflow-x-auto rounded-lg border border-slate-200"><table className="w-full min-w-[960px] text-left [&_th]:bg-slate-50 [&_th]:px-3 [&_th]:py-2 [&_td]:px-3 [&_td]:py-2 [&_tr]:border-b [&_tr]:border-slate-100"><thead><tr>{['Trading date', 'Open', 'High', 'Low', 'Close', 'Volume', 'Source / adjustment', 'Fetched (UTC)'].map(label => <th key={label}>{label}</th>)}</tr></thead>
         <tbody>{data.dailyPrices.slice(0, 30).map((day, index) => <tr key={index}><td>{day.tradingDate || day.date || 'Unknown'}</td><td>{day.open}</td><td>{day.high}</td><td>{day.low}</td><td>{day.close}</td><td>{day.volume ?? 'Unknown'}</td><td>{day.source || 'Unknown'} / {day.adjusted === true ? 'Adjusted' : day.adjusted === false ? 'Unadjusted' : 'Unknown'}</td><td>{marketTime(day.fetchedAt)}</td></tr>)}</tbody></table></div>}
       <p>Daily OHLC uses {data.instrument.currency || 'unknown currency'}; trading dates follow {data.instrument.timezone || 'unknown market timezone'}. Adjustment series must not be mixed.</p>
       <h2 className="text-lg font-semibold">Sync</h2>

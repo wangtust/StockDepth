@@ -11,7 +11,7 @@ export const AnalysisProgress = memo(function AnalysisProgress({ content, runnin
   if (!turns.length) return <MarkdownRenderer content={content} />;
   const responseCount = turns.filter(t => t.text || t.tools.some(tool => tool.args)).length;
   const toolCount = turns.reduce((count, turn) => count + turn.tools.length, 0);
-  return <div className="mx-auto max-w-4xl space-y-6">
+  return <div className="mx-auto w-full max-w-[1200px] min-w-0 space-y-5 [overflow-wrap:anywhere] [&_pre]:max-w-full [&_pre]:[overflow-wrap:normal] [&_table]:[overflow-wrap:normal]">
     <header className="rounded-xl border border-emerald-100 bg-emerald-50/60 p-5">
       <h2 className="text-lg font-semibold text-slate-950">Analysis Progress</h2>
       <p className="mt-1 text-sm text-slate-600">Follow model queries, data retrieval and analysis. Expand entries to view source data and query parameters.</p>
@@ -22,24 +22,24 @@ export const AnalysisProgress = memo(function AnalysisProgress({ content, runnin
       </div>
     </header>
     <ol className="space-y-6">
-      {turns.map((turn, index) => <li key={turn.id} className="relative pl-10 sm:pl-12">
+      {turns.map((turn, index) => <li key={turn.id} className="relative min-w-0 pl-9 sm:pl-12">
         {index < turns.length - 1 && <div className="absolute bottom-[-24px] left-4 top-8 w-px bg-slate-200" />}
         <div className="absolute left-0 top-0 flex size-8 items-center justify-center rounded-full bg-slate-900 text-xs font-semibold text-white">{index + 1}</div>
-        <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
+        <div className="min-w-0 overflow-hidden rounded-xl border border-slate-200 bg-white">
           <div className="flex items-center gap-2 border-b border-slate-100 bg-slate-50 px-4 py-3 text-sm font-medium text-slate-800">
             <Bot className="size-4 text-emerald-600" />{turn.tools.length ? 'Model queries data' : 'Model generates analysis'}
           </div>
-          {turn.text && <div className="px-4 py-4 sm:px-5">
+          {turn.text && <div className="mx-auto max-w-[80ch] px-3 py-4 sm:px-5">
             {turn.text.length > 1200 ? <DeferredDetails summary={<span className="cursor-pointer text-sm font-medium text-slate-700">View analysis response · {turn.text.length.toLocaleString('en-US')} characters<span className="mt-2 block text-sm font-normal leading-6 text-slate-500">{turn.text.replace(/[#*`]/g, "").slice(0, 180)}…</span></span>}><div className="mt-3"><MarkdownRenderer content={turn.text} /></div></DeferredDetails> : <MarkdownRenderer content={turn.text} />}
           </div>}
-          {!!turn.tools.length && <div className="space-y-3 p-4 sm:p-5">
+          {!!turn.tools.length && <div className="min-w-0 space-y-3 p-3 sm:p-5">
             {turn.tools.map((tool, toolIndex) => <div key={`${tool.name}-${toolIndex}`} className="rounded-lg border border-slate-200 bg-slate-50/50 p-3">
               <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
-                <span className="flex items-center gap-2 font-medium text-slate-800"><Database className="size-4 text-blue-600" />{toolLabel(tool.name)}</span>
+                <span className="flex min-w-0 items-center gap-2 font-medium text-slate-800"><Database className="size-4 text-blue-600" />{toolLabel(tool.name)}</span>
                 <span className="flex items-center gap-1 text-xs text-slate-500">{tool.result !== undefined ? <><CheckCircle2 className="size-3.5 text-emerald-600" />Returned</> : <><Clock3 className="size-3.5" />Result pending</>}</span>
               </div>
               {tool.args && <>
-                <p className="mt-2 break-words text-xs leading-5 text-slate-600">{parameterSummary(tool.args)}</p>
+                <p className="mt-2 [overflow-wrap:anywhere] text-xs leading-5 text-slate-600">{parameterSummary(tool.args)}</p>
                 <details className="mt-2 text-xs text-slate-500"><summary className="cursor-pointer">Query parameters</summary><pre className="mt-2 overflow-x-auto rounded bg-white p-3">{tool.args}</pre></details>
               </>}
               {tool.result !== undefined && <div className="mt-3 border-t border-slate-200 pt-3">

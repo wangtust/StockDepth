@@ -174,7 +174,7 @@ export function AdminReportViewer({
             >
               {selectedReport.reportKey === 'progress' ? <AnalysisProgress content={visibleContent} /> : <MarkdownRenderer
                 content={visibleContent}
-                className="mx-auto max-w-[1180px]"
+                className="mx-auto w-full min-w-0 max-w-[80ch]"
               />}
             </article>
           ) : (

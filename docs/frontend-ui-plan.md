@@ -16,8 +16,8 @@ User's earlier explicit preferences take precedence over conflicting generic tex
 | --- | --- | --- |
 | 0 | Git/remote baseline, page inventory, mock desktop/mobile screenshots, protocol review; docs/frontend-ui-audit.md | Complete; audit and synthetic before/after evidence |
 | 1 | Shared safe deterministic ErrorPresentation; all four failure surfaces; no raw traces/paths/secrets; tests | Published and remote SHA verified b119d06 |
-| 2 | English static UI; historical Chinese progress parsing remains compatible; Agent/Role/Model split; user Cache Hit column removed | Independent acceptance complete; scheduler publication/SHA gate pending |
-| 3 | Responsive layouts at 390/768/1440/1920/2560 widths, consistent visual treatment, readable reports and local table scrolling | Queued |
+| 2 | English static UI; historical Chinese progress parsing remains compatible; Agent/Role/Model split; user Cache Hit column removed | Published and remote SHA verified 431349c |
+| 3 | Responsive layouts at 390/768/1440/1920/2560 widths, consistent visual treatment, readable reports and local table scrolling | Independent acceptance complete; scheduler publication/SHA gate pending |
 | 4 | Loading/empty/error/retry feedback, modal focus/ESC, state races, accessibility, final browser regression | Queued |
 
 Each phase: preserve before state; test relevant components and TypeScript; document evidence, screenshots and limitations; coordinator reviews explicit frontend-only paths; commit/push dev without force, verify remote SHA, then advance. Failures stop advancement. No whole-tree staging. Final docs/frontend-ui-results.md records commands, actual results, changed files/functions, screenshot paths, remaining risks and rollback per commit. Phase 0 audit is included in Phase 1 publication.
@@ -39,3 +39,7 @@ Initial acceptance found three issues; preserved history is in repair-history an
 ## 2026-10-14 repair continuation
 
 Phase1 acceptance returned three findings. Publisher now permits frontend tests under scripts/tests/frontend-*. Prior authorized model-save action dependency was independently committed/pushed as 7ae2378, with no new action logic; actions.ts stays frozen this round. experience must restore readable Retry, all roles repair and revalidate from preserved receipts. Supervisor returns ordinary failed acceptance to owners for at most three rounds per phase; publication/auth/scope problems stop for review. STOP still halts execution. No deployment/restart.
+
+## Phase3 coordinator acceptance — 2026-10-14 Beijing
+
+Phase2 is published/verified dev 431349c. Both Phase3 deliveries independently reviewed; coordinator preserved incoming sources/tests/docs/publisher with hashes before editing. Five exact viewports passed mock UI acceptance: four core admin pages plus Users/Accounts/Pricing/System, actual dashboard navigation and actual Markdown/report integration; user report/Progress/Usage/privacy/Retry regressions passed. Web tsc, incoming/frozen hashes, explicit 24-path publisher validation and three dedicated rollback checks passed. See results and stage3-coordinator.handoff.md for real logs/screenshots and limitations. Coordinator changed only docs/PLAN and two own frontend tests; no implementation edits, commit/push, live services, real data/model/trading or Phase4. Scheduler alone publishes receipt.commit_paths and verifies origin/dev SHA before releasing Phase4; publication failure blocks.

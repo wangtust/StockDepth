@@ -16,9 +16,9 @@ function addDecimal(left: string | null, right: string | null) {
 }
 export function ModelCostDetails({ jobId, count, version }: { jobId: number; count: number; version: string }) {
   const [expanded, setExpanded] = useState(false);
-  const { data, error, isLoading } = useSWR(expanded ? `/api/admin/jobs/${jobId}/details?v=${encodeURIComponent(version)}` : null, jsonFetcher);
-  const calls: Call[] = data?.calls || [];
-  const paperCalls = data?.paperCalls || [];
+  const { data, error, isLoading, isValidating, mutate } = useSWR(expanded ? `/api/admin/jobs/${jobId}/details?v=${encodeURIComponent(version)}` : null, jsonFetcher);
+  const calls: Call[] = !error && !isLoading ? data?.calls || [] : [];
+  const paperCalls = !error && !isLoading ? data?.paperCalls || [] : [];
   const groups = new Map<string, { role: string; provider: string; model: string; calls: number; input: number; output: number; cached: number; cost: string | null; complete: boolean }>();
   for (const call of calls) {
     const key = [call.agent, call.role, call.provider, call.modelConfigId, call.model].join('|');
@@ -28,7 +28,7 @@ export function ModelCostDetails({ jobId, count, version }: { jobId: number; cou
     groups.set(key, group);
   }
   return <div className="mt-4"><button type="button" aria-expanded={expanded} onClick={() => setExpanded(value => !value)}>{expanded ? 'Hide call details' : 'Show call details'} ({count} {count === 1 ? 'call' : 'calls'})</button>
-    {expanded && <div className="mt-3 overflow-x-auto">{isLoading && <p>Loading…</p>}{error && <ErrorPresentation error={error} context="request" compact />}{!!groups.size && <><h3 className="mb-2 font-medium">Summary by role, provider, and agent</h3><table className="mb-5 w-full min-w-[750px] text-left text-xs"><thead><tr>{['Role / Agent', 'Provider / Model', 'Calls', 'Input', 'Cache hit', 'Output', 'Estimated cost (CNY)'].map(label => <th key={label} className="p-2">{label}</th>)}</tr></thead><tbody>{[...groups.values()].map((group, index) => <tr key={index} className="border-t border-slate-100"><td className="p-2">{group.role}</td><td className="p-2">{group.provider} · {group.model}</td><td className="p-2">{group.calls}</td><td className="p-2">{group.input.toLocaleString('en-US')}</td><td className="p-2">{group.cached.toLocaleString('en-US')}</td><td className="p-2">{group.output.toLocaleString('en-US')}</td><td className="p-2">{group.cost ?? 'Unknown'}{!group.complete && ' · Incomplete'}</td></tr>)}</tbody></table></>}<table className="w-full min-w-[850px] text-left text-xs">
+    {expanded && <div className="mt-3 overflow-x-auto">{isLoading && <p role="status">Loading call details…</p>}{error && <ErrorPresentation error={error} context="request" compact onRetry={() => { void mutate(); }} retrying={isValidating} />}{!isLoading && !error && !calls.length && !paperCalls.length && <p role="status">No recorded calls are available.</p>}{!!groups.size && <><h3 className="mb-2 font-medium">Summary by role, provider, and agent</h3><table className="mb-5 w-full min-w-[750px] text-left text-xs"><thead><tr>{['Role / Agent', 'Provider / Model', 'Calls', 'Input', 'Cache hit', 'Output', 'Estimated cost (CNY)'].map(label => <th key={label} className="p-2">{label}</th>)}</tr></thead><tbody>{[...groups.values()].map((group, index) => <tr key={index} className="border-t border-slate-100"><td className="p-2">{group.role}</td><td className="p-2">{group.provider} · {group.model}</td><td className="p-2">{group.calls}</td><td className="p-2">{group.input.toLocaleString('en-US')}</td><td className="p-2">{group.cached.toLocaleString('en-US')}</td><td className="p-2">{group.output.toLocaleString('en-US')}</td><td className="p-2">{group.cost ?? 'Unknown'}{!group.complete && ' · Incomplete'}</td></tr>)}</tbody></table></>}<table className="w-full min-w-[850px] text-left text-xs">
       <thead><tr>{['Agent / Role / Provider / Model configuration', 'Input / Output tokens', 'Cached input tokens', 'Input / Cache / Output prices', 'Estimated cost (CNY)', 'Statistics status'].map(label => <th key={label} className="p-2">{label}</th>)}</tr></thead>
       <tbody>{calls.map(call => {
         let prices: { input: string; cache: string; output: string } | null = null;

@@ -2,14 +2,15 @@
 
 import { presentError } from '@/lib/analysis/error-presentation';
 
-import { createContext, useContext, useRef, useState, type FormEvent, type ReactNode } from 'react';
+import { createContext, useContext, useRef, useState, useId, type FormEvent, type ReactNode } from 'react';
 import { Button } from '@/components/ui/button';
 import { updateModelConfig } from '@/app/admin/actions';
 
-const SaveState = createContext({ pending: false, success: '', error: '' });
+const SaveState = createContext({ pending: false, success: '', error: '', feedbackId: '' });
 
 export function ModelEditForm({ children }: { children: ReactNode }) {
   const submitting = useRef(false);
+  const feedbackId = useId();
   const [pending, setPending] = useState(false);
   const [success, setSuccess] = useState('');
   const [error, setError] = useState('');
@@ -40,8 +41,8 @@ export function ModelEditForm({ children }: { children: ReactNode }) {
   }
 
   return (
-    <SaveState.Provider value={{ pending, success, error }}>
-      <form onSubmit={submit} onInput={() => { setSuccess(''); setError(''); }} className="space-y-4">
+    <SaveState.Provider value={{ pending, success, error, feedbackId }}>
+      <form aria-busy={pending} aria-describedby={error ? feedbackId : undefined} onSubmit={submit} onInput={() => { setSuccess(''); setError(''); }} className="space-y-4">
         <fieldset disabled={pending} className="space-y-4">{children}</fieldset>
       </form>
     </SaveState.Provider>
@@ -49,11 +50,11 @@ export function ModelEditForm({ children }: { children: ReactNode }) {
 }
 
 export function ModelSaveButton() {
-  const { pending, success, error } = useContext(SaveState);
+  const { pending, success, error, feedbackId } = useContext(SaveState);
   return (
     <div className="flex flex-wrap items-center gap-3">
       <Button type="submit" disabled={pending}>{pending ? 'Saving…' : 'Save Model'}</Button>
-      <span role={error ? 'alert' : 'status'} aria-live="polite" className={`text-sm ${error ? 'text-red-700' : 'text-emerald-700'}`}>
+      <span id={feedbackId} role={error ? 'alert' : 'status'} aria-live="polite" className={`text-sm ${error ? 'text-red-700' : 'text-emerald-700'}`}>
         {pending ? 'Saving…' : error || success}
       </span>
     </div>

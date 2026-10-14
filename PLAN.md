@@ -73,3 +73,31 @@ Phase1已由调度器发布并验证origin/dev b119d06，HEAD含7ae2378；action
 ### Frontend Phase3 coordinator — 2026-10-14（北京时间）
 
 Phase2已由调度器发布并验证dev 431349c，7ae2378为既有冻结前置依赖。Phase3两角色交付经逐文件独立审查；五视口Mock UI验收通过：管理员移动整页溢出修复、导航/表格/代码局部横滚、2400px工作区及80ch报告、长文本约束，中文Progress协议/报告语言/用户Retry隐私/延迟挂载保留。Web tsc、冻结hash、24项明确发布白名单及三份专用回滚检查通过。证据、截图与局限见docs/frontend-ui-results.md及stage3-coordinator.handoff.md。coordinator仅文档和自身测试，不改实现、不commit/push、不部署/重启；停在Phase3，只有调度器普通发布origin/dev并验证SHA后才能放行Phase4，失败blocked。
+
+### Frontend Phase4 coordinator — 2026-10-14（北京时间）
+
+Phase3已发布验证dev 7f2c7bc，HEAD含冻结7ae2378。Phase4两角色交付独立审查及mock UI回归，发现P4-ADMIN-SCROLL-01：admin报告全屏ESC只恢复window滚动，不恢复article原100px（实测仍250px）。交回supervisor/admin-layout仅修复该明确缺陷，保留其他通过项；coordinator未改实现/他人测试、未commit/push或部署。日志/截图/冻结hash/20项候选清单/专用回滚见frontend-ui-results及stage4-coordinator.handoff。当前Phase4不通过，不发布；返修相关项及tsc/hash/rollback通过后重新验收，禁止把候选清单视为发布批准。
+
+## Phase4 repair final independent acceptance — 北京时间 2026-10-14T11:45:14.526121+08:00
+
+当前 **complete（前端验收通过，等待调度器发布及远端SHA验证）**。此前blocked结论已由本次返修验收取代。只处理P4-ADMIN-SCROLL-01，没有重复重构、创建智能体、改实现/其他角色测试、commit/push或部署。dev HEAD仍为7f2c7bc；冻结保存依赖7ae2378已在HEAD祖先中，不再作为阻塞或提交对象。
+
+先读取当前协调checkpoint/handoff、两角色receipt/checkpoint/handoff、contract及计划。覆盖前最终产品/测试/文档/publisher和协调记录保存于stage4-coordinator-repair-before，hashes.json记录实际SHA256；initial-before及原缺陷日志保持。对比admin-layout修复前源，唯一产品增量为AdminReportViewer的articleRef、全屏effect记录scrollTop/scrollLeft并在cleanup恢复、article挂ref；SWR key/API/权限/费用/模型/角色/语言和中文Progress协议未改。
+
+独立重新执行受影响项，实际命令/耗时/exitCode见stage4-coordinator-repair-validation.json：
+- `node scripts/tests/frontend-admin-interactions-stage4.cjs after` → exit0，`var/codex-frontend-team/stage4-coordinator-repair-interactions.log`，7.7s。
+- `node scripts/tests/frontend-admin-race-stage4.cjs` → exit0，`var/codex-frontend-team/stage4-coordinator-repair-race.log`，5.26s。
+- `node scripts/tests/frontend-coordinator-interactions-stage4.cjs after` → exit0，`var/codex-frontend-team/stage4-coordinator-repair-scroll.log`，8.0s。
+- `node apps/web/node_modules/typescript/bin/tsc -p apps/web/tsconfig.json --noEmit --incremental false` → exit0，`var/codex-frontend-team/stage4-coordinator-repair-tsc.log`，7.44s。
+
+全部exit0。原协调断言未改：article100→全屏250→ESC100，window150、焦点/overflow/键盘恢复通过；管理员报告五视口Markdown/宽表/长文本、安全Retry和任务切换通过；真实SWR旧job晚到隔离通过，最终相关浏览器无明显console/runtime错误。Web tsc仅作为类型检查，UI由真实组件隔离浏览器断言验收。14个已验收产品/其他角色测试与原协调快照哈希一致，故复用先前六个完整阶段套件中未受影响项目（命令/日志见stage4-coordinator-validation.json），不重跑未变化项。全部阶段最终证据由原全面验收加此次针对性复验组成。
+
+实际查看真实合成前后截图：返修前stage4-admin-layout-repair-before/coordinator-evidence/after-escape-scroll-defect.png及scroll-restoration.json(expected100/actual250)；本次stage4-coordinator-evidence/after-escape-scroll-defect.png及scroll-restoration.json(expected100/actual100)。正文退出后回到更早的位置，80ch阅读宽度/局部滚动保持。固定截图文件名含defect是原测试命名，不表示当前失败。其余用户页面/反馈、管理员错误及五视口前后截图清单保留在下面历史全面审查记录和两角色handoff中。
+
+stage4-coordinator-repair-integrity.json独立确认231个冻结tracked/依赖文件等于HEAD（含actions.ts），7ae2378 ancestor、14个未变验收文件哈希一致、20个commit_paths通过publisher实际AST白名单及8类禁止反例。当前工作区所有tracked/untracked改动均在审查清单内。publisher只读审查，没有执行main。审查清单包含9展示源、6角色frontend测试、1协调测试、3文档/计划及scripts/diagnostics/push-frontend-dev.py，不含actions/API/Python/Worker/schema/migrations/.env/凭据/var/log/node_modules；前置Phase1–3已发布，不重复纳入业务保存依赖。
+
+风险/限制保持：仅mock浏览器/fixtures，真实DB/auth/权限/费用/模型/交易、生产Next chunk/SSR和Security/Activity真实交互未执行；未访问运行应用、真实用户数据或凭据。客户端去重不证明服务端幂等；native确认用fixture验证取消/接受。无依赖升级、部署或重启。未变Phase3布局/导航/管理员SSR证据继续有效。
+
+专用stage4-coordinator.rollback.patch已按最终三文档重新生成，只恢复到本阶段coordinator-before并删除自身新增frontend-coordinator测试；experience/admin-layout完整阶段补丁和admin-layout repair-only补丁均只撤销对应所有者范围，保留Phase1–3、7ae2378、initial-before及其他角色成果。stage4-coordinator-repair-checks.json记录diff及四份rollback apply-check全部通过，均未应用；未来同文件变化需重新检查，禁止whole-tree reset。
+
+协调仅交付complete receipt和明确commit_paths。调度器才可普通提交/推送origin/dev并核验远端SHA；发布或SHA核验失败必须blocked。此处不宣称已发布，没有后续阶段操作。

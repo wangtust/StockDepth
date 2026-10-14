@@ -1,10 +1,11 @@
 'use client';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import useSWR from 'swr';
 import { jsonFetcher } from '@/lib/http/json-fetcher';
 import { pollingDefaults } from '@/lib/http/polling';
 import { Button } from '@/components/ui/button';
+import { ErrorPresentation } from '@/components/error-presentation';
 import { Input } from '@/components/ui/input';
 import { Instrument, Quote, QuoteDisplay, marketTime } from './market-display';
 
@@ -21,6 +22,9 @@ export function StocksClient() {
   const cursor = cursors.at(-1);
   if (cursor) params.set('before', cursor);
   const { data, error, isLoading, mutate } = useSWR<{ instruments: Instrument[]; nextCursor: string | null }>(`/api/market/instruments?${params}`, jsonFetcher, readOptions);
+  const [refreshing, setRefreshing] = useState(false);
+  const refreshLock = useRef(false);
+  async function refresh() { if (refreshLock.current) return; refreshLock.current = true; setRefreshing(true); try { await mutate(); } finally { refreshLock.current = false; setRefreshing(false); } }
   const changing = input.trim().slice(0, 80) !== query;
   return <section className="min-w-0 space-y-5 p-4 text-sm leading-6 [overflow-wrap:anywhere] sm:p-6 lg:p-8">
     <h1 className="text-2xl font-semibold">Shared Stocks</h1>
@@ -28,8 +32,8 @@ export function StocksClient() {
     <label htmlFor="stock-search">Search symbol or name</label>
     <Input id="stock-search" maxLength={80} value={input} onChange={event => setInput(event.target.value)} />
     {(isLoading || changing) && <p role="status">Loading stocks…</p>}
-    {error && <p role="alert">Stock lookup failed. {error instanceof Error ? error.message : 'Unavailable'}</p>}
-    <Button variant="outline" onClick={() => void mutate()}>Refresh stocks</Button>
+    {error && <ErrorPresentation error={error} context="request" onRetry={refresh} retrying={refreshing} />}
+    <Button variant="outline" disabled={refreshing} aria-busy={refreshing} onClick={refresh}>{refreshing ? 'Refreshing…' : 'Refresh stocks'}</Button>
     {!changing && data && <>
       {!data.instruments.length && <p>No matching stocks.</p>}
       <ul className="divide-y rounded border bg-white">{data.instruments.slice(0, 25).map(item => <li key={item.id} className="p-4">
@@ -50,13 +54,16 @@ type Sync = { category?: string; status?: string; lastSuccessAt?: string | null;
 export function StockDetailClient({ id }: { id: string }) {
   const validId = /^\d{1,10}$/.test(id) && Number(id) >= 1 && Number(id) <= 2147483647;
   const { data, error, isLoading, mutate } = useSWR<{ instrument: Instrument; latestQuote: Quote | null; dailyPrices: DailyPrice[]; sync: Sync | Sync[] | null }>(validId ? `/api/market/instruments/${id}?limit=30` : null, jsonFetcher, { ...readOptions, refreshInterval: 30000 });
+  const [refreshing, setRefreshing] = useState(false);
+  const refreshLock = useRef(false);
+  async function refresh() { if (refreshLock.current) return; refreshLock.current = true; setRefreshing(true); try { await mutate(); } finally { refreshLock.current = false; setRefreshing(false); } }
   return <section className="min-w-0 space-y-5 p-4 text-sm leading-6 [overflow-wrap:anywhere] sm:p-6 lg:p-8">
     <Link className="underline" href="/dashboard/stocks">Back to Shared Stocks</Link>
     <h1 className="text-2xl font-semibold">Stock details</h1>
     {!validId && <p role="alert">Invalid instrument ID.</p>}
     {isLoading && <p role="status">Loading stock details…</p>}
-    {error && <p role="alert">Stock details failed. {error instanceof Error ? error.message : 'Unavailable'}</p>}
-    {validId && <Button variant="outline" onClick={() => void mutate()}>Refresh details</Button>}
+    {error && <ErrorPresentation error={error} context="request" onRetry={refresh} retrying={refreshing} />}
+    {validId && <Button variant="outline" disabled={refreshing} aria-busy={refreshing} onClick={refresh}>{refreshing ? 'Refreshing…' : 'Refresh details'}</Button>}
     {data && <>
       <h2 className="text-xl">{data.instrument.symbol} · {data.instrument.exchange} · {data.instrument.name || 'Name unavailable'}</h2>
       <p>{data.instrument.currency || 'Currency unknown'} · {data.instrument.timezone || 'Timezone unknown'} · {data.instrument.status}</p>

@@ -2,7 +2,7 @@
 
 import { presentError } from '@/lib/analysis/error-presentation';
 
-import { useState, useTransition } from 'react';
+import { useRef, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import { MoreHorizontal, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -15,19 +15,23 @@ export function ModelActionsMenu({ configId }: { configId: number }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState('');
+  const submitting = useRef(false);
+  const [success, setSuccess] = useState('');
 
   function removeModel() {
-    setError('');
+    if (submitting.current || !window.confirm('Deprecate this model configuration? It will no longer be available for new selections.')) return;
+    submitting.current = true;
+    setError(''); setSuccess('');
     startTransition(async () => {
       try {
         const formData = new FormData();
         formData.set('configId', String(configId));
         const result = await deleteModelConfig(formData);
         if (result.error) setError(presentError(result.error, 'request').description);
-        else router.refresh();
+        else { setSuccess('Model configuration deprecated.'); router.refresh(); }
       } catch {
         setError('Unable to delete the model. Please try again.');
-      }
+      } finally { submitting.current = false; }
     });
   }
 
@@ -47,6 +51,8 @@ export function ModelActionsMenu({ configId }: { configId: number }) {
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
+      {pending && <p role="status">Deprecating model…</p>}
+      {success && <p role="status">{success}</p>}
       {error && <p role="alert" className="mb-2 rounded-md bg-red-50 px-4 py-2 text-sm text-red-700">{error}</p>}
     </>
   );

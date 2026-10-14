@@ -1,7 +1,7 @@
 'use client';
 
 import { ErrorPresentation } from '@/components/error-presentation';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import useSWR from 'swr';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -20,8 +20,17 @@ export function RecentlyDeletedJobs() {
   const [restoringId, setRestoringId] = useState<number | null>(null);
   const [actionError, setActionError] = useState('');
   const [notice, setNotice] = useState('');
+  const restoreLock = useRef(false);
+  const [retrying, setRetrying] = useState(false);
+  async function retryLoad() {
+    if (retrying) return;
+    setRetrying(true);
+    try { await mutate(); } finally { setRetrying(false); }
+  }
 
   async function restore(id: number) {
+    if (restoreLock.current) return;
+    restoreLock.current = true;
     setRestoringId(id);
     setActionError('');
     setNotice('');
@@ -34,6 +43,7 @@ export function RecentlyDeletedJobs() {
     } catch (err) {
       setActionError(err instanceof Error ? err.message : String(err));
     } finally {
+      restoreLock.current = false;
       setRestoringId(null);
     }
   }
@@ -45,9 +55,9 @@ export function RecentlyDeletedJobs() {
         <p className="text-sm text-muted-foreground">The 50 most recently deleted jobs. Restoring preserves their status and reports without running the analysis again.</p>
       </CardHeader>
       <CardContent className="space-y-3">
-        {(error || actionError) && <ErrorPresentation error={actionError || error.message} context="request" compact />}
+        {(error || actionError) && <ErrorPresentation error={actionError || error.message} context="request" compact onRetry={error ? retryLoad : undefined} retrying={retrying} />}
         {notice && <p role="status" className="text-sm text-emerald-700">{notice}</p>}
-        {isLoading && <p className="text-sm text-muted-foreground">Loading…</p>}
+        {isLoading && <p role="status" className="text-sm text-muted-foreground">Loading…</p>}
         {!isLoading && !error && data?.jobs.length === 0 && <p className="text-sm text-muted-foreground">No deleted jobs.</p>}
         {data?.jobs.map(job => (
           <div key={job.id} className="flex items-center justify-between gap-4 rounded-md border p-3">

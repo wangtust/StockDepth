@@ -1,3 +1,5 @@
+'use client';
+
 import { presentError, type ErrorContext } from '@/lib/analysis/error-presentation';
 
 export type ErrorPresentationProps = {
@@ -5,9 +7,11 @@ export type ErrorPresentationProps = {
   jobId?: number;
   compact?: boolean;
   context?: ErrorContext;
+  onRetry?: () => void;
+  retrying?: boolean;
 };
 
-export function ErrorPresentation({ error, jobId, compact = false, context = 'analysis' }: ErrorPresentationProps) {
+export function ErrorPresentation({ error, jobId, compact = false, context = 'analysis', onRetry, retrying = false }: ErrorPresentationProps) {
   const message = presentError(error, context);
   const safeJobId = typeof jobId === 'number' && Number.isSafeInteger(jobId) && jobId > 0 ? jobId : undefined;
   return (
@@ -16,6 +20,7 @@ export function ErrorPresentation({ error, jobId, compact = false, context = 'an
       {safeJobId !== undefined && <p className="mt-1">Job #{safeJobId}</p>}
       <p className="mt-1">{message.description}</p>
       <p className="mt-2 text-red-700">{message.nextStep}</p>
+      {onRetry && <button type="button" onClick={onRetry} disabled={retrying} aria-busy={retrying} className="mt-3 rounded-md border border-red-300 px-3 py-2 font-medium focus-visible:outline focus-visible:outline-2">{retrying ? 'Retrying…' : 'Retry'}</button>}
     </div>
   );
 }

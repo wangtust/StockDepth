@@ -108,3 +108,8 @@ stage4-coordinator-repair-integrity.json独立确认231个冻结tracked/依赖�
 Active work: [CI execution plan](docs/ci-plan.md), Phase0–6, Node22/Python3.11/PG16, three roles environment/tests/coordinator. Dev only, actual Actions URL/SHA/jobs required at each acceptance. No main updates, production access, LLMs, trades, deployment or restarts. Pending validation pushes explicitly precede remote acceptance; remote unavailable must block, never fake pass. Previous frontend round complete. State: var/codex-ci-team/state.json.
 
 Phase0 CI审查完成（北京时间2026-10-14）：真实push run 38518651341，tested source 0c9848e，Phase 0 static audit success/6秒；见docs/ci-results.md。仅静态bootstrap，后续完整CI未通过也未执行。文档followup与tested SHA分开记录；停在Phase0等调度器放行。main保持8f88572，无部署。
+
+
+### CI Phase1 coordinator acceptance — 2026-10-14（北京时间）
+
+两owner local_ready交接后独立源码/hash/断言审查，39条显式路径普通提交推送dev64c5763039943cb2007b142c55d3d53e328e4d21，真实Phase1 Actions run38520070810 / Phase 1 clean clone offline regression success162s。全新checkout Node22/pnpm12.11.2/Python3.11冻结哈希安装、CI browser系统依赖、Web/Worker类型、299 Python passed（1 integration明确排除）与4前端套件通过，finally输出与venv清理成功。见docs/ci-results.md及矩阵/架构/设置/故障处理。随后文档followup不是tested SHA。main冻结8f88572；无业务编辑、生产访问、收费LLM/交易、部署、main操作或新智能体。只完成Phase1，Phase2以后等待调度器放行。

@@ -1,4 +1,4 @@
-# Phase 0 test environment inventory
+# CI test environment inventory — Phase 0 audit / Phase 1 update
 
 日期：2026-10-14（北京时间）。审查完成；远端静态 bootstrap 已真实验收，见 [结果](ci-results.md)。所有候选业务测试命令均未在本阶段执行。
 
@@ -10,7 +10,7 @@
 | --- | --- | --- |
 | package.json | packageManager=pnpm@12.11.2；check:web、check:workers；根 build/start 指向 bin/stockdepth | 静态审查适合每 push；禁止运行管理器 build/start，可能触发生产管理行为 |
 | pnpm-workspace.yaml | apps/web、apps/workers；allowBuilds 允许 esbuild/sharp/oxide | 统一根安装边界；原生构建需要平台一致；当前未安装验证 |
-| pnpm-lock.yaml | pnpm 自身依赖及第二 YAML 文档的 web/workers importers | 两个 `---`/lockfileVersion/importers 文档；不能只认定缺失 importer。Phase1 合成单一根锁并验证 `pnpm install --frozen-lockfile`；下载需要 registry/network，当前未执行 |
+| pnpm-lock.yaml | pnpm 自身依赖及第二 YAML 文档的 web/workers importers | 两个 `---`/lockfileVersion/importers 文档；不能只认定缺失 importer。Phase1 实际pnpm12证明双文档为原生格式，保持并通过 frozen install；见下方Phase1矩阵（registry网络必需） |
 | apps/web/pnpm-lock.yaml | 旧 web 独立 lock | 与根锁双重权威风险；Phase1 明确唯一根锁，禁止按旧内部 store 路径推断依赖完整 |
 | apps/web/package.json / apps/workers/package.json | Next15、TS5.9.3、Worker tsx；`pnpm --dir apps/web exec tsc --noEmit --incremental false`；`pnpm --dir apps/workers exec tsc --noEmit --incremental false` | 类型检查是每 push 候选，安装复现后验证；web build 需单独审查 import/env/DB 行为，Phase0 未运行 |
 | apps/api/pyproject.toml | setuptools 包装、Python >=3.10、pytest markers；`PYTHONPATH=apps/api python3.11 -m pytest -c apps/api/pyproject.toml apps/api/tests -m "not integration" -q` | 没有 test extra 或精确 transitive 锁；目标使用3.11。not integration 不是网络隔离证明，fixtures/import 必须审查；非空收集/退出码必须保留 |
@@ -149,3 +149,20 @@ Static source audit only. Commands below are real source entry commands, **not e
 | `scripts/tests/frontend-experience-stage2.cjs` | `node scripts/tests/frontend-experience-stage2.cjs` | absolute-path, pnpm-internal, var-fixture/output, browser, localhost/mock | Needs portable fixture/browser and isolated env |
 | `scripts/tests/frontend-experience-stage3.cjs` | `node scripts/tests/frontend-experience-stage3.cjs` | absolute-path, pnpm-internal, var-fixture/output, browser, localhost/mock | Needs portable fixture/browser and isolated env |
 | `scripts/tests/frontend-experience-stage4.cjs` | `node scripts/tests/frontend-experience-stage4.cjs after` | absolute-path, pnpm-internal, var-fixture/output, browser, localhost/mock | Needs portable fixture/browser and isolated env |
+
+
+## Phase 1 reproducibility matrix — 2026-10-14（北京时间）
+
+上方逐文件矩阵保留Phase0原始审查发现，不表示全部历史入口已移植。Phase1实际入口如下；本地两receipt已核对，远端结果见[ci-results](ci-results.md)。
+
+| 入口 | Phase1选择与边界 | 证据/后续范围 |
+| --- | --- | --- |
+| env-check.py / env-install.py | Node22；pnpm12.11.2完全等于root packageManager；Python3.11；根frozen lock、Python require-hashes、pip check | 全新clone本地安装37.342s；远端同入口；删除tracked Worker依赖链接 |
+| test-all.py | 默认all，分项python/frontend；失败传播 | 统一无root.env入口，无生产管理器 |
+| test-python.py | 全部not integration；299 passed、1明确deselected；外部socket被阻止 | 合成legacy checkpoint模板已追踪、tmp现场生成/finally清理；PG16后续Phase3 |
+| test-frontend.cjs | admin forms、真实SWR race、coordinator fullscreen/scroll、experience interactions，4非空套件 | Playwright1.58.2可安装browser及系统依赖；FRONTEND_CHROMIUM可覆盖；输出finally清理 |
+| Web/Worker tsc | 两workspace公开exec入口 | 仅类型检查；未运行生产build/start |
+| 22个旧frontend脚本 | 移植公共依赖解析与browser路径，保持原assert序列 | 只运行上列4套件；历史before比较仍不纳入CI；完整矩阵留Phase4 |
+| Worker DB/lease/crash、security、full CI | Phase1未运行 | Phase2–6尚未验收，不能当required checks已有绿灯 |
+
+独立coordinator比对22个JavaScript断言调用序列和Python37个assert AST，均保留；两owner成功测试源hash与发布候选一致。完整Git历史必须保留，已有7ae2378 ancestor/frozen actions断言不得削弱。

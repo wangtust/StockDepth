@@ -9,7 +9,7 @@
 - 数据库 8 套：空库及升级迁移/重复/约束/积分审计回滚、Worker 稳定性、报告/费用同步、实际 SIGKILL 与租约到期后的新进程恢复、管理员限流竞争、模型替换续跑、密钥迁移/轮换/回滚和保留策略。
 - 前端 13 套，admin 7、experience 3、coordinator 3；覆盖用户/管理员错误与隐私、模型表单、SWR 迟到竞态、五视口页面/报告、侧栏、全屏 Escape/焦点/滚动、报告 Markdown、历史进度、取消/删除/恢复及 loading 状态。
 - 安全 6 套：密钥认证加密、所有实际 reader 与双模型请求明文出口、管理员密钥写入/脱敏、初始化管理员、JWT 篡改/过期/算法与 Cookie/角色门禁、Worker 读请求重试及写请求不盲目重试。用户/DB/Cookie 夹具明确为合成；不是生产渗透测试。
-- Gitleaks 8.30.1 完整 Git 历史扫描，二进制校验固定 SHA256，日志脱敏。唯一例外仅 `.env.example` 中精确无效值 `sk_test_placeholder`，不豁免文件或整个测试目录。额外的生成凭据 canary 已验证：即便在该文件中也会失败且不泄露匹配值。
+- Gitleaks 8.30.1 完整 Git 历史扫描，二进制校验固定 SHA256，日志脱敏。例外仅 `.env.example` 和本文扫描说明中的精确无效值 `sk_test_placeholder`，不豁免整个文件或测试目录。额外的生成凭据 canary 已验证：即便在该文件中也会失败且不泄露匹配值。
 - pnpm audit：high/critical 必须失败；pip-audit 2.10.1：完整哈希锁清单中的任何已知漏洞均失败，查询服务异常同样失败。现 Node 仍有 1 条 moderate 记录，不符合 high 门禁条件，不声称所有级别清零。
 - 官方 Actions 固定提交 SHA；依赖缓存只有下载/store，安装仍 frozen/hash；同事件同 PR/ref 取消过期任务；job 有超时。Python JUnit 和前端/数据库/安全 JSON 报告保留 7 天，不上传 .env、应用日志或真实数据。
 - phase0/phase1 保留手动入口，停止重复自动运行。
@@ -39,3 +39,11 @@
 本次读取 rulesets 返回空列表；读取 main branch protection 返回 GitHub App 403 `Resource not accessible by integration`。连接器不提供管理写入能力，不能据此判断用户套餐，也不能声称已强制保护分支。
 
 用户可在仓库 Settings → Rules → Rulesets，为 main/dev 新建规则，要求 PR 且 required status check 为 `CI required`，禁止 force push；先确认该 check 已真实出现。完成后的工作流会生成汇总检查，但 GitHub 只有启用保护规则后才会强制阻止直接合并。账号私有仓库规则能力以界面实际显示为准。
+
+
+### 首次云端失败与修复
+
+工作分支提交 `ca2aef82545e764c7b41ddcd052ff699d261c517` 的 [run 38706000895](https://github.com/wangtust/StockDepth/actions/runs/38706000895) 中，Type checks 的临时 probe 按设计退出 42。首次运行同时发现云端差异：隐藏的报告目录被 artifact 默认排除、数据库测试将容器内部端口误认为宿主映射端口，以及本文占位符说明也触发了历史扫描。修复为非隐藏专用报告目录、核验同一服务的实际地址/端口及 CI 角色/库身份、对文档中同一精确无效占位符增加限路径例外。未忽略失败，也未降低报告缺失/凭据检查门禁。
+
+
+临时 probe run 已实际结束为 failure，`CI required` 退出 1 并列出所有失败依赖，证明失败传播真实生效。Coordinator 的附加 SSR 套件在云端首次出现 180 秒超时；新增渲染阶段日志及 CDP 请求 15 秒超时，用于定位而非放宽断言或增加总时限。恢复版移除临时 exit42，仍要求全部任务通过。

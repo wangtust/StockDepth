@@ -22,11 +22,12 @@ function run(script: string, args: string[] = [], testEnv = env, expected = 0) {
  return r.stdout.trim() ? JSON.parse(r.stdout.trim()) : null;
 }
 async function main() {
- const [server] = await admin`select inet_server_addr()::text host,inet_server_port() port`;
- assert.equal(server.host,'127.0.0.1/32'); assert.equal(server.port,Number(base.port));
+ const [server] = await admin`select inet_server_addr()::text host,inet_server_port() port,current_database() name,current_user role`;
+ assert(server.host); assert(server.port>0);
+ if(process.env.SECURITY_TEST_ADMIN_URL){assert.equal(base.username,'stockdepth_ci');assert.equal(base.pathname,'/stockdepth_ci_admin');assert.equal(server.name,'stockdepth_ci_admin');assert.equal(server.role,'stockdepth_ci');}
  await admin.unsafe(`create database "${name}"`);
- const [identity] = await db`select current_database() name, inet_server_port() port`;
- assert.equal(identity.name,name);assert.equal(identity.port,Number(base.port));
+ const [identity] = await db`select current_database() name, inet_server_port() port,inet_server_addr()::text host`;
+ assert.equal(identity.name,name);assert.equal(identity.port,server.port);assert.equal(identity.host,server.host);
  await db`create table llm_model_configs(id serial primary key,api_key text not null)`;
  await db`insert into llm_model_configs(api_key) values('synthetic-old')`;
  let result=run('scripts/model-key-migrate.ts');assert.equal(result.candidates,1);
@@ -59,4 +60,4 @@ async function main() {
  assert.equal((await db`select count(*) from price_snapshots`)[0].count,'6');
  console.log('PASS isolated DB migration dryrun/apply/idempotency/rotation/rollback and retention latest/reference/lease/replay guards; no production access');
 }
-main().catch(() => { console.error('isolated_security_db_failed');process.exitCode=1; }).finally(async()=>{await db.end();await admin.unsafe(`drop database if exists "${name}" with (force)`);await admin.end();});
+main().catch(error => { console.error('isolated_security_db_failed',error.name);console.error(String(error.stack).split('\n').filter(line=>line.trim().startsWith('at ')).join('\n'));process.exitCode=1; }).finally(async()=>{await db.end();await admin.unsafe(`drop database if exists "${name}" with (force)`);await admin.end();});

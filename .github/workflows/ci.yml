@@ -15,15 +15,13 @@ defaults:
     shell: bash
 env:
   NEXT_TELEMETRY_DISABLED: '1'
-  CI_REPORT_DIR: .ci-reports
+  CI_REPORT_DIR: ci-reports
 jobs:
   types:
     name: Type checks
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - name: Controlled CI failure probe - temporary branch only
-        run: exit 42
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
@@ -46,7 +44,7 @@ jobs:
         if: always()
         with:
           name: python-test-report
-          path: .ci-reports
+          path: ci-reports
           if-no-files-found: error
           retention-days: 7
       - name: Remove disposable Python environment
@@ -72,7 +70,7 @@ jobs:
         if: always()
         with:
           name: frontend-${{ matrix.group }}-report
-          path: .ci-reports
+          path: ci-reports
           if-no-files-found: error
           retention-days: 7
   build:
@@ -102,7 +100,7 @@ jobs:
         if: always()
         with:
           name: security-regression-report
-          path: .ci-reports
+          path: ci-reports
           if-no-files-found: error
           retention-days: 7
   dependencies:

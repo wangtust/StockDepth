@@ -22,7 +22,7 @@ jobs:
           --health-cmd "pg_isready -U stockdepth_ci -d stockdepth_ci_admin"
           --health-interval 5s --health-timeout 5s --health-retries 10
     env:
-      CI_REPORT_DIR: .ci-reports
+      CI_REPORT_DIR: ci-reports
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -36,6 +36,6 @@ jobs:
         if: always()
         with:
           name: database-integration-report
-          path: .ci-reports
+          path: ci-reports
           if-no-files-found: error
           retention-days: 7

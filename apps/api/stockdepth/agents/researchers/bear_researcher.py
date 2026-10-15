@@ -1,3 +1,4 @@
+from stockdepth.agents.context import decision_context, report_or_absent, opponent_argument_or_opening
 from stockdepth.agents.utils.agent_utils import get_language_instruction
 
 
@@ -14,11 +15,11 @@ def create_bear_researcher(llm):
         history = investment_debate_state.get("history", "")
         bear_history = investment_debate_state.get("bear_history", "")
 
-        current_response = investment_debate_state.get("current_response", "")
-        market_research_report = state["market_report"]
-        sentiment_report = state["sentiment_report"]
-        news_report = state["news_report"]
-        fundamentals_report = state["fundamentals_report"]
+        current_response = opponent_argument_or_opening(investment_debate_state.get("current_response", ""), "opponent")
+        market_research_report = report_or_absent(state.get("market_report"), "market")
+        sentiment_report = report_or_absent(state.get("sentiment_report"), "sentiment")
+        news_report = report_or_absent(state.get("news_report"), "news")
+        fundamentals_report = report_or_absent(state.get("fundamentals_report"), "fundamentals")
         asset_type = state.get("asset_type", "stock")
         target_label = "stock" if asset_type == "stock" else "asset"
         fundamentals_label = (
@@ -46,7 +47,7 @@ Latest world affairs news: {news_report}
 Conversation history of the debate: {history}
 Last bull argument: {current_response}
 Use this information to deliver a compelling bear argument, refute the bull's claims, and engage in a dynamic debate that demonstrates the risks and weaknesses of investing in the {target_label}. {DEBATE_SAFETY_INSTRUCTION}
-""" + get_language_instruction()
+""" + "\n" + decision_context(state) + get_language_instruction()
 
         response = llm.invoke(prompt)
 

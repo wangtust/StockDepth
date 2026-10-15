@@ -51,7 +51,7 @@ def create_sentiment_analyst(llm):
         ticker = state["company_of_interest"]
         end_date = state["trade_date"]
         start_date = _seven_days_back(end_date)
-        instrument_context = build_instrument_context(ticker)
+        instrument_context = state.get("instrument_context") or build_instrument_context(ticker, state.get("asset_type", "stock"))
 
         # Pre-fetch all three sources. Each fetcher degrades gracefully and
         # returns a string (no exceptions surface from here), so the LLM
@@ -88,8 +88,7 @@ def create_sentiment_analyst(llm):
                 (
                     "system",
                     "You are a helpful AI assistant, collaborating with other assistants."
-                    " If you or any other assistant has the FINAL TRANSACTION PROPOSAL: **BUY/HOLD/SELL** or deliverable,"
-                    " prefix your response with FINAL TRANSACTION PROPOSAL: **BUY/HOLD/SELL** so the team knows to stop."
+                    " Report only supplied sentiment evidence. You have no external tools and do not decide the trade."
                     "\n{system_message}\n"
                     "For your reference, the current date is {current_date}. {instrument_context}",
                 ),

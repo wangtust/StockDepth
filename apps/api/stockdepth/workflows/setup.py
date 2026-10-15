@@ -27,6 +27,7 @@ class GraphSetup:
         workflow_version: int = 1,
         max_tool_rounds: int = 5,
         memory_node=None,
+        evidence_node=None,
     ):
         """Initialize with required components."""
         self.quick_thinking_llm = quick_thinking_llm
@@ -37,6 +38,7 @@ class GraphSetup:
         self.workflow_version = workflow_version
         self.max_tool_rounds = max_tool_rounds
         self.memory_node = memory_node
+        self.evidence_node = evidence_node
 
     def setup_graph(
         self, selected_analysts=["market", "social", "news", "fundamentals"]
@@ -84,6 +86,13 @@ class GraphSetup:
         # Create workflow
         workflow = StateGraph(AgentState)
 
+        entry = START
+        if self.workflow_version >= 3:
+            from .market_evidence import market_evidence_node
+            workflow.add_node("Market Evidence", self.evidence_node or market_evidence_node)
+            workflow.add_edge(START, "Market Evidence")
+            entry = "Market Evidence"
+
         # Serial topology and names remain unchanged for old checkpoints.
         if plan.concurrency_limit == 1 and self.workflow_version == 1:
             for spec in plan.specs:
@@ -94,6 +103,7 @@ class GraphSetup:
             add_parallel_analysts(
                 workflow, plan, analyst_factories, self.tool_nodes,
                 self.conditional_logic, "Research Reports Ready" if self.workflow_version >= 2 else "Bull Researcher",
+                entry=entry,
             )
 
         if self.workflow_version >= 2:

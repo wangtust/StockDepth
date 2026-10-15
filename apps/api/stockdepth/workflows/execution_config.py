@@ -9,13 +9,15 @@ def execution_config(run_dir: Path, config: dict, analysts: list, *, resume=Fals
     path = run_dir / 'execution.json'
     owner_hash = hashlib.sha256(str(owner).encode()).hexdigest() if owner else None
     identity = {key: config.get(key) for key in ("analysis_ticker", "analysis_date", "realtime_data", "output_language", "max_debate_rounds", "max_risk_discuss_rounds")}
+    if config.get('portfolio_fingerprint'):
+        identity['portfolio_fingerprint'] = config['portfolio_fingerprint']
     if path.exists():
         saved = json.loads(path.read_text())
         if saved.get('analysts') != analysts or saved.get('owner') != owner_hash or saved.get('identity') != identity:
             raise ValueError('Execution identity/analyst selection differs from saved run')
     else:
         saved = {
-            'workflow_version': 1 if resume else 2,
+            'workflow_version': 1 if resume else 3,
             'analyst_concurrency_limit': 1 if resume else effective_analyst_concurrency(config),
             'max_tool_rounds': config.get('max_tool_rounds', 5),
             'analysts': analysts, 'owner': owner_hash, 'identity': identity,
@@ -23,6 +25,6 @@ def execution_config(run_dir: Path, config: dict, analysts: list, *, resume=Fals
         temp = path.with_suffix('.tmp')
         temp.write_text(json.dumps(saved, indent=2))
         temp.replace(path)
-    if saved['workflow_version'] not in (1, 2):
+    if saved['workflow_version'] not in (1, 2, 3):
         raise ValueError('Unsupported saved workflow version')
     return saved

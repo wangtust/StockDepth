@@ -106,7 +106,7 @@ def test_ambiguous_or_unrecognized_rating_never_defaults_to_hold(text):
 def test_v2_manifest_freezes_shape_on_replacement_and_legacy_resume(tmp_path):
     cfg = {'analyst_concurrency_limit': 4, 'max_tool_rounds': 3}
     saved = execution_config(tmp_path, cfg, ['news', 'market'], owner=12)
-    assert saved['workflow_version'] == 2 and saved['analyst_concurrency_limit'] == 4
+    assert saved['workflow_version'] == 3 and saved['analyst_concurrency_limit'] == 4
     assert execution_config(tmp_path, {'analyst_concurrency_limit': 1}, ['news', 'market'], resume=True, owner=12) == saved
     with pytest.raises(ValueError, match='identity'):
         execution_config(tmp_path, cfg, ['news', 'market'], owner=13)
@@ -283,7 +283,8 @@ def test_runner_persists_nested_progress_metrics_and_resumes_same_run(tmp_path, 
     def graph_factory(selected_analysts, config, **kwargs):
         configs.append(dict(config))
         workflow = mock_workflow(config['frozen_analyst_concurrency'], next(models), selected_analysts,
-                                 workflow_version=config['workflow_version'])
+                                 workflow_version=config['workflow_version'],
+                                 evidence_node=lambda state: {'market_snapshot': {}, 'market_evidence': 'offline fixture'})
         return SimpleNamespace(workflow=workflow, graph=workflow.compile(), propagator=Propagator(),
             _log_state=lambda *args: None, memory_log=TradingMemoryLog(config),
             process_signal=SignalProcessor().process_signal)

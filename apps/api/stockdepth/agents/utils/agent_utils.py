@@ -35,7 +35,7 @@ def get_language_instruction() -> str:
     lang = get_config().get("output_language", "English")
     if lang.strip().lower() == "english":
         return ""
-    return f" Write your entire response in {lang}."
+    return f" Write prose in {lang}, but keep machine-readable Rating, Action and FINAL TRANSACTION PROPOSAL labels and their values in English."
 
 
 @lru_cache(maxsize=256)

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from stockdepth.agents.context import decision_context
+
 from stockdepth.agents.schemas import ResearchPlan, render_research_plan
 from stockdepth.agents.utils.agent_utils import (
     build_instrument_context,
@@ -17,7 +19,7 @@ def create_research_manager(llm):
     structured_llm = bind_structured(llm, ResearchPlan, "Research Manager")
 
     def research_manager_node(state) -> dict:
-        instrument_context = build_instrument_context(state["company_of_interest"])
+        instrument_context = state.get("instrument_context") or build_instrument_context(state["company_of_interest"])
         history = state["investment_debate_state"].get("history", "")
 
         investment_debate_state = state["investment_debate_state"]
@@ -40,7 +42,7 @@ Commit to a clear stance whenever the debate's strongest arguments warrant one; 
 ---
 
 **Debate History:**
-{history}""" + get_language_instruction()
+{history}""" + "\n" + decision_context(state) + get_language_instruction()
 
         investment_plan = invoke_structured_or_freetext(
             structured_llm,

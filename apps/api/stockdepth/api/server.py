@@ -412,7 +412,7 @@ class Handler(SimpleHTTPRequestHandler):
                 ",".join(str(a) for a in analysts),
                 "--checkpoint",
             ]
-            concurrency = payload.get("analyst_concurrency", int(os.environ.get("STOCKDEPTH_ANALYST_CONCURRENCY", "1")))
+            concurrency = payload.get("analyst_concurrency", int(os.environ.get("STOCKDEPTH_ANALYST_CONCURRENCY", "4")))
             rounds = payload.get("max_tool_rounds", int(os.environ.get("STOCKDEPTH_MAX_TOOL_ROUNDS", "5")))
             if type(concurrency) is not int or concurrency not in (1, 2, 4):
                 raise ValueError("analyst_concurrency must be 1, 2 or 4")
@@ -434,6 +434,10 @@ class Handler(SimpleHTTPRequestHandler):
             if realtime_data:
                 cmd.append("--realtime-data")
             env = os.environ.copy()
+            env.pop("STOCKDEPTH_PORTFOLIO_CONTEXT", None)
+            if payload.get("portfolio") is not None:
+                from stockdepth.agents.portfolio import PortfolioContext
+                env["STOCKDEPTH_PORTFOLIO_CONTEXT"] = PortfolioContext.model_validate(payload["portfolio"]).model_dump_json()
             env.setdefault("PYTHONUNBUFFERED", "1")
             env["STOCKDEPTH_MODEL_PRICES"] = json.dumps(payload.get("model_prices") or {})
             if payload.get("job_id") is not None:

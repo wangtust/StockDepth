@@ -69,6 +69,8 @@ class StockDepthGraph:
             config: Configuration dictionary. If None, uses default config
             callbacks: Optional list of callback handlers (e.g., for tracking LLM/tool stats)
         """
+        self._managed_execution = not config or "workflow_version" not in config
+        self.selected_analysts = list(selected_analysts)
         self.debug = debug
         self.config = config or DEFAULT_CONFIG
         self.callbacks = callbacks or []
@@ -120,18 +122,25 @@ class StockDepthGraph:
         self.log_states_dict = {}  # date to full state dict
 
         # Set up the graph: keep the workflow for recompilation with a checkpointer.
-        self.workflow = self.graph_setup.setup_graph(selected_analysts)
+        self.workflow = self.graph_setup.setup_graph(self.selected_analysts)
         self.graph = self.workflow.compile()
         self._checkpointer_ctx = None
 
     def _memory_node(self, state):
         # Historical runs must never settle outcomes using prices fetched today.
         as_of = state["trade_date"]
+        note = []
         if as_of >= datetime.now().strftime("%Y-%m-%d"):
-            self._resolve_pending_entries(state["company_of_interest"])
-        return {"past_context": self.memory_log.get_past_context(
-            state["company_of_interest"], as_of=as_of
-        )}
+            try:
+                self._resolve_pending_entries(state["company_of_interest"])
+            except Exception as error:
+                note.append(f"Memory settlement unavailable ({type(error).__name__}); previous lessons only.")
+        try:
+            context = self.memory_log.get_past_context(state["company_of_interest"], as_of=as_of)
+        except Exception as error:
+            context = ""
+            note.append(f"Memory read unavailable ({type(error).__name__}); analysis continues without lessons.")
+        return {"past_context": context, "memory_note": " ".join(note)}
 
     def _get_provider_kwargs(self) -> Dict[str, Any]:
         """Get provider-specific kwargs for LLM client creation."""
@@ -174,7 +183,7 @@ class StockDepthGraph:
             base_url = self.config.get("backend_url")
             kwargs = self._get_provider_kwargs()
             metadata = {"model_role": role, "model_provider": provider, "model_name": model}
-        capacity = kwargs.pop("request_concurrency", 1)
+        capacity = kwargs.pop("request_concurrency", 4)
         # All SDKs receive explicit finite deadlines/retry budgets, including
         # native providers. Queuing is bounded separately by the same timeout.
         timeout = kwargs.setdefault("timeout", 600)
@@ -204,7 +213,7 @@ class StockDepthGraph:
 
     def _create_tool_nodes(self) -> Dict[str, ToolNode]:
         """Create tool nodes for different data sources using abstract methods."""
-        return {
+        nodes = {
             "market": ToolNode(
                 [
                     # Core stock data tools
@@ -237,6 +246,10 @@ class StockDepthGraph:
                 ]
             ),
         }
+        if self.config.get("workflow_version", 1) >= 3:
+            from stockdepth.agents.runtime_tools import analyst_tools
+            nodes = {key: ToolNode(analyst_tools(list(node.tools_by_name.values()))) for key, node in nodes.items()}
+        return nodes
 
     def _resolve_benchmark(self, ticker: str) -> str:
         """Pick the benchmark ticker for alpha calculation against ``ticker``.
@@ -351,7 +364,26 @@ class StockDepthGraph:
         """
         self.ticker = company_name
 
-        # Resolve any pending memory-log entries for this ticker before the pipeline runs.
+        if self._managed_execution:
+            from .execution_config import execution_config
+            self.config = {**self.config, "analysis_ticker": company_name, "analysis_date": str(trade_date)}
+            manifest_dir = (Path(self.config["results_dir"]) / safe_ticker_component(company_name)
+                            / str(trade_date) / "execution")
+            datetime.strptime(str(trade_date), "%Y-%m-%d")
+            manifest_dir.mkdir(parents=True, exist_ok=True)
+            resume = (self.config.get("checkpoint_enabled") and
+                      checkpoint_step(self.config["data_cache_dir"], company_name, str(trade_date)) is not None)
+            frozen = execution_config(manifest_dir, self.config, self.selected_analysts, resume=resume)
+            self.config["workflow_version"] = frozen["workflow_version"]
+            set_config(self.config)
+            self.tool_nodes = self._create_tool_nodes()
+            self.workflow = GraphSetup(
+                self.quick_thinking_llm, self.deep_thinking_llm, self.tool_nodes, self.conditional_logic,
+                analyst_concurrency_limit=frozen["analyst_concurrency_limit"],
+                workflow_version=frozen["workflow_version"], max_tool_rounds=frozen["max_tool_rounds"],
+                memory_node=self._memory_node,
+            ).setup_graph(self.selected_analysts)
+            self.graph = self.workflow.compile()
         if self.config.get("workflow_version", 1) == 1:
             self._resolve_pending_entries(company_name)
 
@@ -388,6 +420,8 @@ class StockDepthGraph:
         init_agent_state = self.propagator.create_initial_state(
             company_name, trade_date, asset_type=asset_type, past_context=past_context
         )
+        from stockdepth.agents.context import instrument_context
+        init_agent_state["instrument_context"] = instrument_context(init_agent_state)
         args = self.propagator.get_graph_args()
 
         # Inject thread_id so same ticker+date resumes, different date starts fresh.
@@ -466,6 +500,10 @@ class StockDepthGraph:
             },
             "investment_plan": final_state["investment_plan"],
             "final_trade_decision": final_state["final_trade_decision"],
+            "market_snapshot": final_state.get("market_snapshot"),
+            "market_evidence": final_state.get("market_evidence"),
+            "portfolio_context": final_state.get("portfolio_context"),
+            "memory_note": final_state.get("memory_note"),
         }
 
         # Save to file. Reject ticker values that would escape the

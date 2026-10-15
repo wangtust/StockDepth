@@ -12,6 +12,7 @@ from langgraph.graph import END, START, StateGraph
 from stockdepth.agents.utils.agent_states import AgentState
 from stockdepth.agents.utils.agent_utils import create_msg_delete
 from .research_validation import MISSING_REPORT
+from stockdepth.agents.analysts.turn import WRAP_UP
 
 
 def bounded_analyst(spec, analyst, max_tool_rounds):
@@ -22,11 +23,7 @@ def bounded_analyst(spec, analyst, max_tool_rounds):
         rounds = sum(bool(getattr(m, 'tool_calls', None)) for m in state['messages'])
         final_turn = rounds >= max_tool_rounds
         if final_turn:
-            state = {**state, 'messages': [*state['messages'], HumanMessage(content=(
-                'Tool round budget exhausted. Write your final research report now '
-                'using only the evidence already retrieved. Do not call tools. '
-                'Explicitly identify unavailable data and uncertainty.'
-            ))]}
+            state = {**state, 'messages': [*state['messages'], HumanMessage(content=WRAP_UP)]}
         # Use RunnableLambda to forward inherited callbacks/config even for
         # factories whose public callable only accepts state.
         from langchain_core.runnables import RunnableLambda
@@ -73,8 +70,8 @@ def isolated_analyst(spec, analyst, tools, conditional_logic, first=False):
     return run
 
 
-def add_parallel_analysts(workflow, plan, factories, tools, logic, next_node):
-    previous = START
+def add_parallel_analysts(workflow, plan, factories, tools, logic, next_node, entry=START):
+    previous = entry
     for offset in range(0, len(plan.specs), plan.concurrency_limit):
         batch = plan.specs[offset:offset + plan.concurrency_limit]
         names = []

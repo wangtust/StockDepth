@@ -1,5 +1,7 @@
 # StockDepth 多智能体执行升级
 
+本文记录第一轮升级；后续默认并发已改为 4，并新增证据结构，见 [Agent 证据结构升级](agent-evidence-upgrade-2026-10-15.md)。
+
 参考 [TradingAgents graph/setup.py](https://github.com/TauricResearch/TradingAgents/blob/1394a3f72aa4393e1a98f51b382434c4b4c2d972/tradingagents/graph/setup.py)，在 StockDepth 原有 SaaS 调度和持久化链路中实现独立分析师子图、工具轮次预算及汇合屏障，没有替换 Worker 或数据库用量统计。
 
 ## 行为与配置

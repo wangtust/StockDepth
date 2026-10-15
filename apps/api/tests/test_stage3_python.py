@@ -134,9 +134,9 @@ def test_parallel_resume_preserves_completed_sibling_and_tool_step(tmp_path):
     assert resumed_model._calls['social']==resumed_model._calls['fundamentals']==2
 
 
-def test_serial_default_and_fallback():
+def test_maximum_default_and_explicit_serial_compatibility():
     from stockdepth.default_config import DEFAULT_CONFIG
-    assert DEFAULT_CONFIG['analyst_concurrency_limit']==1
+    assert DEFAULT_CONFIG['analyst_concurrency_limit']==4
     assert MockModel()._peak==0
     graph=mock_workflow(1,MockModel()).compile()
     assert 'Market Analyst' in graph.nodes and 'Msg Clear News' in graph.nodes
@@ -155,11 +155,11 @@ def test_duplicate_analyst_rejected():
 
 def test_snapshot_capacity_clamp():
     from stockdepth.workflows.analyst_execution import effective_analyst_concurrency as limit
-    assert limit({})==1
+    assert limit({})==4
     assert limit({'analyst_concurrency_limit':2})==2
     for capacity,expected in [(1,1),(2,2),(4,2)]:
         assert limit({'analyst_concurrency_limit':2,'model_configs':{'quick':{'options':{'request_concurrency':capacity}}}})==expected
-    assert limit({'analyst_concurrency_limit':2,'model_configs':{'quick':{}}})==1
+    assert limit({'analyst_concurrency_limit':2,'model_configs':{'quick':{}}})==2
     with pytest.raises(ValueError):
         limit({'model_configs':{'quick':{'options':{'request_concurrency':1.5}}}})
 

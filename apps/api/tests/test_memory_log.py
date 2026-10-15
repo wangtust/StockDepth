@@ -840,6 +840,7 @@ class TestLegacyRemoval:
             },
         }
         mock_graph = MagicMock()
+        mock_graph._managed_execution = False
         mock_graph.memory_log = TradingMemoryLog({"memory_log_path": str(tmp_path / "mem.md")})
         mock_graph.log_states_dict = {}
         mock_graph.debug = False

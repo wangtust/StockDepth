@@ -123,6 +123,13 @@ def build_complete_report(state: dict, ticker: str) -> str:
     if state.get("research_status"):
         sections.append("Research completeness: " + ", ".join(f"{k}: {v}" for k, v in state["research_status"].items()))
 
+    if state.get("market_evidence"):
+        sections.append("## Market Evidence\n\n" + state["market_evidence"])
+    if state.get("memory_note"):
+        sections.append("Memory note: " + state["memory_note"])
+    if state.get("portfolio_context"):
+        sections.append(state["portfolio_context"])
+
     analyst_parts = []
     for key in ("market_report", "sentiment_report", "news_report", "fundamentals_report"):
         title = REPORT_MAP[key][1]
@@ -197,6 +204,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--analyst-concurrency", type=int, choices=(1, 2, 4), default=None)
     parser.add_argument("--max-tool-rounds", type=int, default=None)
     parser.add_argument("--memory-owner", default=None)
+    parser.add_argument("--portfolio-file", default=None)
     return parser.parse_args()
 
 
@@ -220,6 +228,12 @@ def main() -> None:
     config["realtime_data"] = args.realtime_data
     config["analysis_date"] = args.date
     config["analysis_ticker"] = ticker
+    portfolio = None
+    portfolio_raw = Path(args.portfolio_file).read_text() if args.portfolio_file else os.environ.get("STOCKDEPTH_PORTFOLIO_CONTEXT")
+    if portfolio_raw:
+        from stockdepth.agents.portfolio import PortfolioContext
+        portfolio = PortfolioContext.model_validate_json(portfolio_raw)
+        config["portfolio_fingerprint"] = portfolio.fingerprint()
     if args.analyst_concurrency is not None:
         config["analyst_concurrency_limit"] = args.analyst_concurrency
     if args.max_tool_rounds is not None:
@@ -278,6 +292,9 @@ def main() -> None:
         graph._resolve_pending_entries(ticker)
 
     state = graph.propagator.create_initial_state(ticker, args.date, asset_type=args.asset_type)
+    from stockdepth.agents.context import instrument_context
+    state["instrument_context"] = instrument_context(state)
+    state["portfolio_context"] = portfolio.render() if portfolio else ""
     graph_args = graph.propagator.get_graph_args()
     graph_args.setdefault("config", {})["callbacks"] = callbacks
     checkpointer_ctx = None

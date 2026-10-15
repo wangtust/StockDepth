@@ -1,5 +1,7 @@
 # CI setup — Phase 1
 
+> 2026-10-15：已开始第二阶段，当前实现与分阶段计划见 [CI 第二阶段执行](ci-phase2-execution.md)。以下保留第一阶段历史说明；第二阶段远端验收尚未完成。
+
 2026-10-14（北京时间）。仅dev普通提交推送；main不改。全新clone无root.env，先安装Node22、Python3.11与根packageManager的pnpm12.11.2。实际registry版本/engines与Node22运行已核对，没有更改目标。pnpm12根锁原生双YAML文档由真实frozen install接受；旧web独立lock不作为CI安装入口。
 
 从仓库根执行，venv使用全新专属临时路径：

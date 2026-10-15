@@ -1,0 +1,85 @@
+name: CI
+on:
+  push:
+    branches: [dev]
+  pull_request:
+    branches: [dev, main]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: ci-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+defaults:
+  run:
+    shell: bash
+env:
+  NEXT_TELEMETRY_DISABLED: '1'
+jobs:
+  types:
+    name: Type checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-ci
+      - run: pnpm --dir apps/web exec tsc --noEmit --incremental false
+      - run: pnpm --dir apps/workers exec tsc --noEmit --incremental false
+  python:
+    name: Python offline tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-ci
+        with:
+          scope: python
+      - run: '"$RUNNER_TEMP/stockdepth-ci-venv/bin/python" scripts/ci/test-python.py'
+      - name: Remove disposable Python environment
+        if: always()
+        run: rm -rf -- "$RUNNER_TEMP/stockdepth-ci-venv"
+  frontend:
+    name: Frontend regression
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: ./.github/actions/setup-ci
+      - run: node scripts/ci/test-frontend.cjs --install-browser --with-deps
+      - run: node scripts/ci/test-frontend.cjs
+  build:
+    name: Web production build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-ci
+      - run: node scripts/ci/build-web.cjs
+  required:
+    name: CI required
+    if: always()
+    needs: [types, python, frontend, build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Require every job to succeed
+        env:
+          JOB_RESULTS: ${{ toJSON(needs) }}
+        run: |
+          python3 - <<'PY'
+          import json, os
+          results = json.loads(os.environ['JOB_RESULTS'])
+          failures = {name: job['result'] for name, job in results.items() if job['result'] != 'success'}
+          if failures:
+              raise SystemExit(f'CI failed: {failures}')
+          print('All four CI jobs passed')
+          PY

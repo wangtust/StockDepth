@@ -16,19 +16,26 @@ def run(args):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--venv', required=True, type=Path,
+    parser.add_argument('--scope', choices=['all', 'node', 'python'], default='all',
+                        help='Install only the dependencies needed by this CI job')
+    parser.add_argument('--venv', type=Path,
                         help='New disposable virtualenv path; must not already exist')
     options = parser.parse_args()
+    if options.scope != 'node' and options.venv is None:
+        parser.error('--venv is required for Python installation')
     spec = importlib.util.spec_from_file_location('env_check', ROOT / 'scripts/ci/env-check.py')
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     module.check()
     if (ROOT / '.env').exists():
         raise RuntimeError('CI install requires a clean clone without root .env')
-    target = options.venv.resolve()
-    if target.exists():
+    target = options.venv.resolve() if options.scope != 'node' else None
+    if target is not None and target.exists():
         raise RuntimeError('Refusing to reuse an existing Python environment')
-    run(['pnpm', 'install', '--frozen-lockfile'])
+    if options.scope in ('all', 'node'):
+        run(['pnpm', 'install', '--frozen-lockfile'])
+    if options.scope == 'node':
+        return
     # Resolve launcher symlinks so relocatable Python distributions find stdlib.
     try:
         run([str(Path(sys.executable).resolve()), '-m', 'venv', str(target)])

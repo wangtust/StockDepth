@@ -1,0 +1,43 @@
+name: StockDepth CI environment
+description: Locked Node and optional Python dependencies, without project credentials
+inputs:
+  scope:
+    description: Dependency selection (node or python)
+    default: node
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@v7
+      with:
+        node-version: '22'
+        package-manager-cache: false
+    - uses: actions/setup-python@v7
+      with:
+        python-version: '3.11'
+    - name: Install exact root package manager
+      shell: bash
+      run: |
+        set -euo pipefail
+        manager=$(node -p "require('./package.json').packageManager")
+        npm install --global "$manager"
+        python scripts/ci/env-check.py
+    - name: Locate pnpm content store
+      if: inputs.scope == 'node'
+      id: store
+      shell: bash
+      run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+    - uses: actions/cache@v6
+      if: inputs.scope == 'node'
+      with:
+        path: ${{ steps.store.outputs.path }}
+        key: ${{ runner.os }}-${{ runner.arch }}-node22-pnpm-${{ hashFiles('package.json', 'pnpm-lock.yaml', 'pnpm-workspace.yaml') }}
+    - uses: actions/cache@v6
+      if: inputs.scope == 'python'
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-${{ runner.arch }}-py311-${{ hashFiles('apps/api/requirements-ci.lock', 'apps/api/pyproject.toml') }}
+    - name: Install frozen dependencies
+      shell: bash
+      env:
+        CI_INSTALL_SCOPE: ${{ inputs.scope }}
+      run: python scripts/ci/env-install.py --scope "$CI_INSTALL_SCOPE" --venv "$RUNNER_TEMP/stockdepth-ci-venv"

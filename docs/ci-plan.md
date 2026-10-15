@@ -1,5 +1,7 @@
 # GitHub Actions CI engineering execution plan
 
+> 2026-10-15：已开始第二阶段，当前实现与分阶段计划见 [CI 第二阶段执行](ci-phase2-execution.md)。以下保留第一阶段历史说明；第二阶段远端验收尚未完成。
+
 Date: 2026-10-14 (Asia/Shanghai). Repository wangtust/StockDepth. Work and ordinary publication only on dev. Starting HEAD 8f88572; main stays unchanged.
 
 ## Scope and acceptance

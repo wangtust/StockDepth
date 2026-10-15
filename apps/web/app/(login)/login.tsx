@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useActionState } from 'react';
+import { useActionState, useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -11,6 +11,26 @@ import { signIn, signUp } from './actions';
 import { ActionState } from '@/lib/auth/middleware';
 
 export function Login({ mode = 'signin' }: { mode?: 'signin' | 'signup' }) {
+  const [sendingCode, setSendingCode] = useState(false);
+  const [codeMessage, setCodeMessage] = useState('');
+  const [cooldown, setCooldown] = useState(0);
+  useEffect(() => {
+    if (cooldown <= 0) return;
+    const timer = setTimeout(() => setCooldown(value => value - 1), 1000);
+    return () => clearTimeout(timer);
+  }, [cooldown]);
+  async function sendCode(event: React.MouseEvent<HTMLButtonElement>) {
+    const emailInput = event.currentTarget.form?.elements.namedItem('email') as HTMLInputElement | null;
+    if (!emailInput?.reportValidity() || sendingCode || cooldown > 0) return;
+    setSendingCode(true); setCodeMessage('');
+    try {
+      const response = await fetch('/api/auth/signup-code', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: emailInput.value }) });
+      const result = await response.json();
+      setCodeMessage(result.error || result.success || 'Unable to send code.');
+      if (response.ok) setCooldown(60);
+    } catch { setCodeMessage('Unable to send code. Please try again.'); }
+    finally { setSendingCode(false); }
+  }
   const searchParams = useSearchParams();
   const redirect = searchParams.get('redirect');
   const priceId = searchParams.get('priceId');
@@ -65,7 +85,7 @@ export function Login({ mode = 'signin' }: { mode?: 'signin' | 'signup' }) {
                 autoComplete="email"
                 defaultValue={state.email}
                 required
-                maxLength={50}
+                maxLength={255}
                 className="appearance-none rounded-full relative block w-full px-3 py-2 border border-gray-300 placeholder-gray-500 text-gray-900 focus:outline-none focus:ring-orange-500 focus:border-orange-500 focus:z-10 sm:text-sm"
                 placeholder="Enter your email"
               />
@@ -96,6 +116,18 @@ export function Login({ mode = 'signin' }: { mode?: 'signin' | 'signup' }) {
               />
             </div>
           </div>
+
+          {mode === 'signup' && <div className="space-y-2">
+            <Label htmlFor="verificationCode">Email verification code</Label>
+            <div className="flex gap-2">
+              <Input id="verificationCode" name="verificationCode" type="text" inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{6}" maxLength={6} required placeholder="6-digit code" />
+              <Button type="button" variant="outline" onClick={sendCode} disabled={sendingCode || cooldown > 0}>
+                {sendingCode ? 'Sending…' : cooldown > 0 ? `Resend in ${cooldown}s` : 'Send code'}
+              </Button>
+            </div>
+            <p className="text-sm text-gray-600">Verify your email before registering. Code valid for 10 minutes.</p>
+            {codeMessage && <p role="status" className="text-sm">{codeMessage}</p>}
+          </div>}
 
           {mode === 'signup' && (
             <div>

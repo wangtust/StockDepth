@@ -1,5 +1,7 @@
 import { requirePlatformAdmin } from '@/lib/auth/admin';
 import { AdminBrand, AdminNav } from '@/app/admin/_components/admin-nav';
+import Link from 'next/link';
+import { ArrowLeft } from 'lucide-react';
 
 export default async function AdminLayout({
   children
@@ -14,6 +16,13 @@ export default async function AdminLayout({
         <div className="mx-auto flex max-w-[2400px] min-w-0 flex-wrap items-center justify-between gap-3 px-4 py-4 sm:px-6 lg:px-8">
           <AdminBrand />
           <div className="flex min-w-0 flex-wrap items-center gap-2 text-sm text-slate-600">
+            <Link
+              href="/dashboard/analysis"
+              className="inline-flex items-center gap-2 rounded-md border border-slate-200 px-3 py-2 font-medium text-slate-700 hover:bg-slate-100"
+            >
+              <ArrowLeft className="h-4 w-4" aria-hidden="true" />
+              返回股票分析
+            </Link>
             <span className="min-w-0 break-all">{admin.email}</span>
             <span className="rounded-md border border-slate-200 bg-slate-100 px-2 py-1 text-xs font-medium uppercase text-slate-700">
               {admin.role}

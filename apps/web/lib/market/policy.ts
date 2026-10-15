@@ -60,3 +60,12 @@ export function decimalCents(value:string): number {
   if (cents<=0n || cents>9007199254740991n) throw new Error('unsupported_price_range');
   return Number(cents);
 }
+
+// Schedule after the regular market close plus a publication buffer. Intl keeps
+// New York's DST transitions correct. Holidays simply retain the last published bar.
+export function nextDailyCloseAt(exchange: string, timezone: string | null, now = new Date()) {
+  return nextQuoteAt(exchange, timezone, false, now);
+}
+export function isUSMarket(exchange: string) {
+  return ['XNYS', 'XNAS', 'XASE'].includes(exchange);
+}

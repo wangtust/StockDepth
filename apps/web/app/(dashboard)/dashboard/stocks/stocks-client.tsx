@@ -1,4 +1,5 @@
 'use client';
+import { StockDecisionHistory } from '@/components/stock-decision-history';
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import useSWR from 'swr';
@@ -7,7 +8,7 @@ import { pollingDefaults } from '@/lib/http/polling';
 import { Button } from '@/components/ui/button';
 import { ErrorPresentation } from '@/components/error-presentation';
 import { Input } from '@/components/ui/input';
-import { Instrument, Quote, QuoteDisplay, marketTime } from './market-display';
+import { Instrument, Quote, marketTime } from './market-display';
 
 const readOptions = { ...pollingDefaults, shouldRetryOnError: false };
 export function StocksClient() {
@@ -27,8 +28,8 @@ export function StocksClient() {
   async function refresh() { if (refreshLock.current) return; refreshLock.current = true; setRefreshing(true); try { await mutate(); } finally { refreshLock.current = false; setRefreshing(false); } }
   const changing = input.trim().slice(0, 80) !== query;
   return <section className="min-w-0 space-y-5 p-4 text-sm leading-6 [overflow-wrap:anywhere] sm:p-6 lg:p-8">
-    <h1 className="text-2xl font-semibold">Shared Stocks</h1>
-    <p>Shared read-only identities and stored market data. Portfolio holdings remain private.</p>
+    <h1 className="text-2xl font-semibold">Stock</h1>
+    <p>Browse stocks and review historical analysis decisions.</p>
     <label htmlFor="stock-search">Search symbol or name</label>
     <Input id="stock-search" maxLength={80} value={input} onChange={event => setInput(event.target.value)} />
     {(isLoading || changing) && <p role="status">Loading stocks…</p>}
@@ -38,7 +39,7 @@ export function StocksClient() {
       {!data.instruments.length && <p>No matching stocks.</p>}
       <ul className="divide-y rounded border bg-white">{data.instruments.slice(0, 25).map(item => <li key={item.id} className="p-4">
         <Link className="font-semibold underline" href={`/dashboard/stocks/${item.id}`}>{item.symbol} · {item.exchange}</Link>
-        <p>{item.name || 'Name unavailable'} · {item.currency || 'Currency unknown'} · {item.timezone || 'Timezone unknown'} · {item.status}</p>
+        <p>{item.name || 'Name unavailable'} · {item.currency || 'Currency unknown'}</p>
       </li>)}</ul>
       <div className="flex flex-wrap items-center gap-3">
         <Button disabled={!cursors.length || isLoading} onClick={() => setCursors(current => current.slice(0, -1))}>Previous stocks</Button>
@@ -57,8 +58,10 @@ export function StockDetailClient({ id }: { id: string }) {
   const [refreshing, setRefreshing] = useState(false);
   const refreshLock = useRef(false);
   async function refresh() { if (refreshLock.current) return; refreshLock.current = true; setRefreshing(true); try { await mutate(); } finally { refreshLock.current = false; setRefreshing(false); } }
+  const close = data?.dailyPrices[0];
+  const dailySync = data?.sync ? (Array.isArray(data.sync) ? data.sync : [data.sync]).find(s => s.category === 'daily') : null;
   return <section className="min-w-0 space-y-5 p-4 text-sm leading-6 [overflow-wrap:anywhere] sm:p-6 lg:p-8">
-    <Link className="underline" href="/dashboard/stocks">Back to Shared Stocks</Link>
+    <Link className="underline" href="/dashboard/stocks">Back to Stock</Link>
     <h1 className="text-2xl font-semibold">Stock details</h1>
     {!validId && <p role="alert">Invalid instrument ID.</p>}
     {isLoading && <p role="status">Loading stock details…</p>}
@@ -66,15 +69,17 @@ export function StockDetailClient({ id }: { id: string }) {
     {validId && <Button variant="outline" disabled={refreshing} aria-busy={refreshing} onClick={refresh}>{refreshing ? 'Refreshing…' : 'Refresh details'}</Button>}
     {data && <>
       <h2 className="text-xl">{data.instrument.symbol} · {data.instrument.exchange} · {data.instrument.name || 'Name unavailable'}</h2>
-      <p>{data.instrument.currency || 'Currency unknown'} · {data.instrument.timezone || 'Timezone unknown'} · {data.instrument.status}</p>
-      <QuoteDisplay quote={data.latestQuote} timezone={data.instrument.timezone || 'UTC'} />
-      <p>Freshness is supplied by the market service; stored quotes are not a live price stream.</p>
-      <h2 className="text-lg font-semibold">Recent daily prices (up to 30)</h2>
-      {!data.dailyPrices.length ? <p>No daily prices available.</p> : <div className="max-w-full overflow-x-auto rounded-lg border border-slate-200"><table className="w-full min-w-[960px] text-left [&_th]:bg-slate-50 [&_th]:px-3 [&_th]:py-2 [&_td]:px-3 [&_td]:py-2 [&_tr]:border-b [&_tr]:border-slate-100"><thead><tr>{['Trading date', 'Open', 'High', 'Low', 'Close', 'Volume', 'Source / adjustment', 'Fetched (UTC)'].map(label => <th key={label}>{label}</th>)}</tr></thead>
-        <tbody>{data.dailyPrices.slice(0, 30).map((day, index) => <tr key={index}><td>{day.tradingDate || day.date || 'Unknown'}</td><td>{day.open}</td><td>{day.high}</td><td>{day.low}</td><td>{day.close}</td><td>{day.volume ?? 'Unknown'}</td><td>{day.source || 'Unknown'} / {day.adjusted === true ? 'Adjusted' : day.adjusted === false ? 'Unadjusted' : 'Unknown'}</td><td>{marketTime(day.fetchedAt)}</td></tr>)}</tbody></table></div>}
-      <p>Daily OHLC uses {data.instrument.currency || 'unknown currency'}; trading dates follow {data.instrument.timezone || 'unknown market timezone'}. Adjustment series must not be mixed.</p>
-      <h2 className="text-lg font-semibold">Sync</h2>
-      {!data.sync || (Array.isArray(data.sync) && !data.sync.length) ? <p>Sync status unavailable.</p> : (Array.isArray(data.sync) ? data.sync : [data.sync]).map((sync, index) => <p key={index}>{sync.category || 'Unknown category'} · {sync.status || 'Unknown'} · Last success: {marketTime(sync.lastSuccessAt)} · Next: {marketTime(sync.nextRunAt)}</p>)}
+      <div className="rounded-xl border bg-white p-4">
+        <p className="text-sm text-slate-500">Latest daily close</p>
+        {close ? <>
+          <p className="mt-1 text-3xl font-semibold">{new Intl.NumberFormat('en-US', { style: 'currency', currency: data.instrument.currency || 'USD' }).format(Number(close.close))}</p>
+          <p className="mt-2 text-sm text-slate-600">Trading date: {close.tradingDate || close.date} · Updated: {marketTime(close.fetchedAt, data.instrument.timezone || 'UTC')}</p>
+        </> : <p>No closing price available yet.</p>}
+        <p className="mt-2 text-sm text-slate-500">{data.instrument.exchange === 'XHKG' ? 'Hong Kong stocks sync after market close, at 4:45 PM Hong Kong time.' : ['XSHG','XSHE'].includes(data.instrument.exchange) ? 'China A-shares sync after market close, at 3:45 PM Shanghai time.' : 'US stocks sync after market close, at 4:45 PM New York time.'} Non-trading days retain the last available close.</p>
+        {dailySync?.status === 'retrying' && <p role="status" className="mt-2 text-amber-700">Market data update delayed. Retrying automatically; the date above shows the available close.</p>}
+      </div>
+      <StockDecisionHistory id={String(data.instrument.id)} />
+
     </>}
   </section>;
 }

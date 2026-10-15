@@ -1,5 +1,6 @@
 'use server';
 
+import { consumeSignupCode } from '@/lib/auth/signup-email';
 import { z } from 'zod';
 import { and, eq, isNull, sql } from 'drizzle-orm';
 import { db } from '@/lib/db/drizzle';
@@ -99,8 +100,9 @@ export const signIn = validatedAction(signInSchema, async (data, formData) => {
 });
 
 const signUpSchema = z.object({
-  email: z.string().email(),
-  password: z.string().min(8),
+  email: z.string().trim().email().max(255).transform(value => value.toLowerCase()),
+  verificationCode: z.string().regex(/^\d{6}$/, 'Enter the 6-digit email verification code.'),
+  password: z.string().min(8).max(100),
   inviteCode: z.string().optional()
 });
 
@@ -117,16 +119,14 @@ export const signUp = validatedAction(signUpSchema, async (data, formData) => {
   if (existingUser.length > 0) {
     return {
       error: 'Failed to create user. Please try again.',
-      email,
-      password
+      email
     };
   }
 
   if (referralCode && !isValidInviteCode(referralCode)) {
     return {
       error: 'Invite code must be six letters.',
-      email,
-      password
+      email
     };
   }
 
@@ -151,8 +151,7 @@ export const signUp = validatedAction(signUpSchema, async (data, formData) => {
   if (referralCode && !referrer) {
     return {
       error: 'Invalid invite code.',
-      email,
-      password
+      email
     };
   }
 
@@ -166,10 +165,13 @@ export const signUp = validatedAction(signUpSchema, async (data, formData) => {
     role: 'member'
   };
 
-  let createdUser: User;
+  let createdUser: User | null;
+  let verificationError: string | null;
 
   try {
-    ({ createdUser } = await db.transaction(async (tx) => {
+    ({ createdUser, verificationError } = await db.transaction(async (tx) => {
+      const verificationError = await consumeSignupCode(tx, email, data.verificationCode);
+      if (verificationError) return { createdUser: null, verificationError };
       const [createdUser] = await tx.insert(users).values(newUser).returning();
 
       if (!createdUser) {
@@ -204,17 +206,17 @@ export const signUp = validatedAction(signUpSchema, async (data, formData) => {
         });
       }
 
-      return { createdUser };
+      return { createdUser, verificationError: null };
     }));
   } catch (error) {
-    console.error('Failed to create user account.', error);
+    console.error('Failed to create user account.');
     return {
       error: 'Failed to create user. Please try again.',
-      email,
-      password
+      email
     };
   }
 
+  if (verificationError || !createdUser) return { error: verificationError || 'Verification failed.', email };
   await setSession(createdUser);
 
   const redirectTo = formData.get('redirect') as string | null;

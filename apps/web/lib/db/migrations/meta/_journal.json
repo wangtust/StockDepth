@@ -246,6 +246,20 @@
       "when": 1791887312871,
       "tag": "0034_worker_lease_indexes",
       "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1792024504063,
+      "tag": "0035_damp_marvel_zombies",
+      "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1792026494681,
+      "tag": "0036_needy_invaders",
+      "breakpoints": true
     }
   ]
 }

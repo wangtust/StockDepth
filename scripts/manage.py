@@ -35,7 +35,7 @@ def main():
     parser.add_argument('action', choices=['start', 'stop', 'status', 'restart', 'build'])
     parser.add_argument('services', nargs='*')
     args = parser.parse_args()
-    names = args.services or ['api', 'web', 'analysis']
+    names = args.services or ['api', 'web', 'analysis', 'market']
     if any(name not in SERVICES for name in names):
         parser.error('services must be api, web, analysis, paper or market')
     ROOT.joinpath('var').mkdir(exist_ok=True)

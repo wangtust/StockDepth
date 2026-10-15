@@ -136,7 +136,7 @@ tail -f var/api.log var/web.log var/analysis.log var/paper.log
 ./bin/stockdepth stop api web analysis paper
 ```
 
-也可单独操作服务，例如 `./bin/stockdepth restart web`。不指定服务名时默认操作 `api web analysis`，模拟交易 `paper` 需要显式指定。PostgreSQL 由系统或外部数据库服务管理，启停脚本不管理它。
+也可单独操作服务，例如 `./bin/stockdepth restart web`。不指定服务名时默认操作 `api web analysis market`，模拟交易 `paper` 需要显式指定。PostgreSQL 由系统或外部数据库服务管理，启停脚本不管理它。
 
 分析并发配置保存在数据库 `analysis_worker_settings` 中，默认全系统 200 个任务、每用户 5 个任务。管理员可在 `/admin/system` 修改，保存后自动影响后续任务调度；超过限制的任务排队。并发数量不再读取 `.env`。
 
@@ -156,7 +156,7 @@ tail -f var/api.log var/web.log var/analysis.log var/paper.log
 目录执行 `tsx src/market-worker.ts --initialize-catalog`，每次最多
 `MARKET_CATALOG_INIT_LIMIT` 个（默认100、上限500），可重复直到 initialized=0；
 轮询不扫描用户表发现股票。确认迁移和有界源验证后运行
-`./bin/stockdepth start market`；默认 start 仍只启动 api/web/analysis。
+`./bin/stockdepth start market`；默认 start 同时启动 api/web/analysis/market。
 `tsx src/market-worker.ts --once` 仅运行一批。每批默认10只、供应商并发2，
 生产初次可配置 batch3/concurrency1；启动管理器读取 `.env`，应核对实际设置。
 
@@ -211,3 +211,59 @@ bigint适配版，仍使用市场mock限定的 `stockdepth_round4_backend_*` 名
 HTTP与HTTPS的显式模拟交易重试流程保持。生产历史清理默认且强制dry-run：
 `scripts/market-retention.ts --apply` 拒绝，保留成交引用、最新报价、活动租约、
 全部幂等结果与日线。容量继续需要监测，不能承诺历史存储恒定。
+
+
+## 股票历史决策图
+
+进入 Stock，选择股票，在详情页的 Historical decisions 查看历史收盘价与
+BUY / SELL / HOLD 标记。可筛选日期、决策类型，切换分析日期与报告生成日期，
+点击标记或 View 查看原始最终决策报告。仅展示当前用户已完成、未隐藏的分析。
+
+`analysis_decisions` 保存最终报告中明确的评级或交易建议；新报告由分析 worker 自动提取。
+Underweight（减持/低配）归为 SELL；Overweight、含条件或冲突的结论不自动转换，保留原评级摘要，
+显示 Unrecognized。缺少提取记录显示 Pending，不视为 HOLD。
+
+部署先通过 `./bin/stockdepth start` 或 `restart` 应用数据库迁移，再在仓库根目录执行：
+
+```bash
+# 使用 .env 中 STOCKDEPTH_RUNTIME_BIN 所指环境的 tsx
+/path/to/runtime/bin/tsx scripts/backfill-analysis-decisions.ts
+```
+
+补提取脚本可重复执行，按批次更新历史最终报告，并只为唯一匹配的已验证 Yahoo
+身份补齐任务的 instrument_id；无法确认的旧股票代码不自动关联。
+图表使用数据库内单一数据源的未复权日线，不触发付费模型请求。
+周末报告在有行情的下周一标点，其他缺失交易日不猜测价格；参考收盘价不代表成交价。
+同日多份报告全部保留，生成日期按股票市场时区换算，生成时间按浏览器时区显示。
+行情同步状态在同页展示；默认启停包含市场 worker；美股报价和日线在纽约时间 16:45 同步，自动适配夏令时。休市日保留上次行情，失败自动重试。
+
+验证脚本：`scripts/tests/analysis-decisions.ts`（提取规则）、
+`scripts/tests/analysis-decisions-browser.cjs`（使用构建 CSS 的浏览器交互），以及
+`scripts/tests/analysis-decisions-api.cjs`（对本机运行服务和当前数据库的只读权限验证）。
+浏览器测试可通过 `PLAYWRIGHT_CHROMIUM_EXECUTABLE` 指定已安装的 Chromium。
+
+## 注册邮箱验证
+
+注册前必须向所填邮箱发送验证码，输入正确的 6 位验证码后才能创建账户。
+现有账户登录流程不变。根目录 `.env` 配置：
+
+```dotenv
+SMTP_HOST=smtp.qq.com
+SMTP_PORT=465
+EMAIL_SENDER=your-address@qq.com
+SMTP_AUTH_CODE=your-smtp-authorization-code
+```
+
+使用 QQ 邮箱 SMTP 授权码，通过 TLS 连接；不要填写邮箱登录密码。
+真实授权码仅保存在服务器 `.env`，不要提交。发信由运行环境的 Python 标准库完成，
+无需新增邮件依赖。更改配置后运行 `./bin/stockdepth restart web`。
+
+迁移新增 `signup_email_verifications`（验证码 HMAC 摘要、有效期、失败次数）和
+`signup_email_limits`（发送频率计数）。验证码有效期 10 分钟、每邮箱发送间隔 60 秒、
+每邮箱每小时最多 5 次、每来源每小时 20 次、全站每小时 100 次；来源计数使用摘要，
+若反向代理转发来源地址，应由代理覆盖客户端传入的 IP 头。
+连续输错 5 次需重新获取；重发后旧码失效。验证与创建账户处于同一事务，成功后码不能复用。
+发信失败不会允许注册；接口不返回验证码，也不记录邮件内容或 SMTP 授权码。
+过期验证码和频率记录随发送请求分批清理。
+
+`scripts/tests/signup-email.ts` 使用独立临时 schema 和模拟发信测试，不向真实邮箱发送邮件。

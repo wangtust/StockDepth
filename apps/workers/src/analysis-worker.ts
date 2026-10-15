@@ -1,4 +1,5 @@
 import '../env';
+import { extractDecision } from '@/lib/analysis/decision-extraction';
 import { decryptModelKey } from '@/lib/security/model-key';
 import { isAnalysisRunner } from '@/lib/analysis/runner-process';
 import { basename } from 'node:path';
@@ -9,7 +10,7 @@ import { fetchWithBackoff } from './request';
 import { eq, sql } from 'drizzle-orm';
 import { getAnalysisConcurrencySettings } from '@/lib/analysis/concurrency-settings';
 import { db } from '@/lib/db/drizzle';
-import { analysisJobs, analysisReports, analysisModelCalls, llmModelConfigs } from '@/lib/db/schema';
+import { analysisJobs, analysisReports, analysisDecisions, analysisModelCalls, llmModelConfigs } from '@/lib/db/schema';
 
 type ClaimedJob = typeof analysisJobs.$inferSelect;
 
@@ -242,6 +243,13 @@ async function startStockDepth(job: ClaimedJob) {
 export async function saveReports(job: ClaimedJob, reports: StockDepthReport[]) {
   await db.transaction(async (tx) => {
     await assertAnalysisOwner(tx, job);
+    const decision = reports.find(report => report.key === 'decision');
+    if (decision) {
+      const values = { ...extractDecision(decision.content), updatedAt: new Date(), extractedAt: new Date() };
+      await tx.insert(analysisDecisions).values({ jobId: job.id, ...values }).onConflictDoUpdate({ target: analysisDecisions.jobId, set: values });
+    } else {
+      await tx.delete(analysisDecisions).where(eq(analysisDecisions.jobId, job.id));
+    }
     const existing = await tx.select().from(analysisReports).where(eq(analysisReports.jobId, job.id));
     const remaining = new Map(reports.map(report => [report.key, report]));
     for (const row of existing) {

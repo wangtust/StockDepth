@@ -176,6 +176,7 @@ export const analysisJobs = pgTable(
     index('analysis_jobs_status_created_at_idx').on(table.status, table.createdAt),
     index('analysis_jobs_worker_lease_idx').on(table.status, table.workerLeaseUntil, table.createdAt),
     index('analysis_jobs_user_created_at_idx').on(table.userId, table.createdAt),
+    index('analysis_jobs_user_instrument_date_idx').on(table.userId, table.instrumentId, table.tradeDate).where(sql`hidden_at is null`),
     index('analysis_jobs_user_visible_id_idx').on(table.userId, table.id).where(sql`hidden_at is null`),
   ]
 );
@@ -714,3 +715,28 @@ export const analysisModelCalls = pgTable('analysis_model_calls', {
   isRetry: boolean('is_retry').notNull().default(false),
   requestKind: varchar('request_kind', { length: 30 }).notNull().default('standard'),
 }, (table) => [uniqueIndex('analysis_model_calls_job_call_idx').on(table.jobId, table.callId)]);
+
+export const analysisDecisions = pgTable('analysis_decisions', {
+  id: serial('id').primaryKey(),
+  jobId: integer('job_id').notNull().unique().references(() => analysisJobs.id, { onDelete: 'cascade' }),
+  action: varchar('action', { length: 8 }),
+  summary: text('summary'),
+  extractionStatus: varchar('extraction_status', { length: 20 }).notNull(),
+  extractionVersion: integer('extraction_version').notNull().default(1),
+  extractedAt: timestamp('extracted_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, t => [check('analysis_decisions_action_valid', sql`${t.action} in ('buy','sell','hold')`),
+  check('analysis_decisions_status_valid', sql`${t.extractionStatus} in ('pending','succeeded','unrecognized','failed')`)]);
+
+export const signupEmailVerifications = pgTable('signup_email_verifications', {
+  email: varchar('email', { length: 255 }).primaryKey(),
+  codeHash: varchar('code_hash', { length: 64 }).notNull(),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  attempts: integer('attempts').notNull().default(0),
+});
+export const signupEmailLimits = pgTable('signup_email_limits', {
+  scope: varchar('scope', { length: 80 }).primaryKey(),
+  count: integer('count').notNull(),
+  resetAt: timestamp('reset_at', { withTimezone: true }).notNull(),
+  lastSentAt: timestamp('last_sent_at', { withTimezone: true }).notNull(),
+});

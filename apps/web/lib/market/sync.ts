@@ -4,7 +4,7 @@ import { db } from '../db/drizzle';
 import { instruments, instrumentSources, marketSyncState, marketSyncRuns, priceSnapshots, dailyPrices } from '../db/schema';
 import { normalizeTicker } from './tickers';
 import { ensureInstrument } from './catalogue';
-import { nextQuoteAt, sessionOpen } from './policy';
+import { nextQuoteAt, nextDailyCloseAt, isUSMarket, sessionOpen } from './policy';
 import { validateProvider, yahooProvider, type MarketProvider } from './provider';
 export type ClaimedInstrument={id:number;symbol:string;categories:string[];priority:boolean};
 function bound(value:number,max:number) {return Number.isInteger(value)&&value>0?Math.min(value,max):Math.min(10,max);}
@@ -94,7 +94,7 @@ export async function synchronizeClaim(claim:ClaimedInstrument,owner:string,prov
           await tx.insert(dailyPrices).values(unique.map(row=>({instrumentId:claim.id,...row,volume:BigInt(row.volume),source:valid.source,fetchedAt:new Date(valid.fetchedAt)})))
             .onConflictDoUpdate({target:[dailyPrices.instrumentId,dailyPrices.tradingDate,dailyPrices.source,dailyPrices.adjusted],set:{open:sql`excluded.open`,high:sql`excluded.high`,low:sql`excluded.low`,close:sql`excluded.close`,volume:sql`excluded.volume`,fetchedAt:sql`excluded.fetched_at`}});
         }
-        const next=category==='identity'?new Date(now.getTime()+7*86400_000):category==='daily'?new Date(now.getTime()+86400_000):nextQuoteAt(valid.identity.exchange,valid.identity.timezone,claim.priority,now);
+        const next=category==='identity'?new Date(now.getTime()+7*86400_000):category==='daily'?nextDailyCloseAt(valid.identity.exchange,valid.identity.timezone,now):nextQuoteAt(valid.identity.exchange,valid.identity.timezone,isUSMarket(valid.identity.exchange)?false:claim.priority,now);
         await tx.update(marketSyncState).set({lastSuccessAt:now,nextRunAt:next,attempts:0,errorSummary:null,owner:null,leaseUntil:null}).where(eq(marketSyncState.id,state.id));
         succeeded++;
       } else {

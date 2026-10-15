@@ -101,6 +101,9 @@ def main():
     parser.add_argument('--start')
     args = parser.parse_args()
     symbol = args.symbol.strip().upper().replace('.SH', '.SS')
+    hk = re.fullmatch(r'(\d{1,5})\.HK', symbol)
+    if hk and int(hk.group(1)) > 0:
+        symbol = f'{int(hk.group(1)):04d}.HK'
     if not re.fullmatch(r'[A-Z0-9^.-]{1,40}', symbol):
         raise SystemExit('invalid_symbol')
     try:

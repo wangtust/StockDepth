@@ -66,8 +66,17 @@ export async function executionQuote(ticker:string,currency:string,reader:Market
 export async function instrumentDetail(id:number,{before,limit=260}:{before?:string;limit?:number}={}) {
   const record=(await marketRecords([id])).get(id);
   if (!record) return null;
+  if (record.instrument.status === 'unresolved' && normalizeTicker(record.instrument.symbol) !== record.instrument.symbol) {
+    const canonical = await verifiedInstrumentForTicker(record.instrument.symbol);
+    if (canonical && canonical.id !== id) return instrumentDetailCanonical(canonical.id, {before,limit});
+  }
+  return instrumentDetailCanonical(id, {before,limit});
+}
+async function instrumentDetailCanonical(id:number,{before,limit=260}:{before?:string;limit?:number}={}) {
+  const record=(await marketRecords([id])).get(id);
+  if (!record) return null;
   const [daily,sync]=await Promise.all([
-    db.select().from(dailyPrices).where(and(eq(dailyPrices.instrumentId,id),before?lt(dailyPrices.tradingDate,before):undefined))
+    db.select().from(dailyPrices).where(and(eq(dailyPrices.instrumentId,id),eq(dailyPrices.adjusted,false),eq(dailyPrices.source,'yahoo'),before?lt(dailyPrices.tradingDate,before):undefined))
       .orderBy(desc(dailyPrices.tradingDate)).limit(Math.max(1,Math.min(370,limit))),
     db.select({category:marketSyncState.category,lastSuccessAt:marketSyncState.lastSuccessAt,nextRunAt:marketSyncState.nextRunAt,attempts:marketSyncState.attempts,leaseUntil:marketSyncState.leaseUntil})
       .from(marketSyncState).where(eq(marketSyncState.instrumentId,id))

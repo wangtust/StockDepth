@@ -9,6 +9,7 @@ import {
   Activity,
   BarChart3,
   BriefcaseBusiness,
+  CandlestickChart,
   Menu,
   PanelLeftClose,
   PanelLeftOpen,
@@ -37,7 +38,7 @@ export default function DashboardLayout({
 
   const navItems = [
     { href: '/dashboard/analysis', icon: BarChart3, label: 'Analysis' },
-    { href: '/dashboard/stocks', icon: BarChart3, label: 'Shared Stocks' },
+    { href: '/dashboard/stocks', icon: CandlestickChart, label: 'Stock' },
     { href: '/dashboard/portfolio', icon: BriefcaseBusiness, label: 'Portfolio' },
     { href: '/dashboard', icon: UserCircle, label: 'Account' },
     { href: '/dashboard/general', icon: Settings, label: 'General' },

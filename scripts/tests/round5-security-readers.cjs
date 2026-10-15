@@ -13,8 +13,8 @@ const operators={and(){},asc(){},desc(){},eq(){},isNull(){},sql(){}};
 const schema={llmModelConfigs:{},analysisJobs:{}};
 const getters=compile(fs.readFileSync(root+'/apps/web/lib/analysis/model-configs-server.ts','utf8'),{'server-only':{},'drizzle-orm':operators,'@/lib/db/drizzle':{db},'@/lib/db/schema':schema,'@/lib/security/model-key':keys});
 function workerFragment(file,start,end,name,extra=''){
- const source=fs.readFileSync(root+'/'+file,'utf8');const snippet=source.slice(source.indexOf(start),source.indexOf(end,source.indexOf(start)));
- return compile(`const {db, llmModelConfigs, analysisJobs, readModelConfig, decryptModelKey, and, asc, eq, isNull, sql, fetchWithBackoff, tradingAgentsUrl, authHeader, runIdFor, parseAnalysts}=require('fixture'); ${snippet}; ${extra}; exports.reader=${name};`,{fixture:{db,...schema,...keys,...operators,tradingAgentsUrl:'http://mock.invalid',authHeader:()=>({}),runIdFor:()=> 'safe-fixture-id',parseAnalysts:()=>[],fetchWithBackoff:async(url,options)=>{assert.equal(JSON.parse(options.body).api_key,plaintext);calls++;return {ok:true,json:async()=>({status:'started'})}}}}).reader;
+ const source=fs.readFileSync(root+'/'+file,'utf8');const ast=ts.createSourceFile(file,source,ts.ScriptTarget.Latest,true);const declaration=ast.statements.find(node=>ts.isFunctionDeclaration(node)&&node.name?.text===name);assert(declaration,'Actual reader function must exist');const snippet=declaration.getText(ast);
+ return compile(`const {db, llmModelConfigs, analysisJobs, readModelConfig, decryptModelKey, and, asc, eq, isNull, sql, fetchWithBackoff, tradingAgentsUrl, authHeader, runIdFor, parseAnalysts,ownedAnalysis,resourceMonitor}=require('fixture'); ${snippet}; ${extra}; exports.reader=${name};`,{fixture:{db,...schema,...keys,...operators,tradingAgentsUrl:'http://mock.invalid',authHeader:()=>({}),runIdFor:()=> 'safe-fixture-id',parseAnalysts:()=>[],ownedAnalysis:()=>({}),resourceMonitor:{track:async()=>{}},fetchWithBackoff:async(url,options)=>{const payload=JSON.parse(options.body);assert.equal(payload.models.quick.api_key,plaintext);assert.equal(payload.models.deep.api_key,plaintext);calls++;return {ok:true,json:async()=>({status:'started'})}}}}).reader;
 }
 let calls=0;
 const paper=workerFragment('apps/workers/src/paper-trader-worker.ts','async function getDefaultModelConfig()', 'async function claimNextRun','getDefaultModelConfig');
@@ -28,11 +28,11 @@ const probe=compile(fs.readFileSync(root+'/apps/web/lib/analysis/test-model-serv
   assert.equal((await paper()).apiKey,plaintext);
   assert.equal((await getters.getModelConfigsForAdmin())[0].apiKey,'configured');
   assert(!JSON.stringify(await getters.getModelConfigsForAdmin()).includes(plaintext));
-  await analysis({modelConfigId:1,id:1});
+  await analysis({id:1,quickConfigSnapshot:JSON.stringify(rows[0]),deepConfigSnapshot:JSON.stringify(rows[0])});
   assert.deepEqual(await probe.testModelConnection({provider:'mock',modelName:'mock',baseUrl:'mock',apiKey:value}),{success:true});
  }
  rows[0].apiKey='sdkey:v2:invalid';
- await assert.rejects(getters.getDefaultModelConfig());await assert.rejects(paper());await assert.rejects(analysis({modelConfigId:1}));
+ await assert.rejects(getters.getDefaultModelConfig());await assert.rejects(paper());await assert.rejects(analysis({id:1,quickConfigSnapshot:JSON.stringify(rows[0]),deepConfigSnapshot:JSON.stringify(rows[0])}));
  assert.equal(calls,2);
  assert((await probe.testModelConnection({apiKey:rows[0].apiKey})).error);assert.equal(probeCalls,2);
  rows=[];assert.equal(await getters.getDefaultModelConfig(),null);assert.equal(await paper(),null);

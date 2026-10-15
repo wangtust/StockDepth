@@ -19,8 +19,13 @@ try:
     env.update(STOCKDEPTH_RESULTS_DIR=str(Path(output.name) / 'results'),
                STOCKDEPTH_CACHE_DIR=str(Path(output.name) / 'cache'),
                STOCKDEPTH_MEMORY_LOG_PATH=str(Path(output.name) / 'memory.md'))
+    report_args = []
+    if os.environ.get('CI_REPORT_DIR'):
+        report = root / os.environ['CI_REPORT_DIR'] / 'python.xml'
+        report.parent.mkdir(parents=True, exist_ok=True)
+        report_args = ['--junitxml', str(report)]
     subprocess.run([sys.executable, '-m', 'pytest', '-c', 'apps/api/pyproject.toml',
-                    'apps/api/tests', '-m', 'not integration', '-q', '-ra'],
+                    'apps/api/tests', '-m', 'not integration', '-q', '-ra', *report_args],
                    cwd=root, env=env, check=True)
 finally:
     output.cleanup()

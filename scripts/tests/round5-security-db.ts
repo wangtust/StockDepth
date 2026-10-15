@@ -7,8 +7,11 @@ import { decryptModelKey } from '../../apps/web/lib/security/model-key';
 const root = path.resolve(__dirname, '../..');
 const name = 'stockdepth_round5_security_' + Date.now();
 assert.match(name, /^stockdepth_round5_security_[0-9]+$/);
-const url = `postgres://ubuntu@127.0.0.1:55485/${name}`;
-const admin = postgres('postgres://ubuntu@127.0.0.1:55485/postgres', { max: 1, onnotice() {} });
+const base = new URL(process.env.SECURITY_TEST_ADMIN_URL || 'postgres://ubuntu@127.0.0.1:55485/postgres');
+assert.equal(base.hostname, '127.0.0.1');
+const testURL = new URL(base); testURL.pathname = '/' + name;
+const url = testURL.toString();
+const admin = postgres(base.toString(), { max: 1, onnotice() {} });
 const db = postgres(url, { max: 1, onnotice() {} });
 const env = { ...process.env, POSTGRES_URL: url, STOCKDEPTH_MODEL_READERS_READY: 'true',
  STOCKDEPTH_MODEL_KEY_ID: 'old', STOCKDEPTH_MODEL_KEYRING: JSON.stringify({old: randomBytes(32).toString('base64url'), next: randomBytes(32).toString('base64url')}) };
@@ -19,11 +22,12 @@ function run(script: string, args: string[] = [], testEnv = env, expected = 0) {
  return r.stdout.trim() ? JSON.parse(r.stdout.trim()) : null;
 }
 async function main() {
- const [server] = await admin`select inet_server_addr()::text host,inet_server_port() port`;
- assert.equal(server.host,'127.0.0.1/32'); assert.equal(server.port,55485);
+ const [server] = await admin`select inet_server_addr()::text host,inet_server_port() port,current_database() name,current_user role`;
+ assert(server.host); assert(server.port>0);
+ if(process.env.SECURITY_TEST_ADMIN_URL){assert.equal(base.username,'stockdepth_ci');assert.equal(base.pathname,'/stockdepth_ci_admin');assert.equal(server.name,'stockdepth_ci_admin');assert.equal(server.role,'stockdepth_ci');}
  await admin.unsafe(`create database "${name}"`);
- const [identity] = await db`select current_database() name, inet_server_port() port`;
- assert.equal(identity.name,name);assert.equal(identity.port,55485);
+ const [identity] = await db`select current_database() name, inet_server_port() port,inet_server_addr()::text host`;
+ assert.equal(identity.name,name);assert.equal(identity.port,server.port);assert.equal(identity.host,server.host);
  await db`create table llm_model_configs(id serial primary key,api_key text not null)`;
  await db`insert into llm_model_configs(api_key) values('synthetic-old')`;
  let result=run('scripts/model-key-migrate.ts');assert.equal(result.candidates,1);
@@ -56,4 +60,4 @@ async function main() {
  assert.equal((await db`select count(*) from price_snapshots`)[0].count,'6');
  console.log('PASS isolated DB migration dryrun/apply/idempotency/rotation/rollback and retention latest/reference/lease/replay guards; no production access');
 }
-main().catch(() => { console.error('isolated_security_db_failed');process.exitCode=1; }).finally(async()=>{await db.end();await admin.end();});
+main().catch(error => { console.error('isolated_security_db_failed',error.name);console.error(String(error.stack).split('\n').filter(line=>line.trim().startsWith('at ')).join('\n'));process.exitCode=1; }).finally(async()=>{await db.end();await admin.unsafe(`drop database if exists "${name}" with (force)`);await admin.end();});

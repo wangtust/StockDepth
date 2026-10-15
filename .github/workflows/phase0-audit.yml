@@ -1,8 +1,5 @@
 name: Phase 0 audit bootstrap
 on:
-  push:
-    branches: [dev]
-    paths: [.github/workflows/phase0-audit.yml, scripts/ci/env-audit.py, package.json, pnpm-workspace.yaml, pnpm-lock.yaml, apps/web/package.json, apps/web/pnpm-lock.yaml, apps/workers/package.json, apps/api/pyproject.toml]
   workflow_dispatch:
 permissions:
   contents: read

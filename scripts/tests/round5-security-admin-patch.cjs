@@ -25,7 +25,7 @@ const db = {
  }
 };
 const actions=compile(fs.readFileSync(process.env.ROUND5_ADMIN_ACTIONS_SOURCE || root+'/apps/web/app/admin/actions.ts','utf8'),{
- '@/lib/security/model-key':keys,'@/lib/analysis/test-model-server':{testModelConnection:async()=>{probes++;return {success:true}}},'next/cache':{revalidatePath(){}},'drizzle-orm':{and(){},eq(){},isNull(){},sql(){}},'zod':require(root+'/apps/web/node_modules/zod'),
+ '@/lib/credits/admin-adjustment':{adjustCreditBalance:async()=>assert.fail('Credit adjustment is outside this test')},'@/lib/analysis/runner-process':{isAnalysisRunner:()=>false},'@/lib/security/model-key':keys,'@/lib/analysis/test-model-server':{testModelConnection:async()=>{probes++;return {success:true}}},'next/cache':{revalidatePath(){}},'drizzle-orm':{and(){},eq(){},isNull(){},sql(){}},'zod':require(root+'/apps/web/node_modules/zod'),
  '@/lib/auth/admin':{requirePlatformAdmin:async()=>({id:1}),writeAdminAuditLog:async data=>audits.push(data)},'@/lib/analysis/concurrency-settings':{},'@/lib/db/drizzle':{db},'@/lib/db/schema':schema,'@/lib/analysis/pricing':{}
 });
 function form(withKey=true){const f=new FormData();Object.entries({configId:'1',name:'fixture',provider:'openai',baseUrl:'http://mock.invalid',modelName:'mock',isActive:'on',...(withKey?{apiKey:'synthetic-admin-secret'}:{})}).forEach(([k,v])=>f.set(k,v));return f;}

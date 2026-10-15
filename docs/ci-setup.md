@@ -1,5 +1,7 @@
 # CI setup — Phase 1
 
+> 当前完整实现、验证边界和发布记录见 [CI 完整实施](ci-completion.md)。下方保留先前阶段记录。
+
 > 2026-10-15：第二阶段已通过本地及 GitHub PR 验证，当前实现与分阶段计划见 [CI 第二阶段执行](ci-phase2-execution.md)。以下保留第一阶段历史说明；第二阶段 run 38702176804 的五个 job 全部通过，后续阶段仍待实施。
 
 2026-10-14（北京时间）。仅dev普通提交推送；main不改。全新clone无root.env，先安装Node22、Python3.11与根packageManager的pnpm12.11.2。实际registry版本/engines与Node22运行已核对，没有更改目标。pnpm12根锁原生双YAML文档由真实frozen install接受；旧web独立lock不作为CI安装入口。

@@ -1,0 +1,41 @@
+name: Database integration
+on:
+  workflow_call:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  postgres:
+    name: PostgreSQL 16 integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: stockdepth_ci
+          POSTGRES_PASSWORD: ci-disposable-password
+          POSTGRES_DB: stockdepth_ci_admin
+        ports:
+          - 5432/tcp
+        options: >-
+          --health-cmd "pg_isready -U stockdepth_ci -d stockdepth_ci_admin"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      CI_REPORT_DIR: ci-reports
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-ci
+      - name: Run isolated migration, Worker and ledger suites
+        env:
+          CI_POSTGRES_URL: postgres://stockdepth_ci:ci-disposable-password@127.0.0.1:${{ job.services.postgres.ports['5432'] }}/stockdepth_ci_admin
+        run: node scripts/ci/test-integration.cjs
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        if: always()
+        with:
+          name: database-integration-report
+          path: ci-reports
+          if-no-files-found: error
+          retention-days: 7

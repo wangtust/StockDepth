@@ -1,15 +1,5 @@
 name: Phase 1 reproducibility
 on:
-  push:
-    branches: [dev]
-    paths:
-      - '.github/workflows/phase1-reproducibility.yml'
-      - 'package.json'
-      - 'pnpm-lock.yaml'
-      - 'pnpm-workspace.yaml'
-      - 'apps/**'
-      - 'scripts/ci/**'
-      - 'scripts/tests/**'
   workflow_dispatch:
 permissions:
   contents: read

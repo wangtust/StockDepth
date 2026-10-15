@@ -1,6 +1,6 @@
 'use client';
 
-import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from '@/components/ui/dropdown-menu';
@@ -88,11 +88,15 @@ function formatAnalysisDate(date: Date) {
 export default function AnalysisClient({ initialPayload }: { initialPayload: JobsPayload }) {
   const [before, setBefore] = useState<number | null>(null);
   const jobsUrl = before ? `/api/analysis/jobs?before=${before}` : '/api/analysis/jobs';
+  // Keep this callback stable: detail updates every 5s must not reset the 7s list timer.
+  const jobsRefreshInterval = useCallback((data?: JobsPayload) =>
+    (data ?? (before === null ? initialPayload : undefined))?.jobs.some(job => LIVE_JOB_STATUSES.has(job.status))
+      ? JOBS_POLL_INTERVAL_MS : 0, [before, initialPayload]);
   const { data: payload = { ...initialPayload, jobs: [] }, error: listError, isLoading: loading, mutate: loadJobs } = useSWR<JobsPayload>(jobsUrl, jsonFetcher, {
     ...pollingDefaults,
     fallbackData: before === null ? initialPayload : undefined,
-    revalidateIfStale: false,
-    refreshInterval: data => data?.jobs.some(job => LIVE_JOB_STATUSES.has(job.status)) ? JOBS_POLL_INTERVAL_MS : 0
+    revalidateOnMount: true,
+    refreshInterval: jobsRefreshInterval
   });
   const jobsLoadError = listError?.message || '';
   const [selectedJobId, setSelectedJobId] = useState<number | null>(initialPayload.jobs[0]?.id ?? null);
@@ -665,7 +669,7 @@ export default function AnalysisClient({ initialPayload }: { initialPayload: Job
                       : 'min-h-[520px] lg:h-[calc(100dvh-280px)] lg:min-h-[640px]'
                   )}
                 >
-                  {!selectedReport ? <p role="status">Loading report…</p> : selectedReport.reportKey === 'progress' ? <AnalysisProgress content={selectedReport.content} running={selectedJob?.status === 'running'} /> : <MarkdownRenderer
+                  {!selectedReport ? <p role="status">Loading report…</p> : selectedReport.reportKey === 'progress' ? <AnalysisProgress content={selectedReport.content} running={statusJob?.status === 'running'} /> : <MarkdownRenderer
                     content={selectedReport?.content || ''}
                     className="mx-auto w-full max-w-[80ch] min-w-0 [overflow-wrap:anywhere] [&_pre]:max-w-full [&_pre]:[overflow-wrap:normal] [&_figure]:min-w-0 [&_table]:[overflow-wrap:normal]"
                   />}

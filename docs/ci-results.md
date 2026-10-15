@@ -35,3 +35,8 @@ GET runs/jobs和真实job日志独立审阅：Node22.23.3/Python3.11.17，版本
 随后六ci文档及PLAN发布为doc-only followup，路径过滤不触发新Phase1 run；实际tested source始终64c5763，不能把followup SHA冒称通过。main仍8f8857216031e937dc0ef2750b69391ed5998d59。Phase1无验收阻塞；Phase2–6尚未运行，完整CI/build/PG16/security/故障恢复无法通过的原因是尚未实现和实际执行。只完成本阶段，等待调度器放行。
 
 Required checks建议见[setup](ci-setup.md)：已真实出现的Phase1 job可用于复现检查，完整门禁待以后真实证据；私有套餐能力和设置权限未知，不自动配置保护规则。
+
+
+## Phase 2 PR CI — 2026-10-15
+
+新增统一 CI 已在 [PR #1](https://github.com/wangtust/StockDepth/pull/1) 实际运行：[run 38702176804](https://github.com/wangtust/StockDepth/actions/runs/38702176804)，tested source `6689bb6a395ce6099f2fcf52d5db041dff13c8e3`。类型检查、Python 离线测试、4 套前端回归、生产构建及 CI required 全部成功。Python 309 passed、1 integration deselected、9 warnings。完整设计、job 时长及验证边界见 [第二阶段执行](ci-phase2-execution.md)。未合并 PR，未部署；后续数据库/安全/故障演练尚未完成。

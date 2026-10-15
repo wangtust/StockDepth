@@ -21,3 +21,6 @@ Rollback按角色before/hash或普通dev revert本轮源码提交；先核对当
 - 有root.env的工作区会被CI入口拒绝；实际测试只能在干净clone进行，不能删除应用.env来绕过隔离。
 
 失败及恢复run、tested SHA、部署回滚材料位置见[完整记录](ci-completion.md)。
+
+
+2026-10-15 最后dev同步run 38707782968暴露当前experience测试初始页面固定900ms等待的竞态（MOCK尚未渲染）。改为最多10秒、每50ms检查document complete和实际fixture内容的就绪等待，保留后续全部原断言；不是自动重试失败suite，也不是放宽断言。

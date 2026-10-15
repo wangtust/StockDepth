@@ -40,11 +40,12 @@ async function build(before){
     const c=(m,p)=>call(m,p,sessionId);await c('Runtime.enable');await c('Page.enable');
     const evaluate=async expression=>(await c('Runtime.evaluate',{expression,returnByValue:true,awaitPromise:true})).result.value;
     const pause=()=>new Promise(r=>setTimeout(r,900));
+    const waitFor=async expression=>{const deadline=Date.now()+10000;while(Date.now()<deadline){if(await evaluate(expression))return;await new Promise(r=>setTimeout(r,50));}throw Error('Fixture did not become ready: '+expression);};
     for(const before of comparisonModes){
       if(!before)bundle=await build(false);
       for(const width of [390,768,1440,1920,2560]){
         await c('Emulation.setDeviceMetricsOverride',{width,height:({390:844,768:1024,1440:900,1920:1080,2560:1440})[width],deviceScaleFactor:1,mobile:width===390});
-        await c('Page.navigate',{url:`http://127.0.0.1:${server.address().port}/`});await pause();
+        await c('Page.navigate',{url:`http://127.0.0.1:${server.address().port}/`});await waitFor('document.readyState === \"complete\" && !!document.body && document.body.innerText.includes(\"MOCK\")');
         const text=await evaluate('document.body.innerText');
         assert(text.includes('MOCK'));if(before)assert(text.includes('Analysis Failed'));else{assert(text.includes('Analysis Failed'));assert(text.includes('Job #84'));assert(!/Traceback|synthetic-secret|\/srv\/private/.test(text.replaceAll('更换模型并继续','')));assert.equal(await evaluate('document.querySelectorAll("[role=alert]").length'),2);assert(!/[\u3400-\u9fff]/.test(text.replaceAll('更换模型并继续','')));assert.deepEqual(await evaluate('Array.from(document.querySelectorAll("select")).flatMap(s=>Array.from(s.options).filter(o=>["Chinese","English"].includes(o.value)).map(o=>o.value))'),['Chinese','English']);}
         const metrics=await c('Page.getLayoutMetrics');const shot=await c('Page.captureScreenshot',{format:'png',captureBeyondViewport:true,clip:{x:0,y:0,width,height:metrics.cssContentSize.height,scale:1}});fs.writeFileSync(`${dir}/${before?'before':'after'}-analysis-${width}.png`,Buffer.from(shot.data,'base64'));

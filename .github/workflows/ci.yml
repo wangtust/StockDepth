@@ -1,7 +1,7 @@
 name: CI
 on:
   push:
-    branches: [dev]
+    branches: [dev, main]
   pull_request:
     branches: [dev, main]
   workflow_dispatch:
@@ -15,13 +15,14 @@ defaults:
     shell: bash
 env:
   NEXT_TELEMETRY_DISABLED: '1'
+  CI_REPORT_DIR: .ci-reports
 jobs:
   types:
     name: Type checks
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup-ci
@@ -30,44 +31,116 @@ jobs:
   python:
     name: Python offline tests
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup-ci
         with:
           scope: python
       - run: '"$RUNNER_TEMP/stockdepth-ci-venv/bin/python" scripts/ci/test-python.py'
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        if: always()
+        with:
+          name: python-test-report
+          path: .ci-reports
+          if-no-files-found: error
+          retention-days: 7
       - name: Remove disposable Python environment
         if: always()
         run: rm -rf -- "$RUNNER_TEMP/stockdepth-ci-venv"
   frontend:
-    name: Frontend regression
+    name: Frontend regression (${{ matrix.group }})
+    strategy:
+      fail-fast: false
+      matrix:
+        group: [admin, experience, coordinator]
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 0
           persist-credentials: false
       - uses: ./.github/actions/setup-ci
       - run: node scripts/ci/test-frontend.cjs --install-browser --with-deps
-      - run: node scripts/ci/test-frontend.cjs
+      - run: node scripts/ci/test-frontend.cjs --group=${{ matrix.group }}
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        if: always()
+        with:
+          name: frontend-${{ matrix.group }}-report
+          path: .ci-reports
+          if-no-files-found: error
+          retention-days: 7
   build:
     name: Web production build
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup-ci
       - run: node scripts/ci/build-web.cjs
+  integration:
+    name: Database integration
+    uses: ./.github/workflows/integration.yml
+  security:
+    name: Security regression
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-ci
+      - run: node scripts/ci/test-security.cjs
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        if: always()
+        with:
+          name: security-regression-report
+          path: .ci-reports
+          if-no-files-found: error
+          retention-days: 7
+  dependencies:
+    name: Dependency audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-ci
+      - name: Audit Node lockfile (high and critical fail)
+        run: pnpm audit --audit-level=high
+      - name: Audit all locked Python dependencies
+        run: |
+          python -m venv "$RUNNER_TEMP/audit-tools"
+          "$RUNNER_TEMP/audit-tools/bin/pip" install pip-audit==2.10.1
+          "$RUNNER_TEMP/audit-tools/bin/pip-audit" --no-deps --disable-pip -r apps/api/requirements-ci.lock
+      - name: Clean audit tools
+        if: always()
+        run: rm -rf -- "$RUNNER_TEMP/audit-tools"
+  secrets:
+    name: Secret scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: '3.11'
+      - run: python scripts/ci/install-gitleaks.py "$RUNNER_TEMP/gitleaks"
+      - name: Scan complete Git history with redacted findings
+        run: '"$RUNNER_TEMP/gitleaks/gitleaks" git --redact --config .gitleaks.toml --log-opts=--all'
   required:
     name: CI required
     if: always()
-    needs: [types, python, frontend, build]
+    needs: [types, python, frontend, build, integration, security, dependencies, secrets]
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:
@@ -81,5 +154,5 @@ jobs:
           failures = {name: job['result'] for name, job in results.items() if job['result'] != 'success'}
           if failures:
               raise SystemExit(f'CI failed: {failures}')
-          print('All four CI jobs passed')
+          print('All CI jobs passed')
           PY

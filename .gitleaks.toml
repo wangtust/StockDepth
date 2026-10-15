@@ -1,0 +1,10 @@
+title = "StockDepth secret scanning"
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Exact nonfunctional Stripe placeholder in the checked-in environment template"
+condition = "AND"
+regexTarget = "secret"
+paths = ['''^\.env\.example$''']
+regexes = ['''^sk_test_placeholder$''']

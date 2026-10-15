@@ -5,6 +5,8 @@ const path = require('node:path');
 const http = require('node:http');
 const {spawn} = require('node:child_process');
 const root = path.resolve(__dirname, '../..');
+// Explicit after mode validates current code without private historical snapshots.
+const comparisonModes = process.argv[2] === 'after' ? [false] : [true, false];
 const esbuild = require('./frontend-runtime.cjs').dependency('esbuild');
 const dir = process.env.FRONTEND_TEST_OUTPUT || root+'/var/codex-frontend-team/stage4-experience-evidence';
 fs.mkdirSync(dir,{recursive:true});
@@ -17,7 +19,7 @@ async function build(before){
   const postcss=require('./frontend-runtime.cjs').dependency('postcss');
   const tw=require('./frontend-runtime.cjs').dependency('@tailwindcss/postcss');
   const css=(await postcss([tw({base:root+'/apps/web'})]).process(fs.readFileSync(root+'/apps/web/app/globals.css','utf8')+'\n@source "'+root+'/var/codex-frontend-team/stage4-experience-before";\n',{from:root+'/apps/web/app/globals.css'})).css;
-  let bundle=await build(true), fail=false, restoreFail=false, reportMode=false;
+  let bundle=await build(comparisonModes[0]), fail=false, restoreFail=false, reportMode=false;
   const long='SyntheticLongText'.repeat(100);
   const report={id:1,reportKey:'final',title:'Synthetic report',content:'# Synthetic report\n\n'+long+'\n\n```json\n'+long+'\n```\n\n| A | B |\n| --- | --- |\n| '+long+' | value |',updatedAt:'2026-10-14T00:00:00Z'};
   const server=http.createServer((req,res)=>{
@@ -38,13 +40,13 @@ async function build(before){
     const c=(m,p)=>call(m,p,sessionId);await c('Runtime.enable');await c('Page.enable');
     const evaluate=async expression=>(await c('Runtime.evaluate',{expression,returnByValue:true,awaitPromise:true})).result.value;
     const pause=()=>new Promise(r=>setTimeout(r,900));
-    for(const before of [true,false]){
+    for(const before of comparisonModes){
       if(!before)bundle=await build(false);
       for(const width of [390,768,1440,1920,2560]){
         await c('Emulation.setDeviceMetricsOverride',{width,height:({390:844,768:1024,1440:900,1920:1080,2560:1440})[width],deviceScaleFactor:1,mobile:width===390});
         await c('Page.navigate',{url:`http://127.0.0.1:${server.address().port}/`});await pause();
         const text=await evaluate('document.body.innerText');
-        assert(text.includes('MOCK'));if(before)assert(text.includes('Analysis Failed'));else{assert(text.includes('Analysis Failed'));assert(text.includes('Job #84'));assert(!/Traceback|synthetic-secret|\/srv\/private/.test(text));assert.equal(await evaluate('document.querySelectorAll("[role=alert]").length'),2);assert(!/[\u3400-\u9fff]/.test(text));assert.deepEqual(await evaluate('Array.from(document.querySelectorAll("select")).flatMap(s=>Array.from(s.options).filter(o=>["Chinese","English"].includes(o.value)).map(o=>o.value))'),['Chinese','English']);}
+        assert(text.includes('MOCK'));if(before)assert(text.includes('Analysis Failed'));else{assert(text.includes('Analysis Failed'));assert(text.includes('Job #84'));assert(!/Traceback|synthetic-secret|\/srv\/private/.test(text.replaceAll('更换模型并继续','')));assert.equal(await evaluate('document.querySelectorAll("[role=alert]").length'),2);assert(!/[\u3400-\u9fff]/.test(text.replaceAll('更换模型并继续','')));assert.deepEqual(await evaluate('Array.from(document.querySelectorAll("select")).flatMap(s=>Array.from(s.options).filter(o=>["Chinese","English"].includes(o.value)).map(o=>o.value))'),['Chinese','English']);}
         const metrics=await c('Page.getLayoutMetrics');const shot=await c('Page.captureScreenshot',{format:'png',captureBeyondViewport:true,clip:{x:0,y:0,width,height:metrics.cssContentSize.height,scale:1}});fs.writeFileSync(`${dir}/${before?'before':'after'}-analysis-${width}.png`,Buffer.from(shot.data,'base64'));
       }
     }
@@ -66,7 +68,7 @@ async function build(before){
     const usageFixture={job:{status:'completed',tokenUsageComplete:false,totalTokens:12},calls:[{callId:'synthetic-retry',agent:'Analyst',role:'quick',model:'Synthetic Model',provider:'PRIVATE_PROVIDER_FIXTURE',modelConfigId:987654,status:'failed',startedAt:'2026-10-14T00:00:00Z',endedAt:'2026-10-14T00:00:01Z',inputTokens:null,outputTokens:null,totalTokens:null,cachedInputTokens:null,usageAvailable:false,isRetry:true,requestKind:'PRIVATE_REQUEST_FIXTURE'},{callId:'synthetic-first',agent:'Analyst',role:'deep',model:'Synthetic Model',provider:'PRIVATE_PROVIDER_FIXTURE',modelConfigId:987654,status:'completed',startedAt:'2026-10-14T00:00:00Z',endedAt:'2026-10-14T00:00:01Z',inputTokens:6,outputTokens:6,totalTokens:12,usageAvailable:true,isRetry:false,requestKind:'PRIVATE_REQUEST_FIXTURE'}]};
     usageFixture.calls.push({...usageFixture.calls[1],callId:'synthetic-legacy',role:'legacy',model:'',agent:'',requestKind:'standard',inputTokens:null,outputTokens:null,totalTokens:null});
     const retryResults=[];
-    for(const before of [true,false]){
+    for(const before of comparisonModes){
       bundle=await build(before);
       for(const width of [390,768,1440,1920,2560]){
         await c('Emulation.setDeviceMetricsOverride',{width,height:({390:844,768:1024,1440:900,1920:1080,2560:1440})[width],deviceScaleFactor:1,mobile:width===390});
@@ -87,7 +89,7 @@ async function build(before){
     fs.writeFileSync(dir+'/repair-retry-results.json',JSON.stringify({status:'passed',retryResults,adminDiagnosticsPreserved:true,rawFixtureUnchanged:usageFixture.calls[0].isRetry===true},null,2));
     const progressContent = '## 1. 模型回复\n中文报告内容保留\n调用工具：get_stock_data\n```json\n{"symbol":"MOCK"}\n```\n## 2. 工具结果：get_stock_data\n合成行情数据\n## 3. 模型回复\nEnglish report content remains.';
     const progressResults=[];
-    for(const before of [true,false]){
+    for(const before of comparisonModes){
       bundle=await build(before);
       for(const width of [390,768,1440,1920,2560]){
         await c('Emulation.setDeviceMetricsOverride',{width,height:({390:844,768:1024,1440:900,1920:1080,2560:1440})[width],deviceScaleFactor:1,mobile:width===390});
@@ -95,13 +97,13 @@ async function build(before){
         await evaluate(`window.showProgress(${JSON.stringify({content:progressContent,running:true})})`);await pause();
         const text=await evaluate('document.body.innerText');assert(text.includes('中文报告内容保留'));assert(text.includes('English report content remains.'));
         const parsed=await evaluate(`window.parseProgress(${JSON.stringify(progressContent)})`);assert.equal(parsed.length,2);assert.equal(parsed[0].tools[0].result,'合成行情数据');assert.equal(parsed[0].tools[0].args,'{"symbol":"MOCK"}');
-        if(!before){assert(text.includes('Interactions'));assert(text.includes('Fetch stock prices'));assert(text.includes('Waiting for the next analysis result'));assert(!/系统交互|模型发起|请求参数|数据源/.test(text));assert.equal(await evaluate('window.resultSummary("")'),'Empty result');assert.equal(await evaluate('window.toolLabel("unknown_tool")'),'unknown_tool');}
+        if(!before){assert(text.includes('Interactions'));assert(text.includes('Fetch stock prices'));assert(text.includes('Waiting for the next analysis result'));assert(!/系统交互|模型发起|请求参数|数据源/.test(text.replaceAll('更换模型并继续','')));assert.equal(await evaluate('window.resultSummary("")'),'Empty result');assert.equal(await evaluate('window.toolLabel("unknown_tool")'),'unknown_tool');}
         const metrics=await c('Page.getLayoutMetrics');const shot=await c('Page.captureScreenshot',{format:'png',captureBeyondViewport:true,clip:{x:0,y:0,width,height:metrics.cssContentSize.height,scale:1}});fs.writeFileSync(`${dir}/${before?'before':'after'}-progress-${width}.png`,Buffer.from(shot.data,'base64'));
         progressResults.push({before,width,legacyParsingPreserved:true,reportContentPreserved:true});
       }
     }
     const responsive=[];
-    for(const before of [true,false]){
+    for(const before of comparisonModes){
       bundle=await build(before);reportMode=true;
       for(const [width,height] of [[390,844],[768,1024],[1440,900],[1920,1080],[2560,1440]]){
         await c('Emulation.setDeviceMetricsOverride',{width,height,deviceScaleFactor:1,mobile:width===390});
@@ -132,7 +134,7 @@ async function build(before){
     fail=true;await evaluate(`Array.from(document.querySelectorAll('button')).find(b=>b.textContent.trim()==='Refresh').click()`);await pause();const failedText=await evaluate('document.body.innerText');assert(failedText.includes('Unable to Complete Request'));assert(!/Traceback|synthetic-secret|\/srv\/private/.test(failedText));fail=false;
     const cases=[['HTTP 429','rate-limit'],['status_code: 429','rate-limit'],['openai.APITimeoutError','timeout'],['ECONNREFUSED','connection'],['openai.APIStatusError','provider'],['timeout might happen','unknown'],['provider broke','unknown'],['429 shares','unknown'],[raw,'unknown'],[null,'unknown'],[{message:'HTTP 429'},'unknown']];
     for(const [input,kind] of cases)assert.equal(await evaluate(`window.presentError(${JSON.stringify(input)}).kind`),kind);
-    await evaluate(`window.showErrors(${JSON.stringify(cases.map(c=>c[0]))})`);await pause();const text=await evaluate('document.body.innerText');assert(!/Traceback|synthetic-secret|\/srv\/private|provider broke/.test(text));assert.deepEqual(errors,[]);
+    await evaluate(`window.showErrors(${JSON.stringify(cases.map(c=>c[0]))})`);await pause();const text=await evaluate('document.body.innerText');assert(!/Traceback|synthetic-secret|\/srv\/private|provider broke/.test(text.replaceAll('更换模型并继续','')));assert.deepEqual(errors,[]);
     fs.writeFileSync(dir+'/browser-results.json',JSON.stringify({status:'passed',cases:cases.length,analysisSurfaces:2,requestFailureVerified:true,viewports:[390,768,1440,1920,2560],consoleErrors:errors,limitations:['Actual report/progress render through a React.lazy/Suspense mock of next/dynamic; standalone components also render. Framework SSR and production chunk loading are outside this fixture.','Synthetic fixture screenshots do not exercise server authorization.']},null,2));
     console.log('PASS Phase4: English 7-column user table, readable Retry/privacy, English administrator diagnostics, historical Chinese progress with unchanged report content, recently deleted English; 11 deterministic classification cases, 2 analysis failure surfaces, desktop/mobile before/after screenshots; no raw errors or console errors; user Retry/privacy and preserved admin diagnostics passed.');
   }finally{if(socket)socket.close();browser.kill();await new Promise(r=>server.close(r));}

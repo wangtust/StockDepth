@@ -10,3 +10,4 @@ __pycache__/
 var/
 archive/
 *.egg-info/
+.ci-reports/

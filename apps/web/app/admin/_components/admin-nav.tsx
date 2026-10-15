@@ -1,6 +1,6 @@
 'use client';
 
-import Link from 'next/link';
+import { NavigationLink as Link } from '@/components/navigation-link';
 import { usePathname } from 'next/navigation';
 import { Bot, Coins, Cpu, Gauge, ListChecks, Server, UserRoundCog, Users } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -37,6 +37,7 @@ export function AdminNav() {
           <Link
             key={item.href}
             href={item.href}
+            aria-current={active ? 'page' : undefined}
             className={cn(
               'flex min-w-max items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-colors lg:min-w-0',
               active

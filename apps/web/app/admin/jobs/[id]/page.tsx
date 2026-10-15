@@ -91,30 +91,32 @@ export default async function AdminJobDetailPage({ params, searchParams }: PageP
     notFound();
   }
 
-  const [cost] = await db.select({
-    count: sql<number>`count(*)::int`, knownCount: sql<number>`count(${analysisModelCalls.estimatedCost})::int`,
-    total: sql<string>`coalesce(sum(${analysisModelCalls.estimatedCost}), 0)::text`,
-    complete: sql<boolean>`coalesce(bool_and(${analysisModelCalls.costComplete}), false)`
-  }).from(analysisModelCalls).where(eq(analysisModelCalls.jobId, jobId));
-  const [paperCost] = await db.select({
-    count: sql<number>`count(*)::int`, knownCount: sql<number>`count(${paperModelCalls.estimatedCost})::int`,
-    total: sql<string>`coalesce(sum(${paperModelCalls.estimatedCost}), 0)::text`,
-    complete: sql<boolean>`coalesce(bool_and(${paperModelCalls.costComplete}), false)`
-  }).from(paperModelCalls).innerJoin(paperAnalysisRuns, eq(paperAnalysisRuns.id, paperModelCalls.paperRunId))
-    .where(eq(paperAnalysisRuns.analysisJobId, jobId));
+  const [[cost], [paperCost], reports] = await Promise.all([
+    db.select({
+      count: sql<number>`count(*)::int`, knownCount: sql<number>`count(${analysisModelCalls.estimatedCost})::int`,
+      total: sql<string>`coalesce(sum(${analysisModelCalls.estimatedCost}), 0)::text`,
+      complete: sql<boolean>`coalesce(bool_and(${analysisModelCalls.costComplete}), false)`
+    }).from(analysisModelCalls).where(eq(analysisModelCalls.jobId, jobId)),
+    db.select({
+      count: sql<number>`count(*)::int`, knownCount: sql<number>`count(${paperModelCalls.estimatedCost})::int`,
+      total: sql<string>`coalesce(sum(${paperModelCalls.estimatedCost}), 0)::text`,
+      complete: sql<boolean>`coalesce(bool_and(${paperModelCalls.costComplete}), false)`
+    }).from(paperModelCalls).innerJoin(paperAnalysisRuns, eq(paperAnalysisRuns.id, paperModelCalls.paperRunId))
+      .where(eq(paperAnalysisRuns.analysisJobId, jobId)),
 
-  const reports = await db
-    .select({
-      id: analysisReports.id,
-      reportKey: analysisReports.reportKey,
-      title: analysisReports.title,
-      relativePath: analysisReports.relativePath,
-      content: sql<string>`''`,
-      updatedAt: analysisReports.updatedAt
-    })
-    .from(analysisReports)
-    .where(and(eq(analysisReports.jobId, jobId), eq(analysisReports.userId, job.userId!)))
-    .orderBy(analysisReports.id);
+    db
+      .select({
+        id: analysisReports.id,
+        reportKey: analysisReports.reportKey,
+        title: analysisReports.title,
+        relativePath: analysisReports.relativePath,
+        content: sql<string>`''`,
+        updatedAt: analysisReports.updatedAt
+      })
+      .from(analysisReports)
+      .where(and(eq(analysisReports.jobId, jobId), eq(analysisReports.userId, job.userId!)))
+      .orderBy(analysisReports.id)
+  ]);
 
   const selectedReport =
     reports.find((report) => report.reportKey === selectedReportParam) || reports[0];

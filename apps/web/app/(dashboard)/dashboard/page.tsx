@@ -2,6 +2,7 @@
 
 import { Suspense, useMemo, useState } from 'react';
 import useSWR from 'swr';
+import Link from 'next/link';
 import { Copy, Gift, WalletCards } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
@@ -57,7 +58,7 @@ function CreditBalance() {
               </p>
             </div>
             <Button asChild variant="outline" className="rounded-md">
-              <a href="/pricing">Buy Credits</a>
+              <Link href="/pricing">Buy Credits</Link>
             </Button>
           </div>
         </div>

@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import Link from 'next/link';
+import { NavigationLink } from '@/components/navigation-link';
 import { usePathname } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -122,31 +122,27 @@ export default function DashboardLayout({
                 const isActive = pathname === item.href || (item.href === '/dashboard/stocks' && pathname.startsWith('/dashboard/stocks/'));
 
                 return (
-                  <Link key={item.href} href={item.href} passHref>
-                    <Button
-                      aria-label={item.label}
-                      title={isSidebarCollapsed ? item.label : undefined}
-                      variant={isActive ? 'secondary' : 'ghost'}
-                      className={cn(
-                        'my-1 h-10 w-full rounded-md shadow-none',
-                        isSidebarCollapsed ? 'lg:justify-center lg:px-0' : 'justify-start',
-                        isActive
-                          ? 'bg-white text-slate-950 shadow-sm ring-1 ring-slate-200'
-                          : 'text-slate-600 hover:bg-white/80 hover:text-slate-950'
-                      )}
-                      onClick={() => setIsSidebarOpen(false)}
-                    >
+                  <Button
+                    key={item.href}
+                    asChild
+                    aria-label={item.label}
+                    title={isSidebarCollapsed ? item.label : undefined}
+                    variant={isActive ? 'secondary' : 'ghost'}
+                    className={cn(
+                      'my-1 h-10 w-full rounded-md shadow-none',
+                      isSidebarCollapsed ? 'lg:justify-center lg:px-0' : 'justify-start',
+                      isActive
+                        ? 'bg-white text-slate-950 shadow-sm ring-1 ring-slate-200'
+                        : 'text-slate-600 hover:bg-white/80 hover:text-slate-950'
+                    )}
+                  >
+                    <NavigationLink href={item.href} aria-current={isActive ? 'page' : undefined} onNavigate={() => setIsSidebarOpen(false)}>
                       <item.icon className="h-4 w-4" />
-                      <span
-                        className={cn(
-                          'transition-opacity',
-                          isSidebarCollapsed && 'lg:sr-only'
-                        )}
-                      >
+                      <span className={cn('transition-opacity', isSidebarCollapsed && 'lg:sr-only')}>
                         {item.label}
                       </span>
-                    </Button>
-                  </Link>
+                    </NavigationLink>
+                  </Button>
                 );
               })}
             </nav>

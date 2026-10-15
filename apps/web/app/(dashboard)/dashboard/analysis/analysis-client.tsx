@@ -15,6 +15,8 @@ import dynamic from 'next/dynamic';
 import useSWR from 'swr';
 import { analysisFetcher, canRetainAnalysisData, shouldRetryAnalysisRead } from '@/lib/http/analysis-fetcher';
 import { pollingDefaults } from '@/lib/http/polling';
+import { AnalysisActionError, presentActionError } from '@/lib/analysis/action-error';
+import type { PresentedError } from '@/lib/analysis/error-presentation';
 import { ErrorPresentation } from '@/components/error-presentation';
 import { analysisStatusMessage } from '@/lib/analysis/client-status-message';
 const AnalysisProgress = dynamic(() => import('@/components/analysis-progress').then(m => m.AnalysisProgress));
@@ -114,7 +116,7 @@ export default function AnalysisClient({ initialPayload }: { initialPayload: Job
   const [submitting, setSubmitting] = useState(false);
   const [deletingJobId, setDeletingJobId] = useState<number | null>(null);
   const [retryingJobId, setRetryingJobId] = useState<number | null>(null);
-  const [error, setError] = useState('');
+  const [error, setError] = useState<PresentedError | null>(null);
   const [invalidField, setInvalidField] = useState('');
   const [notice, setNotice] = useState('');
   const [refreshing, setRefreshing] = useState(false);
@@ -183,6 +185,7 @@ export default function AnalysisClient({ initialPayload }: { initialPayload: Job
     if (refreshLock.current) return;
     refreshLock.current = true;
     setRefreshing(true);
+    setError(null);
     try { await Promise.all([loadJobs(), refreshDetail(), refreshReport()]); }
     finally { refreshLock.current = false; setRefreshing(false); }
   }
@@ -235,7 +238,7 @@ export default function AnalysisClient({ initialPayload }: { initialPayload: Job
     actionLock.current = true;
     setNotice('');
     setSubmitting(true);
-    setError('');
+    setError(null);
     try {
       const response = await fetch('/api/analysis/jobs', {
         method: 'POST',
@@ -253,14 +256,14 @@ export default function AnalysisClient({ initialPayload }: { initialPayload: Job
       });
       const data = await readJson(response);
       if (!response.ok) {
-        throw new Error(data.error || 'Failed to create analysis job');
+        throw new AnalysisActionError(response.status, data.error || 'Failed to create analysis job');
       }
-      await loadJobs();
+      await Promise.allSettled([loadJobs()]);
       setSelectedReportKey('');
       setSelectedJobId(data.job.id);
       setNotice('Analysis queued.');
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(presentActionError(err, 'queue'));
     } finally {
       actionLock.current = false;
       setSubmitting(false);
@@ -272,19 +275,19 @@ export default function AnalysisClient({ initialPayload }: { initialPayload: Job
     actionLock.current = true;
     setNotice('');
     setDeletingJobId(id);
-    setError('');
+    setError(null);
     try {
       const response = await fetch(`/api/analysis/jobs/${id}`, { method: 'DELETE' });
       const data = await readJson(response);
-      if (!response.ok) throw new Error(data.error || 'Failed to delete job');
+      if (!response.ok) throw new AnalysisActionError(response.status, data.error || 'Failed to delete job');
       if (selectedJobId === id) {
         setSelectedReportKey('');
         setSelectedJobId(null);
       }
-      await loadJobs();
+      await Promise.allSettled([loadJobs()]);
       setNotice('Job deleted.');
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(presentActionError(err, 'delete'));
     } finally {
       actionLock.current = false;
       setDeletingJobId(null);
@@ -296,7 +299,7 @@ export default function AnalysisClient({ initialPayload }: { initialPayload: Job
     actionLock.current = true;
     setNotice('');
     setRetryingJobId(id);
-    setError('');
+    setError(null);
     try {
       const response = await fetch(`/api/analysis/jobs/${id}/retry`, {
         method: 'POST',
@@ -305,14 +308,14 @@ export default function AnalysisClient({ initialPayload }: { initialPayload: Job
       });
       const data = await readJson(response);
       if (!response.ok) {
-        throw new Error(data.error || 'Failed to continue analysis job');
+        throw new AnalysisActionError(response.status, data.error || 'Failed to continue analysis job');
       }
-      await loadJobs();
-      await loadJobDetail(id);
+      await Promise.allSettled([loadJobs()]);
+      await Promise.allSettled([loadJobDetail(id)]);
       setNotice(replacement ? '' : 'Analysis continuation requested.');
       return true;
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(presentActionError(err, 'continue'));
       return false;
     } finally {
       actionLock.current = false;
@@ -345,7 +348,7 @@ export default function AnalysisClient({ initialPayload }: { initialPayload: Job
 
         {notice && <p role="status" className="text-sm text-emerald-700">{notice}</p>}
         {(error || requestError) && (
-          <ErrorPresentation error={error || requestError} context="request" onRetry={requestError ? handleRefresh : undefined} retrying={refreshing} />
+          <ErrorPresentation error={requestError} presentation={error ?? undefined} onDismiss={error ? () => setError(null) : undefined} context="request" onRetry={!error && requestError ? handleRefresh : undefined} retrying={refreshing} />
         )}
 
         <div className="grid min-h-0 min-w-0 gap-6 xl:grid-cols-[340px_minmax(0,1fr)] 2xl:grid-cols-[380px_minmax(0,1fr)]">

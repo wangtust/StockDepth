@@ -1,5 +1,6 @@
 """Persist model-call metadata without prompts, responses or credentials."""
 import datetime as dt
+from copy import deepcopy
 import json
 import os
 from stockdepth.api.costs import cached_tokens, estimate_cost
@@ -36,7 +37,12 @@ class UsageRecorder(BaseCallbackHandler):
             params = kwargs.get('invocation_params') or {}
             metadata = metadata or {}
             model = params.get('model') or params.get('model_name') or metadata.get('model_name') or metadata.get('ls_model_name', 'unknown')
-            prices = metadata.get('pricing_snapshot') or self.prices.get(model)
+            # Configured models must never borrow another provider's same-name
+            # tariff. Only the legacy configuration supports name-based prices.
+            prices = metadata.get('pricing_snapshot')
+            if metadata.get('model_config_id') is None:
+                prices = prices or self.prices.get(model)
+            prices = deepcopy(prices)
             self.calls.append({
                 'call_id': str(run_id),
                 'job_id': self.job_id,

@@ -1,6 +1,13 @@
 import json
 import tempfile
 import unittest
+import pytest
+from unittest.mock import Mock, patch
+from pydantic import BaseModel
+from langchain_core.language_models.chat_models import BaseChatModel
+from langchain_core.outputs import ChatResult
+from stockdepth.agents.utils.structured import bind_structured, invoke_structured_or_freetext
+from stockdepth.workflows.trading_graph import StockDepthGraph
 from pathlib import Path
 from uuid import uuid4
 from langchain_core.messages import AIMessage
@@ -145,3 +152,139 @@ class UsageTests(unittest.TestCase):
         (legacy / 'reports/progress.json').write_text('{}')
         recorder = UsageRecorder(legacy / 'usage.json')
         self.assertFalse(recorder.history_complete)
+
+
+# Exercise the real LangChain binding/parser/callback machinery, with no HTTP.
+
+
+class UsageAnswer(BaseModel):
+    value: int
+
+
+class UsageMockModel(BaseChatModel):
+    mode: str = 'success'
+
+    @property
+    def _llm_type(self):
+        return 'usage-mock'
+
+    def bind_tools(self, tools, *, tool_choice=None, **kwargs):
+        return self.bind(tools=tools, **kwargs)
+
+    def with_structured_output(self, schema, **kwargs):
+        if self.mode == 'unsupported':
+            raise NotImplementedError('mock unsupported')
+        return super().with_structured_output(schema, **kwargs)
+
+    def _generate(self, messages, stop=None, run_manager=None, **kwargs):
+        tools = kwargs.get('tools')
+        if tools and self.mode == 'request_failure':
+            raise RuntimeError('mock provider failure')
+        calls = ([{'name': 'UsageAnswer', 'args': {'value':
+                  'invalid' if self.mode == 'parse_failure' else 1}, 'id': 'mock-tool'}]
+                 if tools else [])
+        return ChatResult(generations=[ChatGeneration(message=AIMessage(
+            content='ok', tool_calls=calls,
+            usage_metadata={'input_tokens': 100, 'output_tokens': 10, 'total_tokens': 110,
+                            'input_token_details': {'cache_read': 25}}))])
+
+
+class MetadataUsageRecorder(UsageRecorder):
+    def __init__(self, path):
+        self.received_metadata = []
+        super().__init__(path)
+
+    def on_chat_model_start(self, serialized, messages, *, run_id, metadata=None, **kwargs):
+        from copy import deepcopy
+        self.received_metadata.append(deepcopy(metadata))
+        return super().on_chat_model_start(serialized, messages, run_id=run_id,
+                                          metadata=metadata, **kwargs)
+
+
+@pytest.mark.parametrize('path', ['plain', 'tools', 'structured', 'parse_failure',
+                                 'request_failure', 'unsupported'])
+def test_role_identity_survives_all_bindings_and_fallbacks(tmp_path, path):
+    recorder = MetadataUsageRecorder(tmp_path / 'usage.json')
+    graph = StockDepthGraph.__new__(StockDepthGraph)
+    graph.config = {}
+    graph.callbacks = [recorder]
+    expected = []
+    for role, config_id, provider, rate, cost in (
+        ('quick', 12, 'qwen', '2', '0.000242500000'),
+        ('deep', 25, 'openai', '4', '0.000392500000'),
+    ):
+        prices = {'input': rate, 'cache': '0.5', 'output': '8'}
+        config = {'id': config_id, 'provider': provider, 'model': 'shared-name',
+                  'api_key': 'mock-secret', 'prices': prices}
+        raw = UsageMockModel(callbacks=[recorder], mode=path)
+        with patch('stockdepth.workflows.trading_graph.create_llm_client',
+                   return_value=Mock(get_llm=Mock(return_value=raw))):
+            llm = graph._make_role_llm(role, config)
+        invocation = {'metadata': {'langgraph_node': 'Mock Agent'}}
+        if path == 'plain':
+            llm.invoke('test', config=invocation)
+        elif path == 'tools':
+            llm.bind_tools([UsageAnswer]).invoke('test', config=invocation)
+        else:
+            result = invoke_structured_or_freetext(
+                bind_structured(llm, UsageAnswer, 'Mock Agent'), llm, 'test',
+                lambda answer: str(answer.value), 'Mock Agent')
+            assert result == ('1' if path == 'structured' else 'ok')
+        count = 2 if path in ('parse_failure', 'request_failure') else 1
+        expected.extend([(role, config_id, provider, dict(prices), cost)] * count)
+        # Neither the model nor earlier records may reference mutable config prices.
+        prices['input'] = '999'
+        assert llm.metadata['pricing_snapshot']['input'] == rate
+
+    calls = read_usage(recorder.path)['calls']
+    assert len(calls) == len(expected) == len(recorder.received_metadata)
+    for index, (call, metadata, identity) in enumerate(zip(calls, recorder.received_metadata, expected)):
+        role, config_id, provider, prices, cost = identity
+        assert (call['role'], call['model_config_id'], call['provider']) == (role, config_id, provider)
+        assert (metadata['model_role'], metadata['model_config_id'], metadata['model_provider']) == (role, config_id, provider)
+        assert call['pricing_snapshot'] == metadata['pricing_snapshot'] == prices
+        if path in ('plain', 'tools'):
+            assert call['agent'] == 'Mock Agent'
+        if path in ('parse_failure', 'request_failure'):
+            assert call['request_kind'] == ('structured' if index % 2 == 0 else 'free-text')
+            assert call['is_retry'] == (index % 2 == 1)
+        elif path in ('structured', 'unsupported'):
+            assert call['request_kind'] == ('structured' if path == 'structured' else 'free-text')
+            assert not call['is_retry']
+        if path == 'request_failure' and index % 2 == 0:
+            assert call['status'] == 'failed'
+            assert call['input_tokens'] is None and call['output_tokens'] is None
+            assert call['estimated_cost'] is None and not call['cost_complete']
+        else:
+            assert call['status'] == 'complete'
+            assert (call['input_tokens'], call['output_tokens']) == (100, 10)
+            assert call['estimated_cost'] == cost
+            assert call['cost_complete']
+    assert 'mock-secret' not in recorder.path.read_text()
+
+
+def test_price_snapshot_does_not_change_after_call_start(tmp_path):
+    recorder = UsageRecorder(tmp_path / 'usage.json')
+    prices = {'input': '2', 'cache': '0.5', 'output': '8'}
+    run_id = uuid4()
+    recorder.on_chat_model_start({}, [], run_id=run_id, metadata={
+        'model_config_id': 12, 'pricing_snapshot': prices})
+    prices['input'] = '999'
+    recorder.on_llm_end(LLMResult(generations=[[ChatGeneration(message=AIMessage(
+        content='ok', usage_metadata={'input_tokens': 100, 'output_tokens': 10,
+                                    'total_tokens': 110,
+                                    'input_token_details': {'cache_read': 25}}))]]), run_id=run_id)
+    call = read_usage(recorder.path)['calls'][0]
+    assert call['pricing_snapshot']['input'] == '2'
+    assert call['estimated_cost'] == '0.000242500000'
+
+
+@pytest.mark.parametrize('config_id', [12, None])
+def test_only_legacy_calls_can_use_model_name_prices(tmp_path, config_id):
+    recorder = UsageRecorder(tmp_path / 'usage.json')
+    recorder.prices = {'shared-name': {'input': '2', 'cache': '0.5', 'output': '8'}}
+    recorder.on_chat_model_start({}, [], run_id=uuid4(), metadata={
+        'model_config_id': config_id, 'model_name': 'shared-name', 'pricing_snapshot': None})
+    call = read_usage(recorder.path)['calls'][0]
+    assert call['pricing_snapshot'] == (recorder.prices['shared-name'] if config_id is None else None)
+    assert call['estimated_cost'] is None and not call['cost_complete']

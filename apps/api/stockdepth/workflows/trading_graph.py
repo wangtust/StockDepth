@@ -1,6 +1,7 @@
 # StockDepth/graph/trading_graph.py
 
 import logging
+from copy import deepcopy
 import os
 from pathlib import Path
 import json
@@ -151,8 +152,6 @@ class StockDepthGraph:
             metadata = {"model_role": role, "model_config_id": model_config.get("id"),
                         "model_provider": provider, "model_name": model,
                         "pricing_snapshot": prices}
-            if prices:
-                metadata["pricing_snapshot"] = prices
         else:
             provider = self.config["llm_provider"]
             model = self.config["deep_think_llm"] if role == "deep" else self.config["quick_think_llm"]
@@ -162,7 +161,10 @@ class StockDepthGraph:
         if self.callbacks:
             kwargs["callbacks"] = self.callbacks
         llm = create_llm_client(provider=provider, model=model, base_url=base_url, **kwargs).get_llm()
-        return llm.with_config(metadata=metadata)
+        # Model methods such as bind_tools/with_structured_output bypass a
+        # with_config wrapper. Keep identity on the model used by every path.
+        llm.metadata = {**(llm.metadata or {}), **deepcopy(metadata)}
+        return llm
 
     def _get_provider_kwargs_for(self, provider: str) -> Dict[str, Any]:
         provider = provider.lower()

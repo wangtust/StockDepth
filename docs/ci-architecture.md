@@ -1,6 +1,6 @@
 # CI architecture — Phase 1
 
-> 2026-10-15：已开始第二阶段，当前实现与分阶段计划见 [CI 第二阶段执行](ci-phase2-execution.md)。以下保留第一阶段历史说明；第二阶段远端验收尚未完成。
+> 2026-10-15：第二阶段已通过本地及 GitHub PR 验证，当前实现与分阶段计划见 [CI 第二阶段执行](ci-phase2-execution.md)。以下保留第一阶段历史说明；第二阶段 run 38702176804 的五个 job 全部通过，后续阶段仍待实施。
 
 2026-10-14（北京时间）。Phase0静态bootstrap保留。新增phase1-reproducibility.yml仅dev路径push及手动触发；一个 `Phase 1 clean clone offline regression` job，ubuntu-latest、20分钟超时、contents: read、同ref取消旧run。checkout fetch-depth:0保留冻结业务断言所需祖先。
 

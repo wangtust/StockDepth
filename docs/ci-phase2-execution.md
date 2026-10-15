@@ -7,7 +7,7 @@
 
 | 阶段 | 工作与验收 | 当前状态 |
 | --- | --- | --- |
-| 2 基础门禁 | dev push、面向 dev/main 的 PR、手动触发；类型/Python/前端/build 独立 job；统一失败传播；干净副本验证 | 已实现，本地通过；GitHub run 待执行 |
+| 2 基础门禁 | dev push、面向 dev/main 的 PR、手动触发；类型/Python/前端/build 独立 job；统一失败传播；干净副本验证 | 已实现，本地及 GitHub PR run 全部通过 |
 | 3 数据库集成 | PostgreSQL 16 临时 service，随机测试库；全量迁移、重复迁移、约束、Worker 抢占/lease/恢复、账务幂等；finally 清理 | 待实施，先审查现有测试的固定端口、dotenv 和历史 var 输入 |
 | 4 前端扩展 | 将剩余可移植套件纳入统一入口，验证真实安装的 Chromium；保留原有断言 | 待实施；现有 4 套回归已纳入第二阶段 |
 | 5 安全 | 凭据扫描、锁文件依赖审查、JWT/管理员/密钥暴露测试；扫描失败必须可见 | 待实施；产品缺陷单独处理 |
@@ -44,6 +44,24 @@
 | 汇总检查故障验证 | 全 success 通过；failure/cancelled/skipped 均拒绝 |
 | 构建入口隔离与失败传播 | 有应用 .env 时立即拒绝；过滤继承的模型/数据库变量；子命令 exit 23 原样传递 |
 
-日志保留于本地忽略目录 `var/ci-phase2/`，不提交构建产物和测试环境。尚无本轮 GitHub run，不将本地结果称为远端验收。
+日志保留于本地忽略目录 `var/ci-phase2/`，不提交构建产物和测试环境。远端验证见下方；本地结果与远端结果分列。
 
 干净副本具有完整 Git 历史，并复制本轮 CI 脚本；不复制应用 .env、node_modules 或 var。安装使用共享下载缓存，但依赖链接及 Python venv 都重新创建。并行 job 的云端调度、cache 服务、PR 合并提交和权限需要真实 GitHub run 验证。
+
+## GitHub 实际验收
+
+草稿 [PR #1](https://github.com/wangtust/StockDepth/pull/1)，目标 main；只新增工作分支及 PR，没有合并或修改 main/dev。源码提交 `6689bb6a395ce6099f2fcf52d5db041dff13c8e3`。
+[CI run 38702176804](https://github.com/wangtust/StockDepth/actions/runs/38702176804) 的 jobs 和日志已逐项检查，全部成功：
+
+| Job | 实际时长 | 结果 |
+| --- | --- | --- |
+| Type checks | 47s | Web / Worker 均通过 |
+| Python offline tests | 72s | 309 passed、1 integration deselected、9 warnings；pytest 7.86s；venv 清理成功 |
+| Frontend regression | 88s | 4 套通过；合成输出清理成功 |
+| Web production build | 82s | Next.js 编译、类型、页面生成、trace 均通过 |
+| CI required | 5s | All four CI jobs passed |
+
+总 job 执行时间 294 秒；各任务并行，不能把该合计当作端到端时长或实际账单。官方 actions v7/cache v6 已在本次 hosted runner 实际运行成功。
+本次没有 GitHub 失败 run；故障传播仅在本地验证，远端受控失败与恢复仍属阶段 6。保护规则尚未更改；待用户选择启用时可将 `CI required` 设为必需检查。
+
+此后证据文档提交与上述 tested source SHA 区分；CI 未做路径过滤，文档提交也会触发新的 PR run。

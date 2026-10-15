@@ -533,3 +533,22 @@ export async function cancelAnalysisJob(formData: FormData) {
   revalidateAdmin();
   return { success: 'Job cancelled.' };
 }
+
+export async function restoreModelAvailability(formData: FormData) {
+  const admin = await requirePlatformAdmin();
+  const configId = userIdSchema.parse(formData.get('configId'));
+  const [config] = await db.select().from(llmModelConfigs).where(and(eq(llmModelConfigs.id, configId), isNull(llmModelConfigs.retiredAt))).limit(1);
+  if (!config) return {error:'Model config not found.'};
+  const probe = await testModelConnection(config);
+  if (!probe.success) return {error:probe.error || '模型测试失败，仍保持不可用。'};
+  const restored = await db.transaction(async tx => {
+    const [current] = await tx.select().from(llmModelConfigs).where(eq(llmModelConfigs.id,configId)).for('update');
+    if (!current || current.retiredAt || current.updatedAt.getTime()!==config.updatedAt.getTime() || current.unavailableAt?.getTime()!==config.unavailableAt?.getTime()) return false;
+    await tx.update(llmModelConfigs).set({unavailableReason:null,unavailableAt:null,availabilityCheckedAt:new Date()}).where(eq(llmModelConfigs.id,configId));
+    return true;
+  });
+  if (!restored) return {error:'模型配置或状态已变化，请刷新后重新测试。'};
+  await writeAdminAuditLog({adminUserId:admin.id,action:'llm_model_config.restore_availability',targetType:'llm_model_config',targetId:configId,metadata:{modelName:config.modelName}});
+  revalidatePath('/admin/models');revalidatePath('/dashboard/analysis');
+  return {success:'模型测试通过，已恢复可用。'};
+}

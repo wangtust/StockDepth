@@ -40,8 +40,8 @@ python -m pip install -e apps/api
 连接池默认最多 5 个连接，并为 Drizzle 的参数查询启用预编译，减少重复 Describe
 往返。若数据库连接代理不支持预编译语句，设置 `STOCKDEPTH_DB_PREPARE=false`。
 
-Worker 的有效并发为管理员设置与 `ANALYSIS_WORKER_MAX_CONCURRENCY` 的较小值，
-默认本机上限 4，同供应商及 endpoint 同时运行上限 2。可用内存低于 256 MB 时
+分析任务并发仅使用管理员页面设置的系统并发和每人并发，30 秒内自动刷新。
+不再读取本机或供应商任务并发环境变量，模型 request_concurrency 不影响任务领取。可用内存低于 256 MB 时
 暂停领取新任务，继续监测已有任务和恢复中的任务。`var/analysis.log` 每 30 秒
 记录活动任务、队列长度、最长排队时间、Worker/分析进程 RSS 和可用内存。
 供应商调用在本机独立 Python runner 之间共享限流文件，默认每分钟 60 次初始调用；
@@ -267,3 +267,41 @@ SMTP_AUTH_CODE=your-smtp-authorization-code
 过期验证码和频率记录随发送请求分批清理。
 
 `scripts/tests/signup-email.ts` 使用独立临时 schema 和模拟发信测试，不向真实邮箱发送邮件。
+
+## 模型额度不可用状态
+
+模型调用明确返回免费额度耗尽、余额不足或 `insufficient_quota` 时，记录对应配置的
+`unavailable_reason=quota_exhausted` 与 `unavailable_at`。任务回调只持久化错误类别，
+不会为此记录原始错误内容。普通限流、网络错误和请求格式错误不触发额度停用。
+分析模型列表、任务创建校验和默认模拟交易模型均排除该配置；排队/重试任务会检查
+其配置是否已因额度不足而不可用，不自动替换模型或重新发起付费调用。
+
+管理员 Models 页面显示“额度不足 · 不可用”。充值或开启后付费后，管理员可点击
+“测试并恢复”（发起一次真实模型测试请求）；只有测试成功才清除不可用状态。
+保存模型配置或勾选 Active 不会自行清除额度错误。恢复时保留手动 Active 设置。
+配置版本与恢复检查时间用于防止旧任务错误覆盖更新后的凭据或成功恢复状态。
+
+旧 runner 的失败记录可以显式回填，例如：
+`tsx scripts/backfill-model-quota-status.ts 109 110`。
+脚本仅使用已保存的失败证据，不请求模型；只标记能够唯一定位且版本未变的配置。
+`scripts/tests/model-availability.ts` 使用隔离 schema 验证，不发起模型调用。
+
+## 失败任务更换模型继续
+
+分析页选择失败任务，在“更换模型并继续”展开 Quick / Deep 选择，确认后继续原任务。
+只允许选择当前启用、未弃用、未被标记额度不足且支持对应角色的模型。
+原来的 Continue 仍沿用原配置；原配置额度不足时，应使用更换模型入口。
+
+接口：`POST /api/analysis/jobs/[id]/retry`，不传 body 时使用原配置；传入
+`{"quickModelConfigId": 1, "deepModelConfigId": 2}` 时原子保存新配置快照并重新排队。
+仅任务所有者的失败且未隐藏任务可以操作；并发提交只允许一次成功。
+任务 ID、runId、首次开始时间、报告与历史模型调用不变，不重复扣分析额度。
+运行器使用同一 runId 的检查点；有检查点时以新模型运行未完成节点，没有时从头执行。
+后续请求按新模型的价格快照记录费用，旧调用费用保持原值。
+
+迁移新增 `analysis_job_resumptions` 保存模型更换审计和加密配置快照。
+任务详情只返回模型名称和更换时间，不返回快照、凭据或租约。
+页面可查看“模型更换记录”。此操作不会自动执行；用户确认后才会继续调用模型。
+
+`scripts/tests/resume-with-models.ts` 使用隔离 schema 验证权限、状态、加密历史、
+重复请求、事务回滚和用量保留；`test_checkpoint_resume.py` 验证重建模型后只恢复未完成节点。

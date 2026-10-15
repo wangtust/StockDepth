@@ -20,7 +20,7 @@ export async function getActiveModelConfigs() {
       updatedAt: llmModelConfigs.updatedAt
     })
     .from(llmModelConfigs)
-    .where(and(eq(llmModelConfigs.isActive, true), isNull(llmModelConfigs.retiredAt)))
+    .where(and(eq(llmModelConfigs.isActive, true), isNull(llmModelConfigs.retiredAt), isNull(llmModelConfigs.unavailableReason)))
     .orderBy(desc(llmModelConfigs.isDefault), asc(llmModelConfigs.id));
 }
 
@@ -41,6 +41,8 @@ export async function getModelConfigsForAdmin() {
       outputPrice: llmModelConfigs.outputPrice,
       isDefault: llmModelConfigs.isDefault,
       isActive: llmModelConfigs.isActive,
+      unavailableReason: llmModelConfigs.unavailableReason,
+      unavailableAt: llmModelConfigs.unavailableAt,
       createdAt: llmModelConfigs.createdAt,
       updatedAt: llmModelConfigs.updatedAt
     })
@@ -54,7 +56,7 @@ export async function getDefaultModelConfig() {
   const configs = await db
     .select()
     .from(llmModelConfigs)
-    .where(and(eq(llmModelConfigs.isActive, true), isNull(llmModelConfigs.retiredAt)))
+    .where(and(eq(llmModelConfigs.isActive, true), isNull(llmModelConfigs.retiredAt), isNull(llmModelConfigs.unavailableReason)))
     .orderBy(desc(llmModelConfigs.isDefault), asc(llmModelConfigs.id))
     .limit(1);
 

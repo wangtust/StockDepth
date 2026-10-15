@@ -31,6 +31,9 @@ def probe(config):
             return {'error': '接口未返回有效内容，请检查模型配置或输出限制。'}
         return {'success': True}
     except Exception as exc:
+        from stockdepth.api.usage import is_quota_exhausted
+        if is_quota_exhausted(exc):
+            return {'error': '额度不足：请充值或开启后付费后重试。'}
         status = getattr(exc, 'status_code', None)
         messages = {
             400: '请求被模型服务拒绝，请检查模型名称、Provider 和接口协议。',

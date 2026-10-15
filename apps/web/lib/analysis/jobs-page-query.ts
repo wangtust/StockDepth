@@ -10,7 +10,7 @@ export function jobsPageQuery(userId: number, before?: number) {
       coalesce((select jsonb_agg(jsonb_build_object('id', id, 'name', name,
         'modelName', model_name, 'provider', provider, 'isDefault', is_default,
         'quickEnabled', quick_enabled, 'deepEnabled', deep_enabled) order by is_default desc, id)
-        from llm_model_configs where is_active and retired_at is null), '[]'::jsonb) as models,
+        from llm_model_configs where is_active and retired_at is null and unavailable_reason is null), '[]'::jsonb) as models,
       coalesce((select jsonb_agg(jsonb_build_object(
         'id', j.id, 'ticker', j.ticker, 'tradeDate', j.trade_date,
         'realtimeData', j.realtime_data, 'language', j.language, 'depth', j.depth,

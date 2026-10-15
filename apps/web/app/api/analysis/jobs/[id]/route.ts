@@ -37,6 +37,7 @@ export async function GET(
   const [job] = await timing.measure('job', () => db
     .select({
       id: analysisJobs.id, ticker: analysisJobs.ticker, status: analysisJobs.status,
+      quickModelConfigId: analysisJobs.quickModelConfigId, deepModelConfigId: analysisJobs.deepModelConfigId,
       externalStatus: analysisJobs.externalStatus, errorMessage: analysisJobs.errorMessage,
       hiddenAt: analysisJobs.hiddenAt,
       startedAt: analysisJobs.startedAt, completedAt: analysisJobs.completedAt,
@@ -46,6 +47,7 @@ export async function GET(
       reports: sql`coalesce((select json_agg(json_build_object('id', r.id, 'reportKey', r.report_key,
         'title', r.title, 'updatedAt', r.updated_at at time zone 'UTC') order by r.id)
         from analysis_reports r where r.job_id = analysis_jobs.id and r.user_id = ${currentUser.id}), '[]'::json)`,
+      resumptions: sql`coalesce((select json_agg(json_build_object('id', h.id, 'previousQuickModel', h.previous_quick_model, 'previousDeepModel', h.previous_deep_model, 'nextQuickModel', h.next_quick_model, 'nextDeepModel', h.next_deep_model, 'createdAt', h.created_at) order by h.id) from analysis_job_resumptions h where h.job_id = analysis_jobs.id and h.user_id = ${currentUser.id}), '[]'::json)`,
       calls: sql`coalesce((select json_agg(json_build_object('callId', c.call_id, 'agent', c.agent,
         'model', c.model, 'role', c.role, 'provider', c.provider, 'modelConfigId', c.model_config_id,
         'status', c.status, 'startedAt', c.started_at,
@@ -68,8 +70,8 @@ export async function GET(
     return NextResponse.json({ error: 'Not found' }, { status: 404 });
   }
 
-  const { reports, calls, ...summary } = job;
-  return NextResponse.json({ job: summary, reports, calls }, { headers: { ...timing.headers(), 'Cache-Control': 'private, no-store' } });
+  const { reports, calls, resumptions, ...summary } = job;
+  return NextResponse.json({ job: summary, reports, calls, resumptions }, { headers: { ...timing.headers(), 'Cache-Control': 'private, no-store' } });
 }
 
 export async function DELETE(

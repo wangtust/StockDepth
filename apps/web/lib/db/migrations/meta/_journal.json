@@ -260,6 +260,20 @@
       "when": 1792026494681,
       "tag": "0036_needy_invaders",
       "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1792032370597,
+      "tag": "0037_bent_vengeance",
+      "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1792032939192,
+      "tag": "0038_overjoyed_gamora",
+      "breakpoints": true
     }
   ]
 }

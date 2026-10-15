@@ -15,7 +15,7 @@ import {
   users
 } from '@/lib/db/schema';
 import { getDepthCreditCostFromDb } from '@/lib/analysis/pricing-server';
-import { encryptModelKey } from '@/lib/security/model-key';
+import { immutableModelSnapshot } from '@/lib/analysis/model-snapshot';
 import { normalizeTicker } from '@/lib/market/tickers';
 
 const createJobSchema = z.object({
@@ -77,9 +77,9 @@ export async function POST(request: NextRequest) {
   const deepId = data.deepModelConfigId ?? data.modelConfigId;
   if (!quickId || !deepId) return NextResponse.json({ error: '请选择 Quick 和 Deep 模型。' }, { status: 400 });
   const [quickConfig] = await db.select().from(llmModelConfigs)
-    .where(and(eq(llmModelConfigs.id, quickId), eq(llmModelConfigs.isActive, true), isNull(llmModelConfigs.retiredAt), eq(llmModelConfigs.quickEnabled, true))).limit(1);
+    .where(and(eq(llmModelConfigs.id, quickId), eq(llmModelConfigs.isActive, true), isNull(llmModelConfigs.retiredAt), isNull(llmModelConfigs.unavailableReason), eq(llmModelConfigs.quickEnabled, true))).limit(1);
   const [deepConfig] = await db.select().from(llmModelConfigs)
-    .where(and(eq(llmModelConfigs.id, deepId), eq(llmModelConfigs.isActive, true), isNull(llmModelConfigs.retiredAt), eq(llmModelConfigs.deepEnabled, true))).limit(1);
+    .where(and(eq(llmModelConfigs.id, deepId), eq(llmModelConfigs.isActive, true), isNull(llmModelConfigs.retiredAt), isNull(llmModelConfigs.unavailableReason), eq(llmModelConfigs.deepEnabled, true))).limit(1);
 
   if (!quickConfig || !deepConfig) {
     return NextResponse.json(
@@ -87,23 +87,11 @@ export async function POST(request: NextRequest) {
       { status: 400 }
     );
   }
-  function immutableSnapshot(config: typeof quickConfig) {
-    try {
-      const apiKey = config.apiKey.startsWith('sdkey:') ? config.apiKey : encryptModelKey(config.apiKey);
-      const options = config.modelOptions || {};
-      if (options.request_concurrency != null && (!Number.isInteger(Number(options.request_concurrency)) || Number(options.request_concurrency) < 1)) {
-        throw new Error('模型并发限制须为正整数。');
-      }
-      return JSON.stringify({ ...config, modelOptions: options, apiKey });
-    } catch {
-      throw new Error('模型密钥加密配置不可用，无法安全创建任务快照。');
-    }
-  }
   let quickConfigSnapshot: string;
   let deepConfigSnapshot: string;
   try {
-    quickConfigSnapshot = immutableSnapshot(quickConfig);
-    deepConfigSnapshot = immutableSnapshot(deepConfig);
+    quickConfigSnapshot = immutableModelSnapshot(quickConfig);
+    deepConfigSnapshot = immutableModelSnapshot(deepConfig);
   } catch (error) {
     return NextResponse.json({ error: (error as Error).message }, { status: 503 });
   }

@@ -98,7 +98,7 @@ export async function readPaperOverview(userId: number) {
       .orderBy(desc(watchlistItems.createdAt)),
     getAnalysisPricingConfig(),
     db.select(modelFields).from(llmModelConfigs)
-      .where(and(eq(llmModelConfigs.isActive, true), isNull(llmModelConfigs.retiredAt)))
+      .where(and(eq(llmModelConfigs.isActive, true), isNull(llmModelConfigs.retiredAt), isNull(llmModelConfigs.unavailableReason)))
       .orderBy(desc(llmModelConfigs.isDefault), asc(llmModelConfigs.id)).limit(1)
   ]);
   const { hasActiveAnalysisRuns = false, ...portfolio } = portfolios[0] ?? {};

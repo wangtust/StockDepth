@@ -79,6 +79,40 @@ class TestCheckpointResume(unittest.TestCase):
         # analyst added 1, trader added 10 → 11
         self.assertEqual(result["count"], 11)
 
+    def test_resume_rebuilds_pending_node_with_new_model(self):
+        """Recompiling with new model closures preserves completed-node output."""
+        calls = []
+        run_id = "resume-model-fixture"
+        cfg = {"configurable": {"thread_id": thread_id(self.ticker, self.date, run_id)}}
+
+        def build(model, fail=False):
+            builder = StateGraph(_SimpleState)
+
+            def analyst(state):
+                calls.append(("analyst", model))
+                return {"count": state["count"] + 1}
+
+            def trader(state):
+                calls.append(("trader", model))
+                if fail:
+                    raise RuntimeError("quota_exhausted fixture")
+                return {"count": state["count"] + 10}
+
+            builder.add_node("analyst", analyst)
+            builder.add_node("trader", trader)
+            builder.set_entry_point("analyst")
+            builder.add_edge("analyst", "trader")
+            builder.add_edge("trader", END)
+            return builder
+
+        with get_checkpointer(self.tmpdir, self.ticker, run_id=run_id) as saver:
+            with self.assertRaises(RuntimeError):
+                build("old-model", fail=True).compile(checkpointer=saver).invoke({"count": 0}, config=cfg)
+        with get_checkpointer(self.tmpdir, self.ticker, run_id=run_id) as saver:
+            result = build("new-model").compile(checkpointer=saver).invoke(None, config=cfg)
+        self.assertEqual(result["count"], 11)
+        self.assertEqual(calls, [("analyst", "old-model"), ("trader", "old-model"), ("trader", "new-model")])
+
     def test_clear_checkpoint_allows_fresh_start(self):
         """After clearing, the graph starts from scratch."""
         global _should_crash

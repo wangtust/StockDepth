@@ -1,5 +1,6 @@
 import '../env';
 import { extractDecision } from '@/lib/analysis/decision-extraction';
+import { recordQuotaFailures, unavailableJobModels } from '@/lib/analysis/model-availability';
 import { decryptModelKey } from '@/lib/security/model-key';
 import { isAnalysisRunner } from '@/lib/analysis/runner-process';
 import { basename } from 'node:path';
@@ -25,6 +26,7 @@ type StockDepthReport = {
 
 type ModelCall = {
   call_id: string; agent: string; model: string;
+  failure_reason?: string | null;
   role?: string; model_config_id?: number | null; provider?: string | null;
   started_at: string; ended_at: string | null; status: string;
   input_tokens: number | null; output_tokens: number | null; total_tokens: number | null;
@@ -62,8 +64,6 @@ const runHardTimeoutMs = positiveIntegerFromEnv(
   Math.max(runTimeoutMs * 2, runTimeoutMs + runStallTimeoutMs)
 );
 const mockMode = process.env.ANALYSIS_WORKER_MOCK === 'true';
-const localConcurrencyCap = positiveIntegerFromEnv('ANALYSIS_WORKER_MAX_CONCURRENCY', 4);
-const providerConcurrency = positiveIntegerFromEnv('ANALYSIS_PROVIDER_CONCURRENCY', 2);
 const minAvailableMemoryMb = positiveIntegerFromEnv('ANALYSIS_WORKER_MIN_AVAILABLE_MB', 256);
 let cachedRuntimeConfig: Awaited<ReturnType<typeof readRuntimeConfig>> | null = null;
 let configReadAt = 0;
@@ -77,7 +77,7 @@ async function readRuntimeConfig() {
   const settings = await getAnalysisConcurrencySettings();
 
   return {
-    workerConcurrency: Math.min(settings.systemConcurrency, localConcurrencyCap),
+    workerConcurrency: settings.systemConcurrency,
     systemConcurrency: settings.systemConcurrency,
     userConcurrency: settings.userConcurrency
   };
@@ -303,6 +303,7 @@ export async function syncUsage(job: ClaimedJob, run: StockDepthRun, previousCal
       tokenUsageComplete: totals.complete && run.usage!.history_complete,
     }).where(ownedAnalysis(job));
   });
+  await recordQuotaFailures(job,run.usage.calls,run.status==='failed'?run.runner_log:undefined);
   for (const call of run.usage.calls) previousCalls.set(call.call_id, JSON.stringify(call));
 }
 
@@ -394,6 +395,7 @@ export async function processJob(job: ClaimedJob, options: { startRun?: boolean 
   }
 
   if (startRun) {
+    if ((await unavailableJobModels(job)).length) throw new Error('模型额度不足，暂不可用，请更换模型后重新提交分析。');
     await startStockDepth(job);
   }
 
@@ -541,7 +543,7 @@ async function main() {
         coalesce(extract(epoch from now() at time zone 'UTC' - min(created_at)), 0)::int as oldest_wait_seconds
         from analysis_jobs where status = 'queued'`);
       console.log(JSON.stringify({ event: 'worker_metrics', active: activeJobs.size,
-        concurrency: currentConfig.workerConcurrency, providerConcurrency, ...memory, ...queue }));
+        concurrency: currentConfig.workerConcurrency, userConcurrency: currentConfig.userConcurrency, ...memory, ...queue }));
       lastMetricsAt = Date.now();
     }
     if (memory.availableMb < minAvailableMemoryMb) {
@@ -550,8 +552,8 @@ async function main() {
     }
 
     while (activeJobs.size < currentConfig.workerConcurrency) {
-      const recovered = await claimAnalysis(currentConfig, providerConcurrency, true);
-      const job = recovered || await claimAnalysis(currentConfig, providerConcurrency);
+      const recovered = await claimAnalysis(currentConfig, true);
+      const job = recovered || await claimAnalysis(currentConfig);
       if (!job) {
         break;
       }

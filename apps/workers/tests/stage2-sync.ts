@@ -25,7 +25,7 @@ async function main() {
  assert(String(database.name).startsWith('stockdepth_stage2_worker_'));
  const [user] = await db.insert(users).values({ email: 'worker-stage2@test.invalid', passwordHash: 'unused', analysisCredits: 100 }).returning();
  await db.insert(analysisJobs).values({ userId: user.id, runId: 'stage2-fixture', ticker: 'MOCK', tradeDate: '2026-10-13', analysts: '[]', provider: 'mock' });
- const job = await claimAnalysis({ systemConcurrency: 2, userConcurrency: 2 }, 2); assert(job);
+ const job = await claimAnalysis({ systemConcurrency: 2, userConcurrency: 2 }); assert(job);
  const reports = [{ key: 'market', title: 'Market', content: 'a'.repeat(100000) }, { key: 'news', title: 'News', content: 'b'.repeat(100000) }];
  await saveReports(job, reports);
  const before = await db.select().from(analysisReports);
@@ -44,7 +44,7 @@ async function main() {
  const [fresh] = await db.select().from(analysisJobs).where(eq(analysisJobs.id, job.id)); assert(fresh.tokenUsageComplete); assert.equal(fresh.totalTokens, 12);
  const [call] = await db.select().from(analysisModelCalls); assert.equal(call.estimatedCost, '0.000026000000'); assert.equal(call.role, 'quick'); assert.equal(call.provider, 'mock');
  await db.update(analysisJobs).set({ workerLeaseUntil: sql`now() - interval '1 second'` }).where(eq(analysisJobs.id, job.id));
- const recovered = await claimAnalysis({ systemConcurrency: 2, userConcurrency: 2 }, 2, true); assert(recovered);
+ const recovered = await claimAnalysis({ systemConcurrency: 2, userConcurrency: 2 }, true); assert(recovered);
  await assert.rejects(saveReports(job, []), LostOwnershipError); await assert.rejects(syncUsage(job, { status: 'running', usage: { calls, history_complete: true } }, cache), LostOwnershipError);
  await saveReports(recovered, [reports[1]]);
  const [credits] = await db.select().from(users); assert.equal(credits.analysisCredits, 100);
@@ -52,7 +52,7 @@ async function main() {
    scenario = end; polls = 0; bodies = 0;
    await db.update(analysisJobs).set({ status: 'complete', workerOwner: null, workerLeaseUntil: null }).where(eq(analysisJobs.id, job.id));
    const [fixture] = await db.insert(analysisJobs).values({ userId: user.id, runId: `loop-${end}`, ticker: 'MOCK', tradeDate: '2026-10-13', analysts: '[]', provider: 'mock' }).returning();
-   const owned = await claimAnalysis({ systemConcurrency: 2, userConcurrency: 2 }, 2); assert(owned && owned.id === fixture.id);
+   const owned = await claimAnalysis({ systemConcurrency: 2, userConcurrency: 2 }); assert(owned && owned.id === fixture.id);
    await processJob(owned, { startRun: false });
    const [result] = await db.select().from(analysisJobs).where(eq(analysisJobs.id, fixture.id));
    if (end === 'partial') { assert.equal(result.externalStatus, 'recovery_waiting'); assert.equal(result.workerOwner, null); }

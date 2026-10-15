@@ -1,51 +1,20 @@
-import { publicAnalysisJob } from '@/lib/analysis/public-job';
-import { and, eq, isNull } from 'drizzle-orm';
-import { NextRequest, NextResponse } from 'next/server';
-import { getUser } from '@/lib/db/queries';
-import { db } from '@/lib/db/drizzle';
-import { analysisJobs } from '@/lib/db/schema';
-
-export async function POST(
-  _request: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  const currentUser = await getUser();
-  if (!currentUser) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+import {publicAnalysisJob} from '@/lib/analysis/public-job';
+import {resumeAnalysisJob} from '@/lib/analysis/resume-job';
+import {NextRequest,NextResponse} from 'next/server';
+import {getUser} from '@/lib/db/queries';
+import {z} from 'zod';
+const replacementSchema=z.object({quickModelConfigId:z.number().int().positive().max(2147483647),deepModelConfigId:z.number().int().positive().max(2147483647)}).strict();
+export async function POST(request:NextRequest,{params}:{params:Promise<{id:string}>}) {
+  const user=await getUser();if(!user)return NextResponse.json({error:'Unauthorized'},{status:401});
+  const id=Number((await params).id);if(!Number.isSafeInteger(id)||id<1||id>2147483647)return NextResponse.json({error:'Not found'},{status:404});
+  const raw=await request.text();if(raw.length>1024)return NextResponse.json({error:'Invalid request'},{status:400});let replacement;
+  if(raw.trim()) {
+    try {const parsed=replacementSchema.safeParse(JSON.parse(raw));if(!parsed.success)return NextResponse.json({error:'请选择有效的 Quick 和 Deep 模型。'},{status:400});replacement=parsed.data;}
+    catch{return NextResponse.json({error:'Invalid request'},{status:400});}
   }
-
-  const id = Number((await params).id);
-  if (!Number.isInteger(id)) {
-    return NextResponse.json({ error: 'Not found' }, { status: 404 });
-  }
-
-  const [job] = await db
-    .update(analysisJobs)
-    .set({
-      status: 'queued',
-      workerOwner: null, workerLeaseUntil: null,
-      externalStatus: 'resume-queued',
-      externalPid: null,
-      errorMessage: null,
-      completedAt: null,
-      updatedAt: new Date()
-    })
-    .where(
-      and(
-        eq(analysisJobs.id, id),
-        eq(analysisJobs.userId, currentUser.id),
-        isNull(analysisJobs.hiddenAt),
-        eq(analysisJobs.status, 'failed')
-      )
-    )
-    .returning();
-
-  if (!job) {
-    return NextResponse.json(
-      { error: 'Only failed analysis jobs can be continued' },
-      { status: 409 }
-    );
-  }
-
-  return NextResponse.json({ job: publicAnalysisJob(job) });
+  try {
+    const result=await resumeAnalysisJob(user.id,id,replacement);
+    if('error' in result)return NextResponse.json({error:result.error},{status:result.status});
+    return NextResponse.json({job:publicAnalysisJob(result.job)});
+  }catch{return NextResponse.json({error:'无法继续任务，请检查模型密钥配置后重试。'},{status:503});}
 }

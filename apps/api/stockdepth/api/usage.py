@@ -4,6 +4,7 @@ import json
 import os
 from stockdepth.api.costs import cached_tokens, estimate_cost
 import threading
+import re
 from pathlib import Path
 from langchain_core.callbacks import BaseCallbackHandler
 
@@ -55,13 +56,15 @@ class UsageRecorder(BaseCallbackHandler):
             call.update(pricing_snapshot=prices, cached_input_tokens=None, raw_usage=None, estimated_cost=None, cost_complete=False)
             self._save()
 
-    def _finish(self, run_id, status, usage=None, raw_usage=None):
+    def _finish(self, run_id, status, usage=None, raw_usage=None, failure_reason=None):
         with self.lock:
             call = next((c for c in self.calls if c['call_id'] == str(run_id)), None)
             if call is None:
                 return
             call['ended_at'] = dt.datetime.now(dt.timezone.utc).isoformat()
             call['status'] = status
+            if failure_reason:
+                call['failure_reason'] = failure_reason
             if usage:
                 inp = usage.get('input_tokens', usage.get('prompt_tokens'))
                 out = usage.get('output_tokens', usage.get('completion_tokens'))
@@ -122,7 +125,8 @@ class UsageRecorder(BaseCallbackHandler):
         self._finish(run_id, 'complete', usage, raw_usage)
 
     def on_llm_error(self, error, *, run_id, **kwargs):
-        self._finish(run_id, 'failed')
+        reason = 'quota_exhausted' if is_quota_exhausted(error) else None
+        self._finish(run_id, 'failed', failure_reason=reason)
 
 
 def read_usage(path):
@@ -130,3 +134,11 @@ def read_usage(path):
         return json.loads(Path(path).read_text(encoding='utf-8'))
     except (OSError, ValueError):
         return {'calls': [], 'history_complete': False}
+
+
+def is_quota_exhausted(error):
+    return bool(re.search(
+        r'insufficient_quota|quota_exhausted|401008|free trial quota.*exhausted|'
+        r'insufficient (?:account )?(?:balance|credits)|credit balance.*(?:too low|insufficient)|'
+        r'(?:余额|额度|配额).{0,12}(?:不足|耗尽|用尽)|billing_hard_limit_reached',
+        str(error), re.IGNORECASE))

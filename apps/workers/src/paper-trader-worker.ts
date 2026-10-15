@@ -1,4 +1,5 @@
 import '../env';
+import { isQuotaExhausted, markModelQuotaUnavailable } from '@/lib/analysis/model-availability';
 import { randomUUID } from 'node:crypto';
 import { basename } from 'node:path';
 import { claimPaperRun, assertPaperOwner, ownedPaper, renewPaper, expireSubmittedRuns, paperLeaseMs } from './paper-ownership';
@@ -59,7 +60,7 @@ async function getDefaultModelConfig() {
   const [config] = await db
     .select()
     .from(llmModelConfigs)
-    .where(and(eq(llmModelConfigs.isActive, true), isNull(llmModelConfigs.retiredAt)))
+    .where(and(eq(llmModelConfigs.isActive, true), isNull(llmModelConfigs.retiredAt), isNull(llmModelConfigs.unavailableReason)))
     .orderBy(sql`${llmModelConfigs.isDefault} desc`, asc(llmModelConfigs.id))
     .limit(1);
   return config ? readModelConfig(config) : null;
@@ -203,9 +204,8 @@ export async function callDecisionModel(modelConfig: ModelConfig, prompt: string
   if (!response.ok || payload.error) {
     const detail = String(payload.error?.message || payload.error || `Decision model failed: ${response.status}`)
       .split(modelConfig.apiKey).join('[redacted]');
-    throw new Error(
-      detail
-    );
+    if (isQuotaExhausted(JSON.stringify(payload.error))) await markModelQuotaUnavailable(modelConfig);
+    throw new Error(detail);
   }
 
   const content = payload.choices?.[0]?.message?.content ?? payload.content?.find((item: any) => item.type === 'text')?.text ?? payload.candidates?.[0]?.content?.parts?.map((item: any) => item.text || '').join('');

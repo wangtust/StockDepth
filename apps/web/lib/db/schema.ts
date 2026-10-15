@@ -203,6 +203,9 @@ export const llmModelConfigs = pgTable('llm_model_configs', {
   outputPrice: numeric('output_price', { precision: 15, scale: 6 }),
   isDefault: boolean('is_default').notNull().default(false),
   isActive: boolean('is_active').notNull().default(true),
+  unavailableReason: varchar('unavailable_reason', { length: 40 }),
+  unavailableAt: timestamp('unavailable_at', { withTimezone: true }),
+  availabilityCheckedAt: timestamp('availability_checked_at', { withTimezone: true }),
   retiredAt: timestamp('retired_at'),
   createdAt: timestamp('created_at').notNull().defaultNow(),
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
@@ -740,3 +743,19 @@ export const signupEmailLimits = pgTable('signup_email_limits', {
   resetAt: timestamp('reset_at', { withTimezone: true }).notNull(),
   lastSentAt: timestamp('last_sent_at', { withTimezone: true }).notNull(),
 });
+
+export const analysisJobResumptions = pgTable('analysis_job_resumptions', {
+  id: serial('id').primaryKey(),
+  jobId: integer('job_id').notNull(),
+  userId: integer('user_id').notNull().references(() => users.id),
+  previousQuickModel: varchar('previous_quick_model', { length: 160 }),
+  previousDeepModel: varchar('previous_deep_model', { length: 160 }),
+  nextQuickModel: varchar('next_quick_model', { length: 160 }).notNull(),
+  nextDeepModel: varchar('next_deep_model', { length: 160 }).notNull(),
+  previousQuickConfigSnapshot: text('previous_quick_config_snapshot'),
+  previousDeepConfigSnapshot: text('previous_deep_config_snapshot'),
+  nextQuickConfigSnapshot: text('next_quick_config_snapshot').notNull(),
+  nextDeepConfigSnapshot: text('next_deep_config_snapshot').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, t => [foreignKey({name:'analysis_resumptions_job_owner_fk',columns:[t.jobId,t.userId],foreignColumns:[analysisJobs.id,analysisJobs.userId]}),
+  index('analysis_resumptions_job_created_idx').on(t.jobId,t.createdAt)]);

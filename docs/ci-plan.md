@@ -1,5 +1,7 @@
 # GitHub Actions CI engineering execution plan
 
+> 2026-10-15：阶段3–6代码与实际运行验收完成，PR #2已合并并部署；唯一外部权限事项为管理员启用分支保护。见 [最终验收](ci-completion.md#最终验收与部署)。
+
 > 当前完整实现、验证边界和发布记录见 [CI 完整实施](ci-completion.md)。下方保留先前阶段记录。
 
 > 2026-10-15：第二阶段已通过本地及 GitHub PR 验证，当前实现与分阶段计划见 [CI 第二阶段执行](ci-phase2-execution.md)。以下保留第一阶段历史说明；第二阶段 run 38702176804 的五个 job 全部通过，后续阶段仍待实施。

@@ -28,11 +28,11 @@
 
 ## 本地验收
 
-在无应用 .env、无 var 的干净 clone 中使用 Node22.23.3 / pnpm12.11.2 / Python3.11.14。Docker daemon 不可用，使用本机独立 PostgreSQL16 临时集群（loopback55497、专用临时数据目录）；没有接触应用库进行测试。Python 309 passed、1 integration deselected、83 subtests passed；6 安全套件通过；Node high/critical=0，Python无已知漏洞，完整历史凭据扫描通过；actionlint1.7.12通过。生产构建已完成。剩余本轮执行证据随 GitHub 验收补充。
+在无应用 .env、无 var 的干净 clone 中使用 Node22.23.3 / pnpm12.11.2 / Python3.11.14。Docker daemon 不可用，使用本机独立 PostgreSQL16 临时集群（loopback55497、专用临时数据目录）；没有接触应用库进行测试。Python 309 passed、1 integration deselected、83 subtests passed；6 安全套件通过；Node high/critical=0，Python无已知漏洞，完整历史凭据扫描通过；actionlint1.7.12通过。生产构建已完成。完整远端验收见下方。
 
 ## 远端故障验证及发布
 
-本轮将提交带有明确标识的临时失败 probe 到工作分支，确认真实 job 及 CI required 变红，然后移除 probe 并取得完整绿灯才合并。该 probe 不进入 main，不设置忽略失败。实际 SHA/run/时长待取得后记录，不预先声明验收。
+已完成工作分支临时失败演练、恢复绿灯、合并及部署。main 最终工作流不含失败 probe；Git 保留演练提交的审计历史，未忽略失败。实际 SHA/run/时长见下方验收。
 
 ## 合并门禁设置权限
 
@@ -47,3 +47,29 @@
 
 
 临时 probe run 已实际结束为 failure，`CI required` 退出 1 并列出所有失败依赖，证明失败传播真实生效。Coordinator 的附加 SSR 套件在云端首次出现 180 秒超时；新增渲染阶段日志及 CDP 请求 15 秒超时，用于定位而非放宽断言或增加总时限。恢复版移除临时 exit42，仍要求全部任务通过。
+
+
+## 最终验收与部署
+
+| 项目 | 实际证据 |
+| --- | --- |
+| 失败演练 | [run 38706000895](https://github.com/wangtust/StockDepth/actions/runs/38706000895)，source `ca2aef82545e764c7b41ddcd052ff699d261c517`；Type checks exit42、CI required exit1 |
+| 恢复绿灯 | [run 38706637161](https://github.com/wangtust/StockDepth/actions/runs/38706637161)，source `33be4be9f2f798592f94cdb5599dc7dbea18c4ba`；11 job 全 success；6 个非空报告 artifact |
+| 合并 | [PR #2](https://github.com/wangtust/StockDepth/pull/2) 已合并；main merge SHA `202e63dbe6f8ee6501e0a6173cad210611a04ee7` |
+| main push 验收 | [run 38707075289](https://github.com/wangtust/StockDepth/actions/runs/38707075289)，上述 merge SHA；11 job 全 success |
+| 应用发布 | 同一 merge SHA；frozen install、真实生产配置 build、Web/analysis/market 启动通过；数据库初始化确认 40 条迁移已应用、28 表就绪，没有待迁移结构 |
+| 发布后只读检查 | sign-in 200；dashboard 307；analysis API 401；真实 admin details API 403；后端 options API 401 |
+| 已加载依赖 | Drizzle0.45.2、PostCSS8.5.29、sharp0.35.5 |
+| 清理 | 本地临时 PostgreSQL16 停止前确认没有遗留套件数据库；临时副本/venv删除；回滚构建和依赖保留于忽略目录 `var/ci-release-20261015` |
+
+发布前再次确认 analysis queued/running=0、paper claimed/submitted=0，先停止 Web 接收新 UI 工作，再确认空闲并停止相关 Worker；保留旧依赖及构建后进行安装/构建，成功后启动。原 API 正常运行，paper 原本未启动，未擅自启用自动交易。没有调用真实模型或创建交易进行验收。初次只读 smoke 使用了不存在的 admin collection 路径而得到404，已改为实际 admin details 路由并得到预期403；不是忽略服务故障。
+
+本机证据：`var/ci-completion/`、`var/ci-release-20261015/deployment.log`、readiness.json、dependency-versions.json。证据文档后续提交与已测试 source SHA 分列，不将文档提交冒称原 tested source。
+
+### 耗时与预算
+
+恢复 run 的实际 job 时长：security23s、types36s、Python72s、secret8s、experience140s、audit38s、build79s、admin107s、coordinator68s、PG16集成61s、required2s；共634 job秒（约10.6 job分钟），并行执行。所有 job 超时上限之和102分钟，仅为异常情况下的硬上限。实际账单/套餐不可读取，不由执行时间推算收费金额。报告保留7天；避免重复旧 workflow；取消过期同事件运行。没有付费模型测试。
+
+首轮 coordinator SSR 超时尚无确定根因；新增阶段日志及15秒CDP超时后，恢复 run 和 main run 连续通过，未增加180秒套件总时限或删除断言。
+
+代码、运行验收和应用部署均已完成。唯一管理权限事项是分支保护强制启用：当前连接器403且无写入能力，必须由有权限的仓库管理员在界面设置；不能将生成 `CI required` 等同于已经启用强制保护。

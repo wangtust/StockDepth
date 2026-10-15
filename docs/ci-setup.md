@@ -1,22 +1,24 @@
-# CI setup — Phase 1
+# CI setup
 
-> 当前完整实现、验证边界和发布记录见 [CI 完整实施](ci-completion.md)。下方保留先前阶段记录。
+CI 已发布到 main；无需提供应用数据库、支付、模型或部署 secrets。GitHub Actions 页面选择 CI 可以手动运行；integration 也有单独手动入口。完整证据与权限边界见 [实施记录](ci-completion.md)。
 
-> 2026-10-15：第二阶段已通过本地及 GitHub PR 验证，当前实现与分阶段计划见 [CI 第二阶段执行](ci-phase2-execution.md)。以下保留第一阶段历史说明；第二阶段 run 38702176804 的五个 job 全部通过，后续阶段仍待实施。
-
-2026-10-14（北京时间）。仅dev普通提交推送；main不改。全新clone无root.env，先安装Node22、Python3.11与根packageManager的pnpm12.11.2。实际registry版本/engines与Node22运行已核对，没有更改目标。pnpm12根锁原生双YAML文档由真实frozen install接受；旧web独立lock不作为CI安装入口。
-
-从仓库根执行，venv使用全新专属临时路径：
+本地复现必须使用无应用 dotenv、无历史 var 的干净 clone，完整 Git 历史；Ubuntu/Linux x86_64、Node22、Python3.11、根 packageManager 的 pnpm。venv 必须是新的专属临时路径：
 
 ```bash
-python3.11 scripts/ci/env-check.py
 python3.11 scripts/ci/env-install.py --venv /tmp/stockdepth-ci-venv
 node scripts/ci/test-frontend.cjs --install-browser --with-deps
 pnpm --dir apps/web exec tsc --noEmit --incremental false
 pnpm --dir apps/workers exec tsc --noEmit --incremental false
-/tmp/stockdepth-ci-venv/bin/python scripts/ci/test-all.py
+/tmp/stockdepth-ci-venv/bin/python scripts/ci/test-python.py
+node scripts/ci/test-frontend.cjs
+node scripts/ci/test-security.cjs
+node scripts/ci/build-web.cjs
 ```
 
-调用方finally删除专属venv/clone；测试runner自行finally删除合成fixture输出。browser支持FRONTEND_CHROMIUM显式可执行路径，默认使用锁定Playwright安装；不依赖宿主绝对路径。需完整Git历史保留既有ancestor断言。安装需要registry/PyPI/Playwright/apt网络，运行测试仅本地Mock。Python依赖由pyproject首次锁定为requirements-ci.lock（uv0.9.5、3.11、hashes），安装不复用应用venv。Linux x86_64已验证；其他平台未验证。
+调用方 finally 删除自建 clone/venv；测试入口自行删除临时夹具。浏览器支持 FRONTEND_CHROMIUM；分组使用 --group=admin / experience / coordinator。可将 CI_REPORT_DIR 设为专用非隐藏目录 ci-reports 获取 JUnit/JSON。
 
-Required checks建议：真实通过后可考虑 `Phase 1 clean clone offline regression`，以及仅作静态审查的 `Phase 0 static audit`。完整CI名称留Phase2以后确定。GitHub Settings → Rules → Rulesets选择目标分支及已有真实check，由用户配置；不自动修改。私有仓库套餐/规则权限未知，不推断支持。DB仅后续隔离PG16容器，禁止应用/云库。
+数据库入口 node scripts/ci/test-integration.cjs 只接受显式 CI_POSTGRES_URL，要求专用 PostgreSQL16 服务、127.0.0.1、非5432端口、stockdepth_ci角色和stockdepth_ci_admin库；不得指向项目库。GitHub integration.yml 自动提供该服务及健康检查。请在本地自行创建独立临时服务并确保 finally 清理，不复用应用 PG 集群。
+
+依赖扫描：pnpm audit --audit-level=high；独立工具venv安装pip-audit==2.10.1，执行 pip-audit --no-deps --disable-pip -r apps/api/requirements-ci.lock。Gitleaks 安装脚本校验固定版本二进制，扫描使用 --redact --config .gitleaks.toml --log-opts=--all。
+
+合并保护：Settings → Rules → Rulesets，为main/dev要求PR并选择实际出现的 CI required 检查、禁止force push。连接器缺少管理权限（403），未替用户启用规则。私有仓库能力以当前账号界面为准。

@@ -40,3 +40,8 @@ Required checks建议见[setup](ci-setup.md)：已真实出现的Phase1 job可�
 ## Phase 2 PR CI — 2026-10-15
 
 新增统一 CI 已在 [PR #1](https://github.com/wangtust/StockDepth/pull/1) 实际运行：[run 38702176804](https://github.com/wangtust/StockDepth/actions/runs/38702176804)，tested source `6689bb6a395ce6099f2fcf52d5db041dff13c8e3`。类型检查、Python 离线测试、4 套前端回归、生产构建及 CI required 全部成功。Python 309 passed、1 integration deselected、9 warnings。完整设计、job 时长及验证边界见 [第二阶段执行](ci-phase2-execution.md)。未合并 PR，未部署；后续数据库/安全/故障演练尚未完成。
+
+
+## Phase 3–6 accepted and deployed — 2026-10-15
+
+[失败演练38706000895](https://github.com/wangtust/StockDepth/actions/runs/38706000895)确认exit42及汇总失败；[恢复38706637161](https://github.com/wangtust/StockDepth/actions/runs/38706637161)与[main38707075289](https://github.com/wangtust/StockDepth/actions/runs/38707075289)均11 job全绿。Python309、前端13套、数据库8套、安全6套及两类依赖/历史凭据扫描通过，6份报告上传成功。PR #2 merge `202e63d`已部署，应用构建、28表检查及只读HTTP验收通过；详见[完整实施](ci-completion.md)。当前App缺少分支保护管理权限，未声称已强制启用保护。

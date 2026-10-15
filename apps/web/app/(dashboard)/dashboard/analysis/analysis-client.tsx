@@ -13,7 +13,7 @@ import {
 } from '@/components/ui/card';
 import dynamic from 'next/dynamic';
 import useSWR from 'swr';
-import { jsonFetcher } from '@/lib/http/json-fetcher';
+import { analysisFetcher, canRetainAnalysisData, shouldRetryAnalysisRead } from '@/lib/http/analysis-fetcher';
 import { pollingDefaults } from '@/lib/http/polling';
 import { ErrorPresentation } from '@/components/error-presentation';
 import { analysisStatusMessage } from '@/lib/analysis/client-status-message';
@@ -92,8 +92,8 @@ export default function AnalysisClient({ initialPayload }: { initialPayload: Job
   const jobsRefreshInterval = useCallback((data?: JobsPayload) =>
     (data ?? (before === null ? initialPayload : undefined))?.jobs.some(job => LIVE_JOB_STATUSES.has(job.status))
       ? JOBS_POLL_INTERVAL_MS : 0, [before, initialPayload]);
-  const { data: payload = { ...initialPayload, jobs: [] }, error: listError, isLoading: loading, mutate: loadJobs } = useSWR<JobsPayload>(jobsUrl, jsonFetcher, {
-    ...pollingDefaults,
+  const { data: payload = { ...initialPayload, jobs: [] }, error: listError, isLoading: loading, mutate: loadJobs } = useSWR<JobsPayload>(jobsUrl, analysisFetcher, {
+    ...pollingDefaults, shouldRetryOnError: shouldRetryAnalysisRead,
     fallbackData: before === null ? initialPayload : undefined,
     revalidateOnMount: true,
     refreshInterval: jobsRefreshInterval
@@ -130,25 +130,30 @@ export default function AnalysisClient({ initialPayload }: { initialPayload: Job
     [payload.jobs, selectedJobId]
   );
 
+  const detailRefreshInterval = useCallback((data?: { job?: { status?: string } }) =>
+    LIVE_JOB_STATUSES.has(data?.job?.status || '') ? REPORT_POLL_INTERVAL_MS : 0, []);
   const { data: detail, error: detailError, isLoading: detailLoading, mutate: refreshDetail } = useSWR(
-    selectedJobId ? `/api/analysis/jobs/${selectedJobId}` : null, jsonFetcher, {
-      ...pollingDefaults,
-      refreshInterval: data => LIVE_JOB_STATUSES.has(data?.job?.status) ? REPORT_POLL_INTERVAL_MS : 0
+    selectedJobId ? `/api/analysis/jobs/${selectedJobId}` : null, analysisFetcher, {
+      ...pollingDefaults, shouldRetryOnError: shouldRetryAnalysisRead,
+      refreshInterval: detailRefreshInterval
     }
   );
-  const selectedReports: Report[] = !detailError && detail?.job?.id === selectedJobId ? detail?.reports || [] : [];
-  const usageJob: Job | null = !detailError && detail?.job?.id === selectedJobId ? detail?.job || null : null;
-  const calls: UsageCall[] = !detailError && detail?.job?.id === selectedJobId ? detail?.calls || [] : [];
+  const selectedReports: Report[] = canRetainAnalysisData(detailError) && detail?.job?.id === selectedJobId ? detail?.reports || [] : [];
+  const usageJob: Job | null = canRetainAnalysisData(detailError) && detail?.job?.id === selectedJobId ? detail?.job || null : null;
+  const calls: UsageCall[] = canRetainAnalysisData(detailError) && detail?.job?.id === selectedJobId ? detail?.calls || [] : [];
   const statusJob = usageJob?.id === selectedJobId ? usageJob : selectedJob;
   const effectiveReportKey = selectedReports.some(r => r.reportKey === selectedReportKey)
     ? selectedReportKey : (selectedReports.find(r => r.reportKey === 'progress') || selectedReports[0])?.reportKey || selectedJob?.defaultReportKey || '';
+  const reportStatus = usageJob?.status || selectedJob?.status || '';
+  const reportRefreshInterval = useCallback(() => LIVE_JOB_STATUSES.has(reportStatus)
+    ? REPORT_POLL_INTERVAL_MS : 0, [reportStatus]);
   const { data: reportData, error: reportError, isLoading: reportLoading, mutate: refreshReport } = useSWR(
     selectedJobId && effectiveReportKey ? `/api/analysis/jobs/${selectedJobId}?report=${encodeURIComponent(effectiveReportKey)}` : null,
-    jsonFetcher, { ...pollingDefaults,
-      refreshInterval: () => LIVE_JOB_STATUSES.has(usageJob?.status || selectedJob?.status || '') ? REPORT_POLL_INTERVAL_MS : 0
+    analysisFetcher, { ...pollingDefaults, shouldRetryOnError: shouldRetryAnalysisRead,
+      refreshInterval: reportRefreshInterval
     }
   );
-  const selectedReport: Report | undefined = !detailError && !reportError && reportData?.report?.reportKey === effectiveReportKey ? reportData?.report : undefined;
+  const selectedReport: Report | undefined = canRetainAnalysisData(detailError) && canRetainAnalysisData(reportError) && reportData?.report?.reportKey === effectiveReportKey ? reportData?.report : undefined;
   const previousDetail = useRef<{ id: number; status: string; revision: string; key: string } | null>(null);
   useEffect(() => {
     if (!usageJob) return;

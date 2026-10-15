@@ -62,7 +62,7 @@ async function build(before){
     assert.equal(await evaluate('document.querySelector("[role=dialog]")'),null);
     assert.equal(await evaluate('document.body.style.overflow'),'');
     assert.equal(await evaluate('document.activeElement.getAttribute("aria-label")'),'Enter report fullscreen');
-    fail=true;await evaluate('Array.from(document.querySelectorAll("button")).find(b=>b.textContent.trim()==="Refresh").click()');await pause();
+    fail=true;await evaluate('Array.from(document.querySelectorAll("button")).find(b=>b.textContent.trim()==="Refresh").click()');await waitFor('document.body.innerText.includes("Retry")');
     const retryShot=await c('Page.captureScreenshot',{format:'png'});fs.writeFileSync(dir+'/after-retry.png',Buffer.from(retryShot.data,'base64'));assert(await evaluate('document.body.innerText.includes("Retry")'));assert(!/Traceback|synthetic-secret/.test(await evaluate('document.body.innerText')));
     fail=false;await evaluate('Array.from(document.querySelectorAll("button")).find(b=>b.textContent.trim()==="Retry").click()');await pause();
     assert(!await evaluate('document.body.innerText.includes("Unable to Load")'));
@@ -110,7 +110,7 @@ async function build(before){
       for(const [width,height] of [[390,844],[768,1024],[1440,900],[1920,1080],[2560,1440]]){
         await c('Emulation.setDeviceMetricsOverride',{width,height,deviceScaleFactor:1,mobile:width===390});
         await c('Page.navigate',{url:`http://127.0.0.1:${server.address().port}/`});await pause();
-        assert((await evaluate('document.querySelector("article")?.innerText || ""')).includes('Synthetic report'));
+        await waitFor('(document.querySelector("article")?.innerText || "").includes("Synthetic report")');
         const metrics=await evaluate(`(()=>{const a=document.querySelector('article'),m=a.firstElementChild,s=document.querySelector('section'),g=s.firstElementChild;return {pageWidth:document.documentElement.scrollWidth,viewport:innerWidth,reportWidth:m.getBoundingClientRect().width,contentWidth:g.getBoundingClientRect().width,localCodeScroll:!!Array.from(a.querySelectorAll('pre')).find(x=>x.scrollWidth>x.clientWidth),textPreserved:a.textContent.includes(${JSON.stringify(long)})}})()`);
         if(!before){assert(metrics.pageWidth<=width+1,JSON.stringify(metrics));assert(metrics.reportWidth<=850,JSON.stringify(metrics));assert(metrics.localCodeScroll);assert(metrics.textPreserved);if(width===2560)assert(metrics.contentWidth>1800);}
         const shot=await c('Page.captureScreenshot',{format:'png',captureBeyondViewport:false});fs.writeFileSync(`${dir}/${before?'before':'after'}-report-${width}.png`,Buffer.from(shot.data,'base64'));
@@ -133,7 +133,7 @@ async function build(before){
     await evaluate('Array.from(document.querySelectorAll("button")).find(b=>b.textContent==="Restore").click()');await pause();assert((await evaluate('document.body.innerText')).includes('Job restored.'));restoreFail=true;await evaluate('Array.from(document.querySelectorAll("button")).find(b=>b.textContent==="Restore").click()');await pause();const restoreText=await evaluate('document.body.innerText');assert(restoreText.includes('Unable to Complete Request'));assert(!/Traceback|synthetic-secret|\/srv\/private/.test(restoreText));restoreFail=false;
     fs.writeFileSync(dir+'/progress-results.json',JSON.stringify({status:'passed',progressResults,deletedEnglish:true,mockRestoreSuccessAndSafeFailure:true},null,2));
     await c('Page.navigate',{url:`http://127.0.0.1:${server.address().port}/`});await pause();
-    fail=true;await evaluate(`Array.from(document.querySelectorAll('button')).find(b=>b.textContent.trim()==='Refresh').click()`);await pause();const failedText=await evaluate('document.body.innerText');assert(failedText.includes('Unable to Complete Request'));assert(!/Traceback|synthetic-secret|\/srv\/private/.test(failedText));fail=false;
+    fail=true;await evaluate(`Array.from(document.querySelectorAll('button')).find(b=>b.textContent.trim()==='Refresh').click()`);await waitFor('document.body.innerText.includes("Unable to Complete Request")');const failedText=await evaluate('document.body.innerText');assert(failedText.includes('Unable to Complete Request'));assert(!/Traceback|synthetic-secret|\/srv\/private/.test(failedText));fail=false;
     const cases=[['HTTP 429','rate-limit'],['status_code: 429','rate-limit'],['openai.APITimeoutError','timeout'],['ECONNREFUSED','connection'],['openai.APIStatusError','provider'],['timeout might happen','unknown'],['provider broke','unknown'],['429 shares','unknown'],[raw,'unknown'],[null,'unknown'],[{message:'HTTP 429'},'unknown']];
     for(const [input,kind] of cases)assert.equal(await evaluate(`window.presentError(${JSON.stringify(input)}).kind`),kind);
     await evaluate(`window.showErrors(${JSON.stringify(cases.map(c=>c[0]))})`);await pause();const text=await evaluate('document.body.innerText');assert(!/Traceback|synthetic-secret|\/srv\/private|provider broke/.test(text.replaceAll('更换模型并继续','')));assert.deepEqual(errors,[]);

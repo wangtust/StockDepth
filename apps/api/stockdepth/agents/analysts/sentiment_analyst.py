@@ -51,13 +51,21 @@ def create_sentiment_analyst(llm):
         ticker = state["company_of_interest"]
         end_date = state["trade_date"]
         start_date = _seven_days_back(end_date)
-        instrument_context = build_instrument_context(ticker)
+        instrument_context = state.get("instrument_context") or build_instrument_context(ticker, state.get("asset_type", "stock"))
 
         # Pre-fetch all three sources. Each fetcher degrades gracefully and
         # returns a string (no exceptions surface from here), so the LLM
         # always sees something — either real data or a clear placeholder.
         news_block = get_news.func(ticker, start_date, end_date)
-        if is_chinese_market_ticker(ticker):
+        from stockdepth.data.config import get_config
+        cfg = get_config()
+        historical = (cfg.get("workflow_version", 1) >= 2 and not cfg.get("realtime_data")
+                      and end_date < datetime.now().strftime("%Y-%m-%d"))
+        if historical:
+            stocktwits_block = reddit_block = (
+                f"[DATA UNAVAILABLE AS OF {end_date}] Live social feeds cannot verify historical publication-time coverage."
+            )
+        elif is_chinese_market_ticker(ticker):
             stocktwits_block = (
                 "<skipped: StockTwits has weak or no coverage for A-share/HK tickers>"
             )
@@ -80,8 +88,7 @@ def create_sentiment_analyst(llm):
                 (
                     "system",
                     "You are a helpful AI assistant, collaborating with other assistants."
-                    " If you or any other assistant has the FINAL TRANSACTION PROPOSAL: **BUY/HOLD/SELL** or deliverable,"
-                    " prefix your response with FINAL TRANSACTION PROPOSAL: **BUY/HOLD/SELL** so the team knows to stop."
+                    " Report only supplied sentiment evidence. You have no external tools and do not decide the trade."
                     "\n{system_message}\n"
                     "For your reference, the current date is {current_date}. {instrument_context}",
                 ),

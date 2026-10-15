@@ -18,8 +18,16 @@ from .stockstats_utils import (
 from .utils import canonical_yahoo_symbol
 
 
-@lru_cache(maxsize=256)
 def _verified_identity_header(symbol: str) -> str:
+    cfg = get_config()
+    if (cfg.get("workflow_version", 1) >= 2 and not cfg.get("realtime_data")
+            and cfg.get("analysis_date", datetime.now().strftime("%Y-%m-%d")) < datetime.now().strftime("%Y-%m-%d")):
+        return ""
+    return _current_identity_header(symbol)
+
+
+@lru_cache(maxsize=256)
+def _current_identity_header(symbol: str) -> str:
     try:
         from .chinese_market import (
             fetch_eastmoney_stock_profile,
@@ -127,6 +135,13 @@ def get_YFin_data_online(
     yahoo_symbol = canonical_yahoo_symbol(symbol)
     scope = os.path.abspath(get_config()["data_cache_dir"])
     data = _historical_frame(yahoo_symbol, start_date, yf_end_date, scope, int(time.monotonic() // 60)).copy(deep=True)
+
+    # Enforce the requested interval even if the upstream cache/feed returns
+    # extra bars. Never let a future price enter the analyst's evidence.
+    if not data.empty:
+        dates = pd.to_datetime(data.index).date
+        data = data[(dates >= datetime.strptime(start_date, "%Y-%m-%d").date()) &
+                    (dates <= end_date_dt.date())]
 
     # Check if data is empty
     if data.empty:

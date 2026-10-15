@@ -24,27 +24,28 @@ _RATING_SET = {r.lower() for r in RATINGS_5_TIER}
 
 # Matches "Rating: X" / "rating - X" / "Rating: **X**" — tolerates markdown
 # bold wrappers and either a colon or hyphen separator.
-_RATING_LABEL_RE = re.compile(r"rating.*?[:\-][\s*]*(\w+)", re.IGNORECASE)
+_RATING_LABEL_RE = re.compile(r"^\s*(?:#{1,6}\s*)?(?:\d+[.)]\s*)?[*_]*(?:Rating|评级|最终评级)[*_]*\s*[:：\-]\s*(.+?)\s*$", re.IGNORECASE)
 
 
-def parse_rating(text: str, default: str = "Hold") -> str:
+def parse_rating(text: str, default: str = "REVIEW") -> str:
     """Heuristically extract a 5-tier rating from prose text.
 
-    Two-pass strategy:
-    1. Look for an explicit "Rating: X" label (tolerant of markdown bold).
-    2. Fall back to the first 5-tier rating word found anywhere in the text.
-
-    Returns a Title-cased rating string, or ``default`` if no rating word appears.
+    Accept an explicit rating label or a standalone rating. Invalid or
+    conflicting labels and prose-only mentions return ``default`` (REVIEW).
     """
+    if not isinstance(text, str):
+        return default
+    labels = []
     for line in text.splitlines():
         m = _RATING_LABEL_RE.search(line)
-        if m and m.group(1).lower() in _RATING_SET:
-            return m.group(1).capitalize()
-
-    for line in text.splitlines():
-        for word in line.lower().split():
-            clean = word.strip("*:.,")
-            if clean in _RATING_SET:
-                return clean.capitalize()
-
-    return default
+        if m:
+            value = m.group(1).strip().strip("*_. ").lower()
+            if value not in _RATING_SET:
+                return default
+            labels.append(value.capitalize())
+    if labels:
+        return labels[0] if len(set(labels)) == 1 else default
+    # Legacy callers may supply only the rating. Prose mentions are not a
+    # decision: e.g. "buy thesis rejected" must never become Buy.
+    bare = text.strip().strip("* .").lower()
+    return bare.capitalize() if bare in _RATING_SET else default

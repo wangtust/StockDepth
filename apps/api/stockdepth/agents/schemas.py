@@ -126,10 +126,12 @@ class TraderProposal(BaseModel):
     )
     entry_price: Optional[float] = Field(
         default=None,
+        gt=0, allow_inf_nan=False,
         description="Optional entry price target in the instrument's quote currency.",
     )
     stop_loss: Optional[float] = Field(
         default=None,
+        gt=0, allow_inf_nan=False,
         description="Optional stop-loss price in the instrument's quote currency.",
     )
     position_sizing: Optional[str] = Field(

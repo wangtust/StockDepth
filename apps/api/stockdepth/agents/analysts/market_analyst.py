@@ -1,3 +1,4 @@
+from stockdepth.agents.analysts.turn import take_turn
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from stockdepth.agents.utils.agent_utils import (
     build_instrument_context,
@@ -14,7 +15,7 @@ def create_market_analyst(llm):
         current_date = state["trade_date"]
         asset_type = state.get("asset_type", "stock")
         realtime_data = bool(get_config().get("realtime_data"))
-        instrument_context = build_instrument_context(
+        instrument_context = state.get("instrument_context") or build_instrument_context(
             state["company_of_interest"], asset_type
         )
         realtime_instruction = (
@@ -67,8 +68,7 @@ Volume-Based Indicators:
                     " Use the provided tools to progress towards answering the question."
                     " If you are unable to fully answer, that's OK; another assistant with different tools"
                     " will help where you left off. Execute what you can to make progress."
-                    " If you or any other assistant has the FINAL TRANSACTION PROPOSAL: **BUY/HOLD/SELL** or deliverable,"
-                    " prefix your response with FINAL TRANSACTION PROPOSAL: **BUY/HOLD/SELL** so the team knows to stop."
+                    " Report only supported research findings and missing evidence. Another role decides the trade."
                     " You have access to the following tools: {tool_names}.\n{system_message}"
                     "For your reference, the current date is {current_date}. {instrument_context}{realtime_instruction}",
                 ),
@@ -76,15 +76,14 @@ Volume-Based Indicators:
             ]
         )
 
+        system_message = str(system_message) + "\n" + state.get("market_evidence", "")
         prompt = prompt.partial(system_message=system_message)
         prompt = prompt.partial(tool_names=", ".join([tool.name for tool in tools]))
         prompt = prompt.partial(current_date=current_date)
         prompt = prompt.partial(instrument_context=instrument_context)
         prompt = prompt.partial(realtime_instruction=realtime_instruction)
 
-        chain = prompt | llm.bind_tools(tools)
-
-        result = chain.invoke(state["messages"])
+        result = take_turn(prompt, llm, tools, state["messages"])
 
         report = ""
 

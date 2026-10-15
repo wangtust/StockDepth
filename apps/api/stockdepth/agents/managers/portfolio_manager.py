@@ -10,6 +10,8 @@ back gracefully to free-text generation.
 
 from __future__ import annotations
 
+from stockdepth.agents.context import decision_context
+
 from stockdepth.agents.schemas import PortfolioDecision, render_pm_decision
 from stockdepth.agents.utils.agent_utils import (
     build_instrument_context,
@@ -61,7 +63,7 @@ def create_portfolio_manager(llm):
 
 ---
 
-Be decisive and ground every conclusion in specific evidence from the analysts.{get_language_instruction()}"""
+Be decisive and ground every conclusion in specific evidence from the analysts.{get_language_instruction()}""" + "\n" + decision_context(state)
 
         final_trade_decision = invoke_structured_or_freetext(
             structured_llm,

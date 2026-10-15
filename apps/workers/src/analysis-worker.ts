@@ -214,6 +214,9 @@ async function startStockDepth(job: ClaimedJob) {
     body: JSON.stringify({
       run_id: runIdFor(job),
       job_id: job.id,
+      memory_owner: job.userId,
+      analyst_concurrency: Number(process.env.STOCKDEPTH_ANALYST_CONCURRENCY || 4),
+      max_tool_rounds: Number(process.env.STOCKDEPTH_MAX_TOOL_ROUNDS || 5),
       ticker: job.ticker,
       date: job.tradeDate,
       realtime_data: job.realtimeData,

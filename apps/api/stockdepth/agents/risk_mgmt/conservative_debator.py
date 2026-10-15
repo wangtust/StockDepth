@@ -1,3 +1,4 @@
+from stockdepth.agents.context import decision_context, report_or_absent, opponent_argument_or_opening
 from stockdepth.agents.utils.agent_utils import get_language_instruction
 
 
@@ -7,13 +8,13 @@ def create_conservative_debator(llm):
         history = risk_debate_state.get("history", "")
         conservative_history = risk_debate_state.get("conservative_history", "")
 
-        current_aggressive_response = risk_debate_state.get("current_aggressive_response", "")
-        current_neutral_response = risk_debate_state.get("current_neutral_response", "")
+        current_aggressive_response = opponent_argument_or_opening(risk_debate_state.get("current_aggressive_response", ""), "aggressive analyst")
+        current_neutral_response = opponent_argument_or_opening(risk_debate_state.get("current_neutral_response", ""), "neutral analyst")
 
-        market_research_report = state["market_report"]
-        sentiment_report = state["sentiment_report"]
-        news_report = state["news_report"]
-        fundamentals_report = state["fundamentals_report"]
+        market_research_report = report_or_absent(state.get("market_report"), "market")
+        sentiment_report = report_or_absent(state.get("sentiment_report"), "sentiment")
+        news_report = report_or_absent(state.get("news_report"), "news")
+        fundamentals_report = report_or_absent(state.get("fundamentals_report"), "fundamentals")
 
         trader_decision = state["trader_investment_plan"]
 
@@ -29,7 +30,7 @@ Latest World Affairs Report: {news_report}
 Company Fundamentals Report: {fundamentals_report}
 Here is the current conversation history: {history} Here is the last response from the aggressive analyst: {current_aggressive_response} Here is the last response from the neutral analyst: {current_neutral_response}. If there are no responses from the other viewpoints yet, present your own argument based on the available data.
 
-Engage by questioning their optimism and emphasizing the potential downsides they may have overlooked. Address each of their counterpoints to showcase why a conservative stance is ultimately the safest path for the firm's assets. Focus on debating and critiquing their arguments to demonstrate the strength of a low-risk strategy over their approaches. Output conversationally as if you are speaking without any special formatting.""" + get_language_instruction()
+Engage by questioning their optimism and emphasizing the potential downsides they may have overlooked. Address each of their counterpoints to showcase why a conservative stance is ultimately the safest path for the firm's assets. Focus on debating and critiquing their arguments to demonstrate the strength of a low-risk strategy over their approaches. Output conversationally as if you are speaking without any special formatting.""" + "\n" + decision_context(state) + get_language_instruction()
 
         response = llm.invoke(prompt)
 

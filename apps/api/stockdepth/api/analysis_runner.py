@@ -7,17 +7,20 @@ import hashlib
 import logging
 import os
 import atexit
+import time
 from pathlib import Path
 
 from dotenv import load_dotenv
 
 from stockdepth.api.report_persistence import ReportPersistence, signature
 from stockdepth.api.usage import UsageRecorder
+from stockdepth.api.execution_metrics import save_execution_metrics
 from stockdepth.api.timing import TimingRecorder, CURRENT_TIMING
 from stockdepth.data.utils import safe_ticker_component
 from stockdepth.default_config import DEFAULT_CONFIG
 from stockdepth.workflows.checkpointer import clear_checkpoint, checkpoint_step, get_checkpointer, thread_id
 from stockdepth.workflows.trading_graph import StockDepthGraph
+from stockdepth.workflows.execution_config import execution_config
 
 
 REPORT_MAP = {
@@ -115,6 +118,18 @@ def build_complete_report(state: dict, ticker: str) -> str:
         f"Generated: {dt.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
     ]
 
+    if state.get("decision_rating"):
+        sections.append("Validated rating: " + state["decision_rating"])
+    if state.get("research_status"):
+        sections.append("Research completeness: " + ", ".join(f"{k}: {v}" for k, v in state["research_status"].items()))
+
+    if state.get("market_evidence"):
+        sections.append("## Market Evidence\n\n" + state["market_evidence"])
+    if state.get("memory_note"):
+        sections.append("Memory note: " + state["memory_note"])
+    if state.get("portfolio_context"):
+        sections.append(state["portfolio_context"])
+
     analyst_parts = []
     for key in ("market_report", "sentiment_report", "news_report", "fundamentals_report"):
         title = REPORT_MAP[key][1]
@@ -156,6 +171,16 @@ def build_complete_report(state: dict, ticker: str) -> str:
     return "\n\n".join(sections) + "\n"
 
 
+def publishable_state(state: dict, workflow_version: int) -> dict:
+    """Do not publish a tradable PM report before v2 validation completes."""
+    if workflow_version < 2 or state.get("decision_rating"):
+        return state
+    public = {k: v for k, v in state.items() if k != "final_trade_decision"}
+    public["risk_debate_state"] = {k: v for k, v in (state.get("risk_debate_state") or {}).items()
+                                  if k != "judge_decision"}
+    return public
+
+
 def save_state_json(state: dict, path: Path, persistence: ReportPersistence | None = None) -> None:
     payload = {k: v for k, v in state.items() if k != "messages"}
     (persistence or ReportPersistence()).save_state(payload, path)
@@ -176,6 +201,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--run-id", default=None)
     parser.add_argument("--realtime-data", action="store_true")
     parser.add_argument("--checkpoint", action="store_true")
+    parser.add_argument("--analyst-concurrency", type=int, choices=(1, 2, 4), default=None)
+    parser.add_argument("--max-tool-rounds", type=int, default=None)
+    parser.add_argument("--memory-owner", default=None)
+    parser.add_argument("--portfolio-file", default=None)
     return parser.parse_args()
 
 
@@ -187,6 +216,8 @@ def main() -> None:
     # Local defaults must not overwrite credentials supplied for this run.
     load_dotenv(Path(__file__).resolve().parents[4] / ".env", override=False)
 
+    if args.date != dt.date.fromisoformat(args.date).isoformat():
+        raise ValueError("Analysis date must use YYYY-MM-DD")
     ticker = args.ticker.strip().upper()
     run_id = args.run_id.strip() if args.run_id else None
     analysts = [item.strip() for item in args.analysts.split(",") if item.strip()]
@@ -195,6 +226,23 @@ def main() -> None:
     config["max_risk_discuss_rounds"] = args.depth
     config["output_language"] = args.language
     config["realtime_data"] = args.realtime_data
+    config["analysis_date"] = args.date
+    config["analysis_ticker"] = ticker
+    portfolio = None
+    portfolio_raw = Path(args.portfolio_file).read_text() if args.portfolio_file else os.environ.get("STOCKDEPTH_PORTFOLIO_CONTEXT")
+    if portfolio_raw:
+        from stockdepth.agents.portfolio import PortfolioContext
+        portfolio = PortfolioContext.model_validate_json(portfolio_raw)
+        config["portfolio_fingerprint"] = portfolio.fingerprint()
+    if args.analyst_concurrency is not None:
+        config["analyst_concurrency_limit"] = args.analyst_concurrency
+    if args.max_tool_rounds is not None:
+        config["max_tool_rounds"] = args.max_tool_rounds
+    if run_id and not args.memory_owner:
+        # An unscoped SaaS run must not read the CLI global memory file.
+        config["memory_log_path"] = None
+    elif args.memory_owner:
+        config["memory_owner"] = args.memory_owner
     model_configs = json.loads(os.environ.get("STOCKDEPTH_MODEL_CONFIGS", "{}"))
     if model_configs:
         if not all(isinstance(model_configs.get(role), dict) for role in ("quick", "deep")):
@@ -217,9 +265,16 @@ def main() -> None:
         run_dir = Path(config["results_dir"]) / "runs" / safe_ticker_component(run_id, max_len=120)
     else:
         run_dir = Path(config["results_dir"]) / safe_ticker / args.date
+    if run_id:
+        config["run_state_dir"] = str(run_dir / "state_logs")
     report_dir = run_dir / "reports"
     report_dir.mkdir(parents=True, exist_ok=True)
     persistence = ReportPersistence()
+    resume = args.checkpoint and checkpoint_step(config["data_cache_dir"], ticker, args.date, run_id=run_id) is not None
+    frozen = execution_config(run_dir, config, analysts, resume=resume, owner=args.memory_owner)
+    config["workflow_version"] = frozen["workflow_version"]
+    config["frozen_analyst_concurrency"] = frozen["analyst_concurrency_limit"]
+    config["max_tool_rounds"] = frozen["max_tool_rounds"]
 
     job_id = os.environ.get("STOCKDEPTH_JOB_ID")
     callbacks = [UsageRecorder(run_dir / "usage.json", job_id=int(job_id) if job_id else None)]
@@ -229,11 +284,17 @@ def main() -> None:
         CURRENT_TIMING.set(timing)
         callbacks.append(timing)
         atexit.register(timing.close)
+    started_at = time.perf_counter()
+    succeeded = False
     graph = StockDepthGraph(selected_analysts=analysts, debug=False, config=config, callbacks=callbacks)
     graph.ticker = ticker
-    graph._resolve_pending_entries(ticker)
+    if config["workflow_version"] == 1:
+        graph._resolve_pending_entries(ticker)
 
     state = graph.propagator.create_initial_state(ticker, args.date, asset_type=args.asset_type)
+    from stockdepth.agents.context import instrument_context
+    state["instrument_context"] = instrument_context(state)
+    state["portfolio_context"] = portfolio.render() if portfolio else ""
     graph_args = graph.propagator.get_graph_args()
     graph_args.setdefault("config", {})["callbacks"] = callbacks
     checkpointer_ctx = None
@@ -259,15 +320,23 @@ def main() -> None:
             final_state.update(graph.graph.get_state(graph_args["config"]).values)
 
     try:
-        for chunk in graph.graph.stream(stream_input, **graph_args):
+        for namespace, chunk in graph.graph.stream(stream_input, subgraphs=True, **graph_args):
+            if namespace:
+                # Private tool histories reach live progress without being
+                # merged into sibling/parent analyst inputs.
+                save_progress(chunk, report_dir, persistence)
+                continue
             final_state.update(chunk)
             save_progress(final_state, report_dir, persistence)
-            save_report_parts(final_state, report_dir, persistence)
-            persistence.save_complete(final_state, report_dir / "complete_report.md", ticker, build_complete_report)
+            public = publishable_state(final_state, frozen["workflow_version"])
+            save_report_parts(public, report_dir, persistence)
+            persistence.save_complete(public, report_dir / "complete_report.md", ticker, build_complete_report)
             save_state_json(final_state, run_dir / "latest_state.json", persistence)
             if timing:
                 timing.flush()
 
+        if frozen["workflow_version"] >= 2 and not final_state.get("decision_rating"):
+            raise RuntimeError("Final decision validation did not complete")
         if final_state.get("final_trade_decision"):
             graph.curr_state = final_state
             graph._log_state(args.date, final_state)
@@ -279,18 +348,23 @@ def main() -> None:
             if args.checkpoint:
                 clear_checkpoint(config["data_cache_dir"], ticker, args.date, run_id=run_id)
             print(graph.process_signal(final_state["final_trade_decision"]))
+            succeeded = True
     finally:
-        if final_state:
-            save_progress(final_state, report_dir, persistence)
-            save_report_parts(final_state, report_dir, persistence)
-            persistence.save_complete(final_state, report_dir / "complete_report.md", ticker, build_complete_report)
-            save_state_json(final_state, run_dir / "latest_state.json", persistence)
-            print(f"Reports saved under: {report_dir}")
-        if checkpointer_ctx is not None:
-            checkpointer_ctx.__exit__(None, None, None)
-        if timing:
-            timing.close()
-        CURRENT_TIMING.set(None)
+        try:
+            save_execution_metrics(run_dir, frozen, time.perf_counter() - started_at, succeeded, persistence)
+            if final_state:
+                save_progress(final_state, report_dir, persistence)
+                public = publishable_state(final_state, frozen["workflow_version"])
+                save_report_parts(public, report_dir, persistence)
+                persistence.save_complete(public, report_dir / "complete_report.md", ticker, build_complete_report)
+                save_state_json(final_state, run_dir / "latest_state.json", persistence)
+                print(f"Reports saved under: {report_dir}")
+        finally:
+            if checkpointer_ctx is not None:
+                checkpointer_ctx.__exit__(None, None, None)
+            if timing:
+                timing.close()
+            CURRENT_TIMING.set(None)
 
 
 if __name__ == "__main__":

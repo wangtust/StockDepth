@@ -35,7 +35,7 @@ def get_language_instruction() -> str:
     lang = get_config().get("output_language", "English")
     if lang.strip().lower() == "english":
         return ""
-    return f" Write your entire response in {lang}."
+    return f" Write prose in {lang}, but keep machine-readable Rating, Action and FINAL TRANSACTION PROPOSAL labels and their values in English."
 
 
 @lru_cache(maxsize=256)
@@ -66,7 +66,12 @@ def resolve_instrument_identity(ticker: str) -> str:
 def build_instrument_context(ticker: str, asset_type: str = "stock") -> str:
     """Describe the exact instrument so agents preserve exchange-qualified tickers."""
     instrument_label = "asset" if asset_type == "crypto" else "instrument"
-    identity = resolve_instrument_identity(ticker) if asset_type != "crypto" else ""
+    from stockdepth.data.config import get_config
+    from datetime import date
+    cfg = get_config()
+    historical = (cfg.get("workflow_version", 1) >= 2 and not cfg.get("realtime_data")
+                  and cfg.get("analysis_date", date.today().isoformat()) < date.today().isoformat())
+    identity = resolve_instrument_identity(ticker) if asset_type != "crypto" and not historical else ""
     identity_hint = (
         " Verified instrument identity: "
         f"{identity}. Treat this identity as authoritative for naming; do not infer, "

@@ -61,7 +61,7 @@ def local_data(key: str) -> str:
     return f'{key}-private-tool-result'
 
 
-def mock_workflow(concurrency, model, selected=None):
+def mock_workflow(concurrency, model, selected=None, **options):
     selected = selected or ['market','news','social','fundamentals']
     plan = build_analyst_execution_plan(selected,concurrency)
     def factory(spec):
@@ -85,7 +85,7 @@ def mock_workflow(concurrency, model, selected=None):
             if name=='should_continue_risk_analysis': return lambda state:'Portfolio Manager'
             raise AttributeError(name)
     with patch.multiple(setup, **{f'create_{name}':factory(spec) for spec in plan.specs for name in [{'market':'market_analyst','news':'news_analyst','social':'sentiment_analyst','fundamentals':'fundamentals_analyst'}[spec.key]]}), patch.multiple(setup,**{f'create_{name}':lambda llm:downstream for name in ['bull_researcher','bear_researcher','research_manager','trader','aggressive_debator','neutral_debator','conservative_debator','portfolio_manager']}):
-        return setup.GraphSetup(model,model,{s.key:ToolNode([local_data]) for s in plan.specs},Logic(),concurrency).setup_graph([s.key for s in plan.specs])
+        return setup.GraphSetup(model,model,{s.key:ToolNode([local_data]) for s in plan.specs},Logic(),concurrency, **options).setup_graph([s.key for s in plan.specs])
 
 
 def initial():

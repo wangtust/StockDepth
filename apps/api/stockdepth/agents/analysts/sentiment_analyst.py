@@ -57,7 +57,15 @@ def create_sentiment_analyst(llm):
         # returns a string (no exceptions surface from here), so the LLM
         # always sees something — either real data or a clear placeholder.
         news_block = get_news.func(ticker, start_date, end_date)
-        if is_chinese_market_ticker(ticker):
+        from stockdepth.data.config import get_config
+        cfg = get_config()
+        historical = (cfg.get("workflow_version", 1) >= 2 and not cfg.get("realtime_data")
+                      and end_date < datetime.now().strftime("%Y-%m-%d"))
+        if historical:
+            stocktwits_block = reddit_block = (
+                f"[DATA UNAVAILABLE AS OF {end_date}] Live social feeds cannot verify historical publication-time coverage."
+            )
+        elif is_chinese_market_ticker(ticker):
             stocktwits_block = (
                 "<skipped: StockTwits has weak or no coverage for A-share/HK tickers>"
             )

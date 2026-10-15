@@ -6,6 +6,7 @@ for (const [text,action] of [
   ['FINAL TRANSACTION PROPOSAL: **BUY**','buy'],['**最终评级**：持有','hold'],
   ['Buy now or sell later? Hold could be better.',null],
   ['**Rating**: Overweight\nFINAL TRANSACTION PROPOSAL: BUY',null],
+  ['**Rating**: REVIEW\nOriginal assessment:\n**Rating**: Buy',null],
   ['**Rating**: Underweight','sell'],['评级：减持','sell'],['评级：低配','sell'],
   ['## 一、最终评级\n\n**Underweight（减持）**\n\n正文提及 Buy 或 Hold。','sell'],
   ['Rating: Underweight if prices drop',null],['Rating: Underweight\nRating: Hold',null],['Rating: Buy\nRating: Sell',null],

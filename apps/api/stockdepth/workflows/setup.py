@@ -8,7 +8,9 @@ from stockdepth.agents import *
 from stockdepth.agents.utils.agent_states import AgentState
 
 from .analyst_execution import build_analyst_execution_plan
-from .parallel_analysts import add_parallel_analysts
+from .parallel_analysts import add_parallel_analysts, bounded_analyst
+from .data_guard import guarded_tools
+from .research_validation import report_barrier, validate_decision
 from .conditional_logic import ConditionalLogic
 
 
@@ -22,6 +24,9 @@ class GraphSetup:
         tool_nodes: Dict[str, ToolNode],
         conditional_logic: ConditionalLogic,
         analyst_concurrency_limit: int = 1,
+        workflow_version: int = 1,
+        max_tool_rounds: int = 5,
+        memory_node=None,
     ):
         """Initialize with required components."""
         self.quick_thinking_llm = quick_thinking_llm
@@ -29,6 +34,9 @@ class GraphSetup:
         self.tool_nodes = tool_nodes
         self.conditional_logic = conditional_logic
         self.analyst_concurrency_limit = analyst_concurrency_limit
+        self.workflow_version = workflow_version
+        self.max_tool_rounds = max_tool_rounds
+        self.memory_node = memory_node
 
     def setup_graph(
         self, selected_analysts=["market", "social", "news", "fundamentals"]
@@ -54,6 +62,13 @@ class GraphSetup:
             "fundamentals": lambda: create_fundamentals_analyst(self.quick_thinking_llm),
         }
 
+        for spec in plan.specs:
+            factory = analyst_factories[spec.key]
+            analyst_factories[spec.key] = lambda spec=spec, factory=factory: bounded_analyst(spec, factory(), self.max_tool_rounds)
+
+        if self.workflow_version >= 2:
+            self.tool_nodes = {key: guarded_tools(node) for key, node in self.tool_nodes.items()}
+
         # Create researcher and manager nodes
         bull_researcher_node = create_bull_researcher(self.quick_thinking_llm)
         bear_researcher_node = create_bear_researcher(self.quick_thinking_llm)
@@ -70,7 +85,7 @@ class GraphSetup:
         workflow = StateGraph(AgentState)
 
         # Serial topology and names remain unchanged for old checkpoints.
-        if plan.concurrency_limit == 1:
+        if plan.concurrency_limit == 1 and self.workflow_version == 1:
             for spec in plan.specs:
                 workflow.add_node(spec.agent_node, analyst_factories[spec.key]())
                 workflow.add_node(spec.clear_node, create_msg_delete())
@@ -78,11 +93,19 @@ class GraphSetup:
         else:
             add_parallel_analysts(
                 workflow, plan, analyst_factories, self.tool_nodes,
-                self.conditional_logic, "Bull Researcher",
+                self.conditional_logic, "Research Reports Ready" if self.workflow_version >= 2 else "Bull Researcher",
             )
+
+        if self.workflow_version >= 2:
+            workflow.add_node("Research Reports Ready", report_barrier(plan))
+            workflow.add_node("Memory Log", self.memory_node or (lambda state: {"past_context": ""}))
+            workflow.add_edge(START, "Memory Log")
+            workflow.add_node("Validate Decision", validate_decision)
 
         # Add other nodes
         workflow.add_node("Bull Researcher", bull_researcher_node)
+        if self.workflow_version >= 2:
+            workflow.add_edge(["Research Reports Ready", "Memory Log"], "Bull Researcher")
         workflow.add_node("Bear Researcher", bear_researcher_node)
         workflow.add_node("Research Manager", research_manager_node)
         workflow.add_node("Trader", trader_node)
@@ -91,7 +114,7 @@ class GraphSetup:
         workflow.add_node("Conservative Analyst", conservative_analyst)
         workflow.add_node("Portfolio Manager", portfolio_manager_node)
 
-        if plan.concurrency_limit == 1:
+        if plan.concurrency_limit == 1 and self.workflow_version == 1:
             # Define edges
             # Start with the first analyst
             workflow.add_edge(START, plan.specs[0].agent_node)
@@ -116,50 +139,19 @@ class GraphSetup:
                 else:
                     workflow.add_edge(current_clear, "Bull Researcher")
 
-        # Add remaining edges
-        workflow.add_conditional_edges(
-            "Bull Researcher",
-            self.conditional_logic.should_continue_debate,
-            {
-                "Bear Researcher": "Bear Researcher",
-                "Research Manager": "Research Manager",
-            },
-        )
-        workflow.add_conditional_edges(
-            "Bear Researcher",
-            self.conditional_logic.should_continue_debate,
-            {
-                "Bull Researcher": "Bull Researcher",
-                "Research Manager": "Research Manager",
-            },
-        )
+        debate_paths = {name: name for name in ("Bull Researcher", "Bear Researcher", "Research Manager")}
+        risk_paths = {name: name for name in ("Aggressive Analyst", "Conservative Analyst", "Neutral Analyst", "Portfolio Manager")}
+        for node in ("Bull Researcher", "Bear Researcher"):
+            workflow.add_conditional_edges(node, self.conditional_logic.should_continue_debate, debate_paths)
         workflow.add_edge("Research Manager", "Trader")
         workflow.add_edge("Trader", "Aggressive Analyst")
-        workflow.add_conditional_edges(
-            "Aggressive Analyst",
-            self.conditional_logic.should_continue_risk_analysis,
-            {
-                "Conservative Analyst": "Conservative Analyst",
-                "Portfolio Manager": "Portfolio Manager",
-            },
-        )
-        workflow.add_conditional_edges(
-            "Conservative Analyst",
-            self.conditional_logic.should_continue_risk_analysis,
-            {
-                "Neutral Analyst": "Neutral Analyst",
-                "Portfolio Manager": "Portfolio Manager",
-            },
-        )
-        workflow.add_conditional_edges(
-            "Neutral Analyst",
-            self.conditional_logic.should_continue_risk_analysis,
-            {
-                "Aggressive Analyst": "Aggressive Analyst",
-                "Portfolio Manager": "Portfolio Manager",
-            },
-        )
+        for node in ("Aggressive Analyst", "Conservative Analyst", "Neutral Analyst"):
+            workflow.add_conditional_edges(node, self.conditional_logic.should_continue_risk_analysis, risk_paths)
 
-        workflow.add_edge("Portfolio Manager", END)
+        if self.workflow_version >= 2:
+            workflow.add_edge("Portfolio Manager", "Validate Decision")
+            workflow.add_edge("Validate Decision", END)
+        else:
+            workflow.add_edge("Portfolio Manager", END)
 
         return workflow

@@ -44,6 +44,9 @@ class RiskDebateState(TypedDict):
 
 
 class AgentState(MessagesState):
+    research_status: dict[str, str]
+    decision_rating: str
+    decision_validation: list[str]
     company_of_interest: Annotated[str, "Company that we are interested in trading"]
     asset_type: Annotated[str, "Asset type under analysis such as stock or crypto"]
     trade_date: Annotated[str, "What date we are trading at"]

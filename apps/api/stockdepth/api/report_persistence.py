@@ -70,7 +70,8 @@ class ReportPersistence:
     def save_complete(self, state: dict, path: Path, ticker: str, builder):
         keys = ('market_report', 'sentiment_report', 'news_report', 'fundamentals_report',
                 'investment_plan', 'trader_investment_plan', 'final_trade_decision',
-                'investment_debate_state', 'risk_debate_state')
+                'investment_debate_state', 'risk_debate_state',
+                'research_status', 'decision_rating', 'decision_validation')
         payload = {key: state.get(key) for key in keys}
         cached = self.snapshots.get(path)
         if cached and cached[0] == signature(path) and cached[1] == (ticker, payload):

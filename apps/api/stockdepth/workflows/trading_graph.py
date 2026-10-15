@@ -1,6 +1,7 @@
 # StockDepth/graph/trading_graph.py
 
 import logging
+import math
 from copy import deepcopy
 import os
 from pathlib import Path
@@ -15,6 +16,7 @@ logger = logging.getLogger(__name__)
 from langgraph.prebuilt import ToolNode
 
 from stockdepth.providers import create_llm_client
+from stockdepth.providers.request_gate import RequestGate
 
 from stockdepth.agents import *
 from stockdepth.default_config import DEFAULT_CONFIG
@@ -98,7 +100,12 @@ class StockDepthGraph:
             self.deep_thinking_llm,
             self.tool_nodes,
             self.conditional_logic,
-            analyst_concurrency_limit=effective_analyst_concurrency(self.config),
+            analyst_concurrency_limit=(self.config["frozen_analyst_concurrency"]
+                                       if "frozen_analyst_concurrency" in self.config
+                                       else effective_analyst_concurrency(self.config)),
+            workflow_version=self.config.get("workflow_version", 1),
+            max_tool_rounds=self.config.get("max_tool_rounds", 5),
+            memory_node=self._memory_node,
         )
 
         self.propagator = Propagator(
@@ -116,6 +123,15 @@ class StockDepthGraph:
         self.workflow = self.graph_setup.setup_graph(selected_analysts)
         self.graph = self.workflow.compile()
         self._checkpointer_ctx = None
+
+    def _memory_node(self, state):
+        # Historical runs must never settle outcomes using prices fetched today.
+        as_of = state["trade_date"]
+        if as_of >= datetime.now().strftime("%Y-%m-%d"):
+            self._resolve_pending_entries(state["company_of_interest"])
+        return {"past_context": self.memory_log.get_past_context(
+            state["company_of_interest"], as_of=as_of
+        )}
 
     def _get_provider_kwargs(self) -> Dict[str, Any]:
         """Get provider-specific kwargs for LLM client creation."""
@@ -158,8 +174,18 @@ class StockDepthGraph:
             base_url = self.config.get("backend_url")
             kwargs = self._get_provider_kwargs()
             metadata = {"model_role": role, "model_provider": provider, "model_name": model}
-        if self.callbacks:
-            kwargs["callbacks"] = self.callbacks
+        capacity = kwargs.pop("request_concurrency", 1)
+        # All SDKs receive explicit finite deadlines/retry budgets, including
+        # native providers. Queuing is bounded separately by the same timeout.
+        timeout = kwargs.setdefault("timeout", 600)
+        retries = kwargs.setdefault("max_retries", int(os.environ.get("STOCKDEPTH_MODEL_MAX_RETRIES", "2")))
+        if isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or not math.isfinite(timeout) or not 0 < timeout <= 3600:
+            raise ValueError("Model timeout must be between 0 and 3600 seconds")
+        if type(retries) is not int or not 0 <= retries <= 5:
+            raise ValueError("Model retries must be between 0 and 5")
+        scope = f"{provider}:{(base_url or 'default').rstrip('/')}:{metadata.get('model_config_id', 'cli')}"
+        gate = RequestGate(scope, capacity, wait_timeout=timeout)
+        kwargs["callbacks"] = [gate, *self.callbacks]
         llm = create_llm_client(provider=provider, model=model, base_url=base_url, **kwargs).get_llm()
         # Model methods such as bind_tools/with_structured_output bypass a
         # with_config wrapper. Keep identity on the model used by every path.
@@ -326,7 +352,8 @@ class StockDepthGraph:
         self.ticker = company_name
 
         # Resolve any pending memory-log entries for this ticker before the pipeline runs.
-        self._resolve_pending_entries(company_name)
+        if self.config.get("workflow_version", 1) == 1:
+            self._resolve_pending_entries(company_name)
 
         # Recompile with a checkpointer if the user opted in.
         if self.config.get("checkpoint_enabled"):
@@ -357,7 +384,7 @@ class StockDepthGraph:
     def _run_graph(self, company_name, trade_date, asset_type: str = "stock"):
         """Execute the graph and write the resulting state to disk and memory log."""
         # Initialize state — inject memory log context for PM.
-        past_context = self.memory_log.get_past_context(company_name)
+        past_context = self.memory_log.get_past_context(company_name, as_of=str(trade_date)) if self.config.get("workflow_version", 1) == 1 else ""
         init_agent_state = self.propagator.create_initial_state(
             company_name, trade_date, asset_type=asset_type, past_context=past_context
         )
@@ -368,9 +395,13 @@ class StockDepthGraph:
             tid = thread_id(company_name, str(trade_date))
             args.setdefault("config", {}).setdefault("configurable", {})["thread_id"] = tid
 
+        stream_input = init_agent_state
+        if self.config.get("checkpoint_enabled") and self.graph.get_state(args["config"]).next:
+            stream_input = None
+
         if self.debug:
             trace = []
-            for chunk in self.graph.stream(init_agent_state, **args):
+            for chunk in self.graph.stream(stream_input, **args):
                 if len(chunk["messages"]) == 0:
                     pass
                 else:
@@ -382,7 +413,7 @@ class StockDepthGraph:
             for chunk in trace:
                 final_state.update(chunk)
         else:
-            final_state = self.graph.invoke(init_agent_state, **args)
+            final_state = self.graph.invoke(stream_input, **args)
 
         # Store current state for reflection.
         self.curr_state = final_state
@@ -440,7 +471,8 @@ class StockDepthGraph:
         # Save to file. Reject ticker values that would escape the
         # results directory when joined as a path component.
         safe_ticker = safe_ticker_component(self.ticker)
-        directory = Path(self.config["results_dir"]) / safe_ticker / "StockDepthStrategy_logs"
+        directory = (Path(self.config["run_state_dir"]) if self.config.get("run_state_dir")
+                     else Path(self.config["results_dir"]) / safe_ticker / "StockDepthStrategy_logs")
         directory.mkdir(parents=True, exist_ok=True)
 
         log_path = directory / f"full_states_log_{trade_date}.json"

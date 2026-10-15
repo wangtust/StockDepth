@@ -49,6 +49,7 @@ REPORT_ORDER = [
     ("neutral", "Neutral Risk", ["4_risk/neutral.md"]),
     ("decision", "Portfolio Decision", ["final_trade_decision.md", "5_portfolio/decision.md"]),
     ("complete", "Complete Report", ["complete_report.md"]),
+    ("execution", "Execution Metrics", ["execution_summary.md"]),
 ]
 
 LANGUAGE_OPTIONS = [
@@ -360,6 +361,9 @@ class Handler(SimpleHTTPRequestHandler):
             run_id = str(payload.get("run_id") or "").strip()
             ticker = str(payload.get("ticker") or "").strip().upper()
             date = str(payload.get("date") or DEFAULT_DATE).strip()
+            from datetime import date as calendar_date
+            if calendar_date.fromisoformat(date).isoformat() != date:
+                raise ValueError("Analysis date must use YYYY-MM-DD")
             language = str(payload.get("language") or "Chinese")
             depth = int(payload.get("depth") or 1)
             realtime_data = bool(payload.get("realtime_data"))
@@ -408,6 +412,18 @@ class Handler(SimpleHTTPRequestHandler):
                 ",".join(str(a) for a in analysts),
                 "--checkpoint",
             ]
+            concurrency = payload.get("analyst_concurrency", int(os.environ.get("STOCKDEPTH_ANALYST_CONCURRENCY", "1")))
+            rounds = payload.get("max_tool_rounds", int(os.environ.get("STOCKDEPTH_MAX_TOOL_ROUNDS", "5")))
+            if type(concurrency) is not int or concurrency not in (1, 2, 4):
+                raise ValueError("analyst_concurrency must be 1, 2 or 4")
+            if type(rounds) is not int or not 1 <= rounds <= 20:
+                raise ValueError("max_tool_rounds must be between 1 and 20")
+            cmd.extend(["--analyst-concurrency", str(concurrency), "--max-tool-rounds", str(rounds)])
+            if payload.get("memory_owner") is not None:
+                owner = payload["memory_owner"]
+                if type(owner) is not int or owner < 1:
+                    raise ValueError("memory_owner must be a positive user ID")
+                cmd.extend(["--memory-owner", str(owner)])
             if not models:
                 if provider: cmd.extend(["--provider", provider])
                 if payload.get("base_url"): cmd.extend(["--base-url", str(payload["base_url"])])

@@ -3,8 +3,29 @@
 from typing import List, Optional
 from pathlib import Path
 import re
+import hashlib
+import threading
+import fcntl
+from functools import wraps
+from datetime import date
 
 from stockdepth.agents.utils.rating import parse_rating
+
+
+def synchronized(method):
+    @wraps(method)
+    def call(self, *args, **kwargs):
+        with self._thread_lock:
+            if not self._log_path or self._locked:
+                return method(self, *args, **kwargs)
+            with self._log_path.with_suffix('.lock').open('a') as lock:
+                fcntl.flock(lock, fcntl.LOCK_EX)
+                self._locked = True
+                try:
+                    return method(self, *args, **kwargs)
+                finally:
+                    self._locked = False
+    return call
 
 
 class TradingMemoryLog:
@@ -19,15 +40,21 @@ class TradingMemoryLog:
     def __init__(self, config: dict = None):
         cfg = config or {}
         self._log_path = None
+        self._thread_lock = threading.RLock()
+        self._locked = False
         path = cfg.get("memory_log_path")
         if path:
             self._log_path = Path(path).expanduser()
+            if cfg.get("memory_owner"):
+                scope = hashlib.sha256(str(cfg["memory_owner"]).encode()).hexdigest()
+                self._log_path = self._log_path.parent / "users" / scope / self._log_path.name
             self._log_path.parent.mkdir(parents=True, exist_ok=True)
         # Optional cap on resolved entries. None disables rotation.
         self._max_entries = cfg.get("memory_log_max_entries")
 
     # --- Write path (Phase A) ---
 
+    @synchronized
     def store_decision(
         self,
         ticker: str,
@@ -51,6 +78,7 @@ class TradingMemoryLog:
 
     # --- Read path (Phase A) ---
 
+    @synchronized
     def load_entries(self) -> List[dict]:
         """Parse all entries from log. Returns list of dicts."""
         if not self._log_path or not self._log_path.exists():
@@ -64,13 +92,19 @@ class TradingMemoryLog:
                 entries.append(parsed)
         return entries
 
+    @synchronized
     def get_pending_entries(self) -> List[dict]:
         """Return entries with outcome:pending (for Phase B)."""
         return [e for e in self.load_entries() if e.get("pending")]
 
-    def get_past_context(self, ticker: str, n_same: int = 5, n_cross: int = 3) -> str:
+    @synchronized
+    def get_past_context(self, ticker: str, n_same: int = 5, n_cross: int = 3, as_of: str = None) -> str:
         """Return formatted past context string for agent prompt injection."""
         entries = [e for e in self.load_entries() if not e.get("pending")]
+        if as_of:
+            date.fromisoformat(as_of)
+            entries = [e for e in entries if e["date"] < as_of
+                       and e.get("resolved_on") and e["resolved_on"] <= as_of]
         if not entries:
             return ""
 
@@ -97,6 +131,7 @@ class TradingMemoryLog:
 
     # --- Update path (Phase B) ---
 
+    @synchronized
     def update_with_outcome(
         self,
         ticker: str,
@@ -147,7 +182,7 @@ class TradingMemoryLog:
                 )
                 rest = "\n".join(lines[1:])
                 new_blocks.append(
-                    f"{new_tag}\n\n{rest.lstrip()}\n\nREFLECTION:\n{reflection}"
+                    f"{new_tag}\n\n{rest.lstrip()}\n\nREFLECTION:\n{reflection}\n<!-- resolved_on: {date.today().isoformat()} -->"
                 )
                 updated = True
             else:
@@ -162,6 +197,7 @@ class TradingMemoryLog:
         tmp_path.write_text(new_text, encoding="utf-8")
         tmp_path.replace(self._log_path)
 
+    @synchronized
     def batch_update_with_outcomes(self, updates: List[dict]) -> None:
         """Apply multiple outcome updates in a single read + atomic write.
 
@@ -201,7 +237,7 @@ class TradingMemoryLog:
                     )
                     rest = "\n".join(lines[1:])
                     new_blocks.append(
-                        f"{new_tag}\n\n{rest.lstrip()}\n\nREFLECTION:\n{upd['reflection']}"
+                        f"{new_tag}\n\n{rest.lstrip()}\n\nREFLECTION:\n{upd['reflection']}\n<!-- resolved_on: {date.today().isoformat()} -->"
                     )
                     del update_map[(trade_date, ticker)]
                     matched = True
@@ -256,6 +292,8 @@ class TradingMemoryLog:
         return kept
 
     def _parse_entry(self, raw: str) -> Optional[dict]:
+        resolved = re.search(r"<!-- resolved_on: (\d{4}-\d{2}-\d{2}) -->", raw)
+        raw = re.sub(r"\n?<!-- resolved_on: \d{4}-\d{2}-\d{2} -->", "", raw)
         lines = raw.strip().splitlines()
         if not lines:
             return None
@@ -273,6 +311,7 @@ class TradingMemoryLog:
             "raw": fields[3] if fields[3] != "pending" else None,
             "alpha": fields[4] if len(fields) > 4 else None,
             "holding": fields[5] if len(fields) > 5 else None,
+            "resolved_on": resolved.group(1) if resolved else (fields[6] if len(fields) > 6 else None),
         }
         body = "\n".join(lines[1:]).strip()
         decision_match = self._DECISION_RE.search(body)

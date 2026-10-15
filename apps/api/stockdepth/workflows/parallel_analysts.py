@@ -6,11 +6,41 @@ use the same topology/selection. SDK client thread safety is provider dependent.
 """
 from copy import deepcopy
 
-from langchain_core.messages import HumanMessage
+from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.graph import END, START, StateGraph
 
 from stockdepth.agents.utils.agent_states import AgentState
 from stockdepth.agents.utils.agent_utils import create_msg_delete
+from .research_validation import MISSING_REPORT
+
+
+def bounded_analyst(spec, analyst, max_tool_rounds):
+    if type(max_tool_rounds) is not int or not 1 <= max_tool_rounds <= 20:
+        raise ValueError("max_tool_rounds must be an integer between 1 and 20")
+
+    def run(state, config):
+        rounds = sum(bool(getattr(m, 'tool_calls', None)) for m in state['messages'])
+        final_turn = rounds >= max_tool_rounds
+        if final_turn:
+            state = {**state, 'messages': [*state['messages'], HumanMessage(content=(
+                'Tool round budget exhausted. Write your final research report now '
+                'using only the evidence already retrieved. Do not call tools. '
+                'Explicitly identify unavailable data and uncertainty.'
+            ))]}
+        # Use RunnableLambda to forward inherited callbacks/config even for
+        # factories whose public callable only accepts state.
+        from langchain_core.runnables import RunnableLambda
+        result = RunnableLambda(analyst).invoke(state, config)
+        messages = result.get('messages') or []
+        if final_turn and messages and getattr(messages[-1], 'tool_calls', None):
+            result[spec.report_key] = (
+                f'{MISSING_REPORT} {spec.agent_node}: tool round budget exhausted; '
+                'model did not provide a final report.'
+            )
+            # Router must end, never dispatch this unexecuted tool request.
+            result['messages'] = [AIMessage(content=result[spec.report_key])]
+        return result
+    return run
 
 
 def isolated_analyst(spec, analyst, tools, conditional_logic, first=False):

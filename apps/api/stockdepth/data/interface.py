@@ -133,6 +133,18 @@ def get_vendor(category: str, method: str = None) -> str:
 
 def route_to_vendor(method: str, *args, **kwargs):
     """Route method calls to appropriate vendor implementation with fallback support."""
+    config = get_config()
+    if config.get("workflow_version", 1) >= 2 and not config.get("realtime_data"):
+        from datetime import date
+        cutoff = config.get("analysis_date")
+        if cutoff and date.fromisoformat(cutoff) < date.today() and method in (
+            "get_fundamentals", "get_balance_sheet", "get_cashflow",
+            "get_income_statement", "get_insider_transactions",
+        ):
+            # Current overview/insider feeds and restated statements do not
+            # establish when the information was published. Fiscal period end
+            # is insufficient evidence of point-in-time availability.
+            return f"[DATA UNAVAILABLE AS OF {cutoff}] {method}: configured vendors do not provide verified publication-time history. Do not use current data as historical evidence."
     category = get_category_for_method(method)
     vendor_config = get_vendor(category, method)
     primary_vendors = [v.strip() for v in vendor_config.split(',')]

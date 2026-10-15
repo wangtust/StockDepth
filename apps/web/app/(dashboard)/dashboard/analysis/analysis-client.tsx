@@ -300,7 +300,7 @@ export default function AnalysisClient({ initialPayload }: { initialPayload: Job
       }
       await loadJobs();
       await loadJobDetail(id);
-      setNotice(replacement ? '已更换模型并请求继续，历史报告和用量记录已保留。' : 'Analysis continuation requested.');
+      setNotice(replacement ? '' : 'Analysis continuation requested.');
       return true;
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));

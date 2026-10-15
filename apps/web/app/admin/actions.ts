@@ -1,5 +1,6 @@
 'use server';
 
+import { adjustCreditBalance } from '@/lib/credits/admin-adjustment';
 import { modelConfigWrite, encryptModelKey } from '@/lib/security/model-key';
 
 import { isAnalysisRunner } from '@/lib/analysis/runner-process';
@@ -16,7 +17,6 @@ import {
   adminAuditLogs,
   analysisPricing,
   analysisJobs,
-  creditTransactions,
   llmModelConfigs,
   users
 } from '@/lib/db/schema';
@@ -412,38 +412,12 @@ export async function adjustUserCredits(formData: FormData) {
   const amount = z.coerce.number().int().min(-100000).max(100000).parse(formData.get('amount'));
   const note = z.string().trim().max(200).optional().parse(formData.get('note') || undefined);
 
-  const [updatedUser] = await db
-    .update(users)
-    .set({
-      analysisCredits: sql<number>`greatest(0, ${users.analysisCredits} + ${amount})`,
-      updatedAt: new Date()
-    })
-    .where(eq(users.id, targetUserId))
-    .returning({
-      id: users.id,
-      analysisCredits: users.analysisCredits
-    });
-
-  if (!updatedUser) {
-    return { error: 'User not found.' };
-  }
-
-  await db.insert(creditTransactions).values({
-    userId: targetUserId,
-    amount,
-    reason: 'admin_credit_adjustment'
-  });
-
-  await writeAdminAuditLog({
-    adminUserId: admin.id,
-    action: 'user.credits.adjust',
-    targetType: 'user',
-    targetId: targetUserId,
-    metadata: { amount, note, resultingCredits: updatedUser.analysisCredits }
-  });
-
-  revalidateAdmin();
-  return { success: 'Credits updated.' };
+  try {
+    const result = await adjustCreditBalance(admin.id,targetUserId,amount,note);
+    if (result.error) return result;
+    revalidateAdmin();
+    return result;
+  } catch { return {error:'额度调整失败，余额和流水未变更，请稍后重试。'}; }
 }
 
 export async function retryAnalysisJob(formData: FormData) {

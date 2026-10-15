@@ -48,7 +48,7 @@ export const users = pgTable('users', {
   createdAt: timestamp('created_at').notNull().defaultNow(),
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
   deletedAt: timestamp('deleted_at'),
-});
+}, t => [check('users_analysis_credits_nonnegative', sql`${t.analysisCredits} >= 0`)]);
 
 export const activityLogs = pgTable('activity_logs', {
   id: serial('id').primaryKey(),
@@ -176,6 +176,7 @@ export const analysisJobs = pgTable(
     index('analysis_jobs_status_created_at_idx').on(table.status, table.createdAt),
     index('analysis_jobs_worker_lease_idx').on(table.status, table.workerLeaseUntil, table.createdAt),
     index('analysis_jobs_user_created_at_idx').on(table.userId, table.createdAt),
+    check('analysis_jobs_trade_date_valid', sql`CASE WHEN ${table.tradeDate} ~ '^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$' THEN (${table.tradeDate}::date IS NOT NULL) ELSE false END`),
     index('analysis_jobs_user_instrument_date_idx').on(table.userId, table.instrumentId, table.tradeDate).where(sql`hidden_at is null`),
     index('analysis_jobs_user_visible_id_idx').on(table.userId, table.id).where(sql`hidden_at is null`),
   ]
@@ -225,17 +226,19 @@ export const analysisReports = pgTable('analysis_reports', {
   content: text('content').notNull(),
   createdAt: timestamp('created_at').notNull().defaultNow(),
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
-}, (table) => [index('analysis_reports_job_user_idx').on(table.jobId, table.userId)]);
+}, (table) => [index('analysis_reports_job_user_idx').on(table.jobId, table.userId),
+  uniqueIndex('analysis_reports_job_key_idx').on(table.jobId,table.reportKey),
+  foreignKey({name:'analysis_reports_job_owner_fk',columns:[table.jobId,table.userId],foreignColumns:[analysisJobs.id,analysisJobs.userId]})]);
 
 export const creditTransactions = pgTable('credit_transactions', {
   id: serial('id').primaryKey(),
-  userId: integer('user_id').references(() => users.id),
+  userId: integer('user_id').notNull().references(() => users.id),
   jobId: integer('job_id').references(() => analysisJobs.id),
   amount: integer('amount').notNull(),
   reason: varchar('reason', { length: 80 }).notNull(),
   stripeCheckoutSessionId: text('stripe_checkout_session_id').unique(),
   createdAt: timestamp('created_at').notNull().defaultNow(),
-});
+}, t => [foreignKey({name:'credit_transactions_job_owner_fk',columns:[t.jobId,t.userId],foreignColumns:[analysisJobs.id,analysisJobs.userId]})]);
 
 export const analysisPricing = pgTable('analysis_pricing', {
   depth: integer('depth').primaryKey(),

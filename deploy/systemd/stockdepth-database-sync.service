@@ -1,0 +1,13 @@
+[Unit]
+Description=Synchronize StockDepth to its dedicated backup database
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=ubuntu
+WorkingDirectory=/home/ubuntu/StockDepth
+ExecStart=/home/ubuntu/StockDepth/bin/sync-database
+UMask=0077
+Nice=10
+TimeoutStartSec=1h

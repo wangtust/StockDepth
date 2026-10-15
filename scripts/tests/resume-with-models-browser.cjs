@@ -23,7 +23,7 @@ require(modules+'/dotenv').config({path:path.resolve(__dirname,'../../.env'),qui
   assert.equal(await quick.locator('option').count(),payload.models.filter(m=>m.quickEnabled).length);
   assert.equal(await deep.locator('option').count(),payload.models.filter(m=>m.deepEnabled).length);
   const selection={quickModelConfigId:Number(await quick.inputValue()),deepModelConfigId:Number(await deep.inputValue())};
-  await page.getByRole('button',{name:'确认更换并继续',exact:true}).click();await page.getByText('已更换模型并请求继续，历史报告和用量记录已保留。',{exact:true}).waitFor();assert.deepEqual(posted,selection);
+  await page.getByRole('button',{name:'确认更换并继续',exact:true}).click();await page.waitForFunction(() => !Array.from(document.querySelectorAll('details')).find(el => el.querySelector('summary')?.textContent === '更换模型并继续')?.open);assert.deepEqual(posted,selection);assert.equal(await page.getByText('已更换模型并请求继续，历史报告和用量记录已保留。',{exact:true}).count(),0);
   await page.getByText('模型更换记录 (1)',{exact:true}).click();await page.getByText(/Quick: old-quick → new-quick/).waitFor();assert.deepEqual(errors,[]);
   assert.equal((await sql`select status from analysis_jobs where id=${job.id}`)[0].status,'failed');assert.equal((await sql`select count(*)::int as count from analysis_job_resumptions where job_id=${job.id}`)[0].count,before.count);assert.equal((await sql`select analysis_credits from users where id=${user.id}`)[0].analysis_credits,user.analysis_credits);
   console.log('PASS: live failed-job UI, available role selectors, replacement payload, confirmation, history rendering, server rejects invalid models. Real continuation intercepted; no model calls or account charges.');

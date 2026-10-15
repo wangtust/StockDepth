@@ -1,3 +1,4 @@
+import { recordInitialCreditGrant } from '../credits/initial-grant';
 import { eq } from 'drizzle-orm';
 import { isStripeConfigured, stripe } from '../payments/stripe';
 import { db } from './drizzle';
@@ -58,7 +59,8 @@ async function seed() {
     return;
   }
 
-  await db
+  await db.transaction(async tx => {
+    const [created] = await tx
     .insert(users)
     .values([
       {
@@ -69,6 +71,8 @@ async function seed() {
       },
     ])
     .returning();
+    await recordInitialCreditGrant(tx,created,'seed_initial_grant');
+  });
 
   console.log('Initial user created.');
 

@@ -1,5 +1,4 @@
-%% StockDepth database snapshot 2026-10-13; all 23 tables and columns.
-%% Composite ownership foreign keys are also listed in database-design.md.
+%% Generated database structure snapshot 2026-10-15; no business data.
 erDiagram
     direction LR
     activity_logs {
@@ -17,6 +16,30 @@ erDiagram
         int target_id "nullable"
         text metadata "nullable"
         timestamp created_at
+    }
+    analysis_decisions {
+        int id PK
+        int job_id FK,UK
+        varchar action "nullable"
+        text summary "nullable"
+        varchar extraction_status
+        int extraction_version
+        timestamptz extracted_at
+        timestamptz updated_at
+    }
+    analysis_job_resumptions {
+        int id PK
+        int job_id FK
+        int user_id FK
+        varchar previous_quick_model "nullable"
+        varchar previous_deep_model "nullable"
+        varchar next_quick_model
+        varchar next_deep_model
+        text previous_quick_config_snapshot "nullable"
+        text previous_deep_config_snapshot "nullable"
+        text next_quick_config_snapshot
+        text next_deep_config_snapshot
+        timestamptz created_at
     }
     analysis_jobs {
         int id PK
@@ -47,6 +70,12 @@ erDiagram
         bigint total_tokens
         boolean token_usage_complete
         int instrument_id FK "nullable"
+        int quick_model_config_id FK "nullable"
+        int deep_model_config_id FK "nullable"
+        text quick_config_snapshot "nullable"
+        text deep_config_snapshot "nullable"
+        varchar worker_owner "nullable"
+        timestamptz worker_lease_until "nullable"
     }
     analysis_model_calls {
         int id PK
@@ -68,6 +97,9 @@ erDiagram
         text pricing_snapshot "nullable"
         numeric estimated_cost "nullable"
         boolean cost_complete
+        varchar role
+        int model_config_id "nullable"
+        varchar provider "nullable"
     }
     analysis_pricing {
         int depth PK
@@ -94,7 +126,7 @@ erDiagram
     }
     credit_transactions {
         int id PK
-        int user_id FK "nullable"
+        int user_id FK
         int job_id FK "nullable"
         int amount
         varchar reason
@@ -148,6 +180,12 @@ erDiagram
         numeric cache_price "nullable"
         numeric output_price "nullable"
         timestamp retired_at "nullable"
+        boolean quick_enabled
+        boolean deep_enabled
+        jsonb model_options
+        varchar unavailable_reason "nullable"
+        timestamptz unavailable_at "nullable"
+        timestamptz availability_checked_at "nullable"
     }
     market_sync_runs {
         int id PK
@@ -175,10 +213,33 @@ erDiagram
         int portfolio_id FK
         int user_id FK
         int watchlist_item_id FK "nullable"
-        int analysis_job_id FK, UK
+        int analysis_job_id FK
         varchar ticker
         text context "nullable"
         timestamp created_at
+        varchar processing_state
+        varchar worker_owner "nullable"
+        timestamptz worker_lease_until "nullable"
+        timestamptz model_submitted_at "nullable"
+        varchar model_call_id "nullable"
+    }
+    paper_model_calls {
+        int id PK
+        int paper_run_id FK
+        varchar call_id
+        int model_config_id "nullable"
+        varchar provider
+        text model
+        varchar status
+        bigint input_tokens "nullable"
+        bigint output_tokens "nullable"
+        bigint cached_input_tokens "nullable"
+        text raw_usage "nullable"
+        text pricing_snapshot "nullable"
+        numeric estimated_cost "nullable"
+        boolean cost_complete
+        timestamptz created_at
+        timestamptz ended_at "nullable"
     }
     paper_portfolios {
         int id PK
@@ -209,7 +270,7 @@ erDiagram
         int id PK
         int portfolio_id FK
         int user_id FK
-        int paper_analysis_run_id FK, UK
+        int paper_analysis_run_id FK
         int analysis_job_id FK
         varchar ticker
         varchar action
@@ -248,7 +309,7 @@ erDiagram
         bigint realized_pnl_cents
         text note "nullable"
         timestamp created_at
-        int decision_id FK, UK "nullable"
+        int decision_id FK "nullable"
         int price_snapshot_id FK "nullable"
         numeric execution_price "nullable"
         int instrument_id FK "nullable"
@@ -263,6 +324,18 @@ erDiagram
         varchar source
         varchar price_type
         varchar session
+    }
+    signup_email_limits {
+        varchar scope PK
+        int count
+        timestamptz reset_at
+        timestamptz last_sent_at
+    }
+    signup_email_verifications {
+        varchar email PK
+        varchar code_hash
+        timestamptz expires_at
+        int attempts
     }
     users {
         int id PK
@@ -293,49 +366,57 @@ erDiagram
         timestamp updated_at
         int instrument_id FK "nullable"
     }
-    users |o--o{ activity_logs : "user_id"
-    users ||--o{ admin_audit_logs : "admin_user_id"
-    instruments |o--o{ analysis_jobs : "instrument_id"
-    llm_model_configs |o--o{ analysis_jobs : "model_config_id"
-    users ||--o{ analysis_jobs : "user_id"
-    analysis_jobs ||--o{ analysis_model_calls : "job_id"
-    analysis_jobs ||--o{ analysis_reports : "job_id"
-    users ||--o{ analysis_reports : "user_id"
-    analysis_jobs |o--o{ credit_transactions : "job_id"
-    users |o--o{ credit_transactions : "user_id"
-    instruments ||--o{ daily_prices : "instrument_id"
-    instruments ||--o{ instrument_sources : "instrument_id"
-    instruments ||--o{ market_sync_state : "instrument_id"
-    analysis_jobs ||--o| paper_analysis_runs : "analysis_job_id"
-    paper_portfolios ||--o{ paper_analysis_runs : "portfolio_id"
-    users ||--o{ paper_analysis_runs : "user_id"
-    watchlist_items |o--o{ paper_analysis_runs : "watchlist_item_id"
-    users ||--o{ paper_portfolios : "user_id"
-    instruments |o--o{ paper_positions : "instrument_id"
-    paper_portfolios ||--o{ paper_positions : "portfolio_id"
-    users ||--o{ paper_positions : "user_id"
-    analysis_jobs ||--o{ paper_trade_decisions : "analysis_job_id"
-    paper_analysis_runs ||--o| paper_trade_decisions : "paper_analysis_run_id"
-    paper_portfolios ||--o{ paper_trade_decisions : "portfolio_id"
-    users ||--o{ paper_trade_decisions : "user_id"
-    paper_portfolios ||--o{ paper_trade_requests : "portfolio_id"
-    users ||--o{ paper_trade_requests : "user_id"
-    paper_trade_decisions |o--o| paper_trades : "decision_id"
-    instruments |o--o{ paper_trades : "instrument_id"
-    paper_portfolios ||--o{ paper_trades : "portfolio_id"
-    paper_positions |o--o{ paper_trades : "position_id"
-    price_snapshots |o--o{ paper_trades : "price_snapshot_id"
-    users ||--o{ paper_trades : "user_id"
-    instruments ||--o{ price_snapshots : "instrument_id"
-    instruments |o--o{ watchlist_items : "instrument_id"
-    users ||--o{ watchlist_items : "user_id"
-    analysis_jobs ||..o{ paper_analysis_runs : "scope (analysis_job_id, user_id)"
-    paper_portfolios ||..o{ paper_analysis_runs : "scope (portfolio_id, user_id)"
-    watchlist_items |o..o{ paper_analysis_runs : "scope (watchlist_item_id, user_id)"
-    paper_portfolios ||..o{ paper_positions : "scope (portfolio_id, user_id)"
-    paper_portfolios ||..o{ paper_trade_decisions : "scope (portfolio_id, user_id)"
-    paper_analysis_runs ||..o| paper_trade_decisions : "scope (paper_analysis_run_id, portfolio_id, user_id, analysis_job_id)"
-    paper_portfolios ||..o{ paper_trade_requests : "scope (portfolio_id, user_id)"
-    paper_trade_decisions |o..o| paper_trades : "scope (decision_id, portfolio_id, user_id)"
-    paper_portfolios ||..o{ paper_trades : "scope (portfolio_id, user_id)"
-    paper_positions |o..o{ paper_trades : "scope (position_id, portfolio_id, user_id)"
+    users ||--o{ activity_logs : "activity_logs_user_id_users_id_fk"
+    users ||--o{ admin_audit_logs : "admin_audit_logs_admin_user_id_users_id_fk"
+    analysis_jobs ||--o{ analysis_decisions : "analysis_decisions_job_id_analysis_jobs_id_fk"
+    users ||--o{ analysis_job_resumptions : "analysis_job_resumptions_user_id_users_id_fk"
+    analysis_jobs ||--o{ analysis_job_resumptions : "analysis_resumptions_job_owner_fk"
+    llm_model_configs ||--o{ analysis_jobs : "analysis_jobs_deep_model_config_id_llm_model_configs_id_fk"
+    instruments ||--o{ analysis_jobs : "analysis_jobs_instrument_id_instruments_id_fk"
+    llm_model_configs ||--o{ analysis_jobs : "analysis_jobs_model_config_id_llm_model_configs_id_fk"
+    llm_model_configs ||--o{ analysis_jobs : "analysis_jobs_quick_model_config_id_llm_model_configs_id_fk"
+    users ||--o{ analysis_jobs : "analysis_jobs_user_id_users_id_fk"
+    analysis_jobs ||--o{ analysis_model_calls : "analysis_model_calls_job_id_analysis_jobs_id_fk"
+    analysis_jobs ||--o{ analysis_reports : "analysis_reports_job_id_analysis_jobs_id_fk"
+    analysis_jobs ||--o{ analysis_reports : "analysis_reports_job_owner_fk"
+    users ||--o{ analysis_reports : "analysis_reports_user_id_users_id_fk"
+    analysis_jobs ||--o{ credit_transactions : "credit_transactions_job_id_analysis_jobs_id_fk"
+    analysis_jobs ||--o{ credit_transactions : "credit_transactions_job_owner_fk"
+    users ||--o{ credit_transactions : "credit_transactions_user_id_users_id_fk"
+    instruments ||--o{ daily_prices : "daily_prices_instrument_id_instruments_id_fk"
+    instruments ||--o{ instrument_sources : "instrument_sources_instrument_id_instruments_id_fk"
+    instruments ||--o{ market_sync_state : "market_sync_state_instrument_id_instruments_id_fk"
+    analysis_jobs ||--o{ paper_analysis_runs : "paper_analysis_runs_analysis_job_id_analysis_jobs_id_fk"
+    paper_portfolios ||--o{ paper_analysis_runs : "paper_analysis_runs_portfolio_id_paper_portfolios_id_fk"
+    users ||--o{ paper_analysis_runs : "paper_analysis_runs_user_id_users_id_fk"
+    watchlist_items ||--o{ paper_analysis_runs : "paper_analysis_runs_watchlist_item_id_watchlist_items_id_fk"
+    analysis_jobs ||--o{ paper_analysis_runs : "paper_runs_job_owner_fk"
+    paper_portfolios ||--o{ paper_analysis_runs : "paper_runs_portfolio_owner_fk"
+    watchlist_items ||--o{ paper_analysis_runs : "paper_runs_watchlist_owner_fk"
+    paper_analysis_runs ||--o{ paper_model_calls : "paper_model_calls_paper_run_id_paper_analysis_runs_id_fk"
+    users ||--o{ paper_portfolios : "paper_portfolios_user_id_users_id_fk"
+    instruments ||--o{ paper_positions : "paper_positions_instrument_id_instruments_id_fk"
+    paper_portfolios ||--o{ paper_positions : "paper_positions_portfolio_id_paper_portfolios_id_fk"
+    paper_portfolios ||--o{ paper_positions : "paper_positions_portfolio_owner_fk"
+    users ||--o{ paper_positions : "paper_positions_user_id_users_id_fk"
+    paper_portfolios ||--o{ paper_trade_decisions : "paper_decisions_portfolio_owner_fk"
+    paper_analysis_runs ||--o{ paper_trade_decisions : "paper_decisions_run_scope_job_fk"
+    analysis_jobs ||--o{ paper_trade_decisions : "paper_trade_decisions_analysis_job_id_analysis_jobs_id_fk"
+    paper_analysis_runs ||--o{ paper_trade_decisions : "paper_trade_decisions_paper_analysis_run_id_paper_analysis_runs"
+    paper_portfolios ||--o{ paper_trade_decisions : "paper_trade_decisions_portfolio_id_paper_portfolios_id_fk"
+    users ||--o{ paper_trade_decisions : "paper_trade_decisions_user_id_users_id_fk"
+    paper_portfolios ||--o{ paper_trade_requests : "paper_requests_portfolio_owner_fk"
+    paper_portfolios ||--o{ paper_trade_requests : "paper_trade_requests_portfolio_id_paper_portfolios_id_fk"
+    users ||--o{ paper_trade_requests : "paper_trade_requests_user_id_users_id_fk"
+    paper_trade_decisions ||--o{ paper_trades : "paper_trades_decision_id_paper_trade_decisions_id_fk"
+    paper_trade_decisions ||--o{ paper_trades : "paper_trades_decision_scope_fk"
+    instruments ||--o{ paper_trades : "paper_trades_instrument_id_instruments_id_fk"
+    paper_portfolios ||--o{ paper_trades : "paper_trades_portfolio_id_paper_portfolios_id_fk"
+    paper_portfolios ||--o{ paper_trades : "paper_trades_portfolio_owner_fk"
+    paper_positions ||--o{ paper_trades : "paper_trades_position_id_paper_positions_id_fk"
+    paper_positions ||--o{ paper_trades : "paper_trades_position_scope_fk"
+    price_snapshots ||--o{ paper_trades : "paper_trades_price_snapshot_id_price_snapshots_id_fk"
+    users ||--o{ paper_trades : "paper_trades_user_id_users_id_fk"
+    instruments ||--o{ price_snapshots : "price_snapshots_instrument_id_instruments_id_fk"
+    instruments ||--o{ watchlist_items : "watchlist_items_instrument_id_instruments_id_fk"
+    users ||--o{ watchlist_items : "watchlist_items_user_id_users_id_fk"

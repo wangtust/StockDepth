@@ -26,7 +26,10 @@ async function initializeAdmin(sql, config) {
     throw new Error('初始管理员邮箱已被现有账户使用，请使用其他 STOCKDEPTH_ADMIN_EMAIL');
   }
   const passwordHash = await hash(password, 10);
-  await sql`insert into users (email, password_hash, role) values (${email}, ${passwordHash}, 'super_admin')`;
+  await sql.begin(async tx => {
+    const [created] = await tx`insert into users (email, password_hash, role) values (${email}, ${passwordHash}, 'super_admin') returning id,analysis_credits`;
+    await tx`insert into credit_transactions (user_id,amount,reason) values (${created.id},${created.analysis_credits},'initial_admin_grant')`;
+  });
   console.log('已根据 .env 创建初始管理员。');
 }
 

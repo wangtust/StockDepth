@@ -1,0 +1,10 @@
+[Unit]
+Description=Daily StockDepth database synchronization at 03:00 Shanghai time
+
+[Timer]
+OnCalendar=*-*-* 03:00:00 Asia/Shanghai
+Persistent=true
+Unit=stockdepth-database-sync.service
+
+[Install]
+WantedBy=timers.target

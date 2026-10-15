@@ -1,5 +1,6 @@
 'use server';
 
+import { recordInitialCreditGrant } from '@/lib/credits/initial-grant';
 import { consumeSignupCode } from '@/lib/auth/signup-email';
 import { z } from 'zod';
 import { and, eq, isNull, sql } from 'drizzle-orm';
@@ -177,6 +178,8 @@ export const signUp = validatedAction(signUpSchema, async (data, formData) => {
       if (!createdUser) {
         throw new Error('Failed to create user.');
       }
+
+      await recordInitialCreditGrant(tx,createdUser,'signup_grant');
 
       await tx.insert(activityLogs).values({
         userId: createdUser.id,

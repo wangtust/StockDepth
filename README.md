@@ -305,3 +305,10 @@ SMTP_AUTH_CODE=your-smtp-authorization-code
 
 `scripts/tests/resume-with-models.ts` 使用隔离 schema 验证权限、状态、加密历史、
 重复请求、事务回滚和用量保留；`test_checkpoint_resume.py` 验证重建模型后只恢复未完成节点。
+
+## 每日远端数据库备份副本
+
+使用 `./bin/sync-database --check` 检查连接，`./bin/sync-database` 完整同步到独立备份库。
+支持验证 TLS 的 PostgreSQL 直连或验证主机密钥的 SSH 隧道；覆盖前保留远端备份，
+事务内更新失败则回滚。每天北京时间 03:00 的 systemd 模板位于 `deploy/systemd/`，
+需连接验证和首次同步成功后再启用。配置及操作见 [数据库同步](docs/database-sync.md)。

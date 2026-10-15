@@ -1,3 +1,4 @@
+import { analysisDateSchema } from '@/lib/analysis/date-validation';
 import { publicAnalysisJob } from '@/lib/analysis/public-job';
 import { ensureInstrument } from '@/lib/market/catalogue';
 import { getJobsPage } from '@/lib/analysis/jobs-page';
@@ -20,7 +21,7 @@ import { normalizeTicker } from '@/lib/market/tickers';
 
 const createJobSchema = z.object({
   ticker: z.string().trim().min(1).max(40),
-  tradeDate: z.string().trim().min(8).max(20).optional(),
+  tradeDate: analysisDateSchema.optional(),
   realtimeData: z.coerce.boolean().default(false),
   language: z.string().trim().min(1).max(40).default('Chinese'),
   depth: z.coerce.number().int().refine((value) => [1, 3, 5].includes(value)),

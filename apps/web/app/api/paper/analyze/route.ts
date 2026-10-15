@@ -1,3 +1,4 @@
+import { analysisDateSchema } from '@/lib/analysis/date-validation';
 import { publicAnalysisJob } from '@/lib/analysis/public-job';
 import { AmountRangeError } from '@/lib/paper/amount';
 import { buildPortfolioContext } from '@/lib/paper/portfolio-context';
@@ -24,7 +25,7 @@ import { normalizeTicker } from '@/lib/market/tickers';
 const analyzeSchema = z.object({
   portfolioId: z.coerce.number().int().positive(),
   watchlistItemIds: z.array(z.coerce.number().int().positive()).min(1).max(20),
-  tradeDate: z.string().trim().min(8).max(20).optional(),
+  tradeDate: analysisDateSchema.optional(),
   realtimeData: z.coerce.boolean().default(true),
   language: z.string().trim().min(1).max(40).default('Chinese'),
   depth: z.coerce.number().int().refine((value) => [1, 3, 5].includes(value)),

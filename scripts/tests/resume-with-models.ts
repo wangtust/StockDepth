@@ -8,7 +8,7 @@ async function main() {
  const admin=postgres(process.env.POSTGRES_URL!,{max:1}),schema=`resume_test_${randomUUID().replaceAll('-','')}`;let client:ReturnType<typeof postgres>|undefined;
  try {
   await admin`create schema ${admin(schema)}`;
-  for(const table of ['analysis_jobs','analysis_job_resumptions','llm_model_configs','analysis_model_calls','analysis_reports','users'])await admin`create table ${admin(schema)}.${admin(table)} (like public.${admin(table)} including all)`;
+  for(const table of ['analysis_jobs','analysis_job_resumptions','llm_model_configs','analysis_model_calls','analysis_reports','analysis_decisions','users'])await admin`create table ${admin(schema)}.${admin(table)} (like public.${admin(table)} including all)`;
   await admin.unsafe(`create sequence ${schema}.resume_ids; alter table ${schema}.analysis_job_resumptions alter column id set default nextval('${schema}.resume_ids')`);
   const url=new URL(process.env.POSTGRES_URL!);url.searchParams.set('search_path',schema);process.env.POSTGRES_URL=url.toString();
   process.env.STOCKDEPTH_MODEL_KEY_ID='fixture';process.env.STOCKDEPTH_MODEL_KEYRING=JSON.stringify({fixture:randomBytes(32).toString('base64url')});
@@ -46,6 +46,47 @@ async function main() {
   const active=await addJob('running'),hidden=await addJob('failed',true);assert.equal((await resumeAnalysisJob(1,active.id,selection)).status,409);assert.equal((await resumeAnalysisJob(1,hidden.id,selection)).status,409);
   const rollback=await addJob();await db.update(jobs).set({quickConfigSnapshot:'invalid-json'}).where(eq(jobs.id,rollback.id));
   await assert.rejects(resumeAnalysisJob(1,rollback.id,selection));assert.equal((await db.select().from(history)).length,1);assert.equal((await db.select().from(jobs).where(eq(jobs.id,rollback.id)))[0].status,'failed','audit and snapshot update roll back together');
+  const automatic=await addJob('running');
+  await db.update(jobs).set({workerOwner:'automatic-owner',workerLeaseUntil:new Date(Date.now()+60000)}).where(eq(jobs.id,automatic.id));
+  assert.equal((await resumeAnalysisJob(1,automatic.id,undefined,'wrong-owner')).status,409);
+  const retried=await resumeAnalysisJob(1,automatic.id,undefined,'automatic-owner');
+  assert.equal(retried.status,200);
+  if('job' in retried){assert.equal(retried.job.runId,automatic.runId);assert.equal(retried.job.status,'queued');assert.equal(retried.job.quickModelConfigId,2);assert.equal(retried.job.deepModelConfigId,2);assert.equal(retried.job.totalTokens,123);}
+  assert.equal((await db.select().from(models).where(eq(models.id,2)))[0].isDefault,true);
+  // Duplicate worker callbacks cannot enqueue two retries or duplicate history.
+  assert.equal((await resumeAnalysisJob(1,automatic.id,undefined,'automatic-owner')).status,409);
+  const blocked=await addJob('running');
+  await db.update(jobs).set({workerOwner:'budget-owner',workerLeaseUntil:new Date(Date.now()+60000)}).where(eq(jobs.id,blocked.id));
+  const [sample]=await db.select().from(history).where(eq(history.jobId,automatic.id));
+  for(let i=0;i<3;i++){const {id,...copy}=sample;await db.insert(history).values({...copy,jobId:blocked.id});}
+  assert.equal((await resumeAnalysisJob(1,blocked.id,undefined,'budget-owner')).status,422,'replacement history bounds retries');
+  // Exercise the real Worker loop: quota evidence must trigger replacement
+  // even while the runner says running and report versions disagree.
+  const {createServer}=await import('node:http');
+  const [currentQuick]=await db.select().from(models).where(eq(models.id,2));
+  const [currentDeep]=await db.select().from(models).where(eq(models.id,3));
+  const live=await addJob('running');
+  const [owned]=await db.update(jobs).set({workerOwner:'live-owner',workerLeaseUntil:new Date(Date.now()+60000),quickModelConfigId:2,deepModelConfigId:3,quickModel:currentQuick.modelName,deepModel:currentDeep.modelName,quickConfigSnapshot:immutableModelSnapshot(currentQuick),deepConfigSnapshot:immutableModelSnapshot(currentDeep)}).where(eq(jobs.id,live.id)).returning();
+  const server=createServer((req,res)=>{
+    res.setHeader('Content-Type','application/json');
+    res.end(JSON.stringify({status:'running',report_version:req.url?.startsWith('/api/run/status')?'v1':'v2',reports:[{key:'market',title:'Saved research',content:'KEEP AUTOMATIC REPORT'}],usage:{history_complete:true,calls:[{call_id:'quota-fixture',agent:'Bull Researcher',model:currentQuick.modelName,model_config_id:2,role:'quick',status:'failed',failure_reason:'quota_exhausted',started_at:new Date().toISOString(),ended_at:new Date().toISOString()}]}}));
+  });
+  await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));
+  process.env.STOCKDEPTH_API_URL=`http://127.0.0.1:${(server.address() as any).port}`;
+  process.env.ANALYSIS_WORKER_MOCK='false';
+  try {
+    const {processJob}=await import('../../apps/workers/src/analysis-worker');
+    await processJob(owned,{startRun:false});
+    const [result]=await db.select().from(jobs).where(eq(jobs.id,live.id));
+    assert.equal(result.status,'queued');assert.equal(result.externalStatus,'resume-queued');assert.equal(result.quickModelConfigId,3);assert.equal(result.deepModelConfigId,3);assert.equal(result.runId,live.runId);
+    const [disabledQuick]=await db.select().from(models).where(eq(models.id,2));const [newDefault]=await db.select().from(models).where(eq(models.id,3));
+    assert.equal(disabledQuick.unavailableReason,'quota_exhausted');assert.equal(disabledQuick.isDefault,false);assert.equal(newDefault.isDefault,true);
+    assert.equal((await db.select().from(reports).where(eq(reports.jobId,live.id)))[0].content,'KEEP AUTOMATIC REPORT');
+  }finally{server.closeAllConnections();await new Promise<void>(resolve=>server.close(()=>resolve()));}
+  await db.update(models).set({isActive:false}).where(eq(models.isActive,true));
+  const none=await addJob('running');await db.update(jobs).set({workerOwner:'none-owner',workerLeaseUntil:new Date(Date.now()+60000)}).where(eq(jobs.id,none.id));
+  assert.equal((await resumeAnalysisJob(1,none.id,undefined,'none-owner')).status,503,'no candidates stops instead of looping');
+  assert.equal((await db.select().from(users).where(eq(users.id,1)))[0].analysisCredits,100,'automatic retry never charges analysis credits again');
   console.log('PASS: atomic model replacement, checkpoint identity, original reports/tokens/costs/credits, encrypted audit history, ownership, role/disabled/quota/retired rejection, duplicate submissions, rollback and public credential filtering. No model calls.');
  }finally{if(client)await client.end();await admin`drop schema if exists ${admin(schema)} cascade`;await admin.end();}
 }

@@ -36,6 +36,7 @@ const suites = [
   ['worker-crash-recovery', 'apps/workers/tests/ci-crash-recovery.ts', 'stockdepth_ci_crash_', true],
   ['worker-admission', 'apps/workers/tests/stage3-admission.ts', 'stockdepth_stage3_worker_', true],
   ['admin-concurrency', 'scripts/tests/admin-concurrency.ts', 'stockdepth_ci_admission_', true],
+  ['model-availability', 'scripts/tests/model-availability.ts', 'stockdepth_ci_availability_', true],
   ['resume-with-models', 'scripts/tests/resume-with-models.ts', 'stockdepth_ci_resume_', true],
 ];
 const results = [];
@@ -64,10 +65,10 @@ async function main() {
     await run(tsx, [path.join(root, 'scripts/tests/round5-security-db.ts')], {cwd: workers,
       env: {...env, SECURITY_TEST_ADMIN_URL: url.toString(), TSX_TSCONFIG_PATH: path.join(workers, 'tsconfig.json')}});
     results.push({name: 'key-migration-and-retention', status: 'passed'});
-    assert.equal(results.length, 8);
+    assert.equal(results.length, 9);
     console.log(JSON.stringify({suite: 'integration', count: results.length, status: 'passed'}));
   } finally {
-    report('integration', {suites: results, expected: 8});
+    report('integration', {suites: results, expected: 9});
   }
 }
 main().catch(error => { console.error(error.message); process.exitCode = 1; }).finally(async () => {

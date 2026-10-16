@@ -1,4 +1,4 @@
-import { and, eq, inArray, isNull } from 'drizzle-orm';
+import { and, eq, inArray, isNull, isNotNull, sql, asc } from 'drizzle-orm';
 import { db } from '../db/drizzle';
 import { analysisJobs, llmModelConfigs } from '../db/schema';
 
@@ -15,11 +15,19 @@ function snapshots(job:Job):Snapshot[] {
 }
 export async function markModelQuotaUnavailable(snapshot:Snapshot,eventAt=new Date()) {
   return db.transaction(async tx=>{
-    const [current]=await tx.select().from(llmModelConfigs).where(eq(llmModelConfigs.id,snapshot.id)).for('update');
+    await tx.execute(sql`select pg_advisory_xact_lock(739421, 3)`);
+    const rows=await tx.select().from(llmModelConfigs).orderBy(asc(llmModelConfigs.id)).for('update');
+    const current=rows.find(row=>row.id===snapshot.id);
     if (!current || current.retiredAt || current.modelName!==snapshot.modelName || current.provider!==snapshot.provider || current.baseUrl!==snapshot.baseUrl || current.updatedAt.getTime()!==new Date(snapshot.updatedAt).getTime()) return false;
     if (!Number.isFinite(eventAt.getTime()) || (current.availabilityCheckedAt && eventAt<=current.availabilityCheckedAt)) return false;
-    if (current.unavailableReason==='quota_exhausted') return true;
-    await tx.update(llmModelConfigs).set({unavailableReason:'quota_exhausted',unavailableAt:eventAt}).where(eq(llmModelConfigs.id,current.id));
+    if (current.unavailableReason!=='quota_exhausted') await tx.update(llmModelConfigs).set({unavailableReason:'quota_exhausted',unavailableAt:eventAt}).where(eq(llmModelConfigs.id,current.id));
+    const available=rows.filter(row=>row.id!==current.id&&row.isActive&&!row.retiredAt&&!row.unavailableReason&&(row.quickEnabled||row.deepEnabled));
+    const next=available.find(row=>row.isDefault)??available.find(row=>row.quickEnabled&&row.deepEnabled)??available.find(row=>row.quickEnabled||row.deepEnabled);
+    const defaults=rows.filter(row=>row.isDefault);
+    if(defaults.length!==(next?1:0)||defaults[0]?.id!==next?.id) {
+      await tx.update(llmModelConfigs).set({isDefault:false}).where(eq(llmModelConfigs.isDefault,true));
+      if(next)await tx.update(llmModelConfigs).set({isDefault:true}).where(eq(llmModelConfigs.id,next.id));
+    }
     return true;
   });
 }
@@ -42,6 +50,6 @@ export async function recordQuotaFailures(job:Job,calls:FailedCall[],fatalLog?:s
 }
 export async function unavailableJobModels(job:Job,reader:Pick<typeof db,'select'>=db) {
   const expected=snapshots(job);if(!expected.length)return [];
-  const rows=await reader.select().from(llmModelConfigs).where(and(inArray(llmModelConfigs.id,expected.map(s=>s.id)),eq(llmModelConfigs.unavailableReason,'quota_exhausted'),isNull(llmModelConfigs.retiredAt)));
+  const rows=await reader.select().from(llmModelConfigs).where(and(inArray(llmModelConfigs.id,expected.map(s=>s.id)),isNotNull(llmModelConfigs.unavailableReason),isNull(llmModelConfigs.retiredAt)));
   return rows.filter(row=>expected.some(s=>s.id===row.id&&row.updatedAt.getTime()===new Date(s.updatedAt).getTime()));
 }

@@ -1,6 +1,6 @@
 # 数据库 V2：独立库验证与兼容阶段
 
-2026-10-16。按用户最终指定名称，V2数据库已原地重命名为 `stockdepth_dev`，运行服务及根 `.env` 均使用 `stockdepth_dev`，保留 `.next-v2` 生产构建目录。本地Git分支为 `dev`，作为后续开发基线。原 `stockdepth` 保留，旧业务数据尚未导入；重命名保留V2已有管理员、积分和模型配置。完整目标设计见 [database-v2.md](design/database-v2.md)。
+2026-10-16。V2数据库名为 `stockdepth_dev`，运行服务及根 `.env` 均使用该库，保留 `.next-v2` 生产构建目录。本地Git分支为 `dev`。旧业务数据已合并导入，原 `stockdepth` 仍保留不动，详见 [迁移记录](legacy-database-import.md)。完整目标设计见 [database-v2.md](design/database-v2.md)。
 
 ## 已实施
 
@@ -64,7 +64,7 @@ node scripts/tests/isolated-regressions.cjs
 4. 验证逐表行数、内容校验、账户余额、成交金额、复合归属与引用、序列、运行中任务恢复策略；未通过前不切连接。
 5. 切换新版服务到V2并观察；回退需要考虑切换后新写入，不能仅把.env改回旧库而丢失新记录。
 
-已完成服务切换，旧数据导入仍未执行。切换前已备份两个数据库和原环境配置，备份在本机var/backups/v2-cutover-*（不提交Git）；pg_restore --list校验可读。登录签名密钥已刷新，使旧库会话失效，避免用户ID复用导致身份混用；模型加密密钥保留供后续迁移使用。
+已完成服务切换及旧数据导入，原库未修改。切换和导入前均备份双库及环境配置（本机var/backups，不提交Git），pg_restore --list校验可读。切库时刷新登录签名密钥，导入时保留新库签名密钥及管理员密码；模型密钥已校验并迁移。
 
 当前使用标准管理命令 ./bin/stockdepth start/status/restart；管理器按照STOCKDEPTH_NEXT_DIST_DIR检查构建。Web、API、analysis、market已切换，原先停用的paper继续停用。根.env和数据库备份均不推送远程。
 

@@ -38,7 +38,7 @@ async function scenario(mode,round,workerCount=1,restart=false){
  await test`insert into analysis_worker_settings(key,system_concurrency,user_concurrency) values('analysis_worker',2,10)
    on conflict(key) do update set system_concurrency=2,user_concurrency=10`;
  const [user]=await test`select id from users limit 1`;
- await test`insert into analysis_jobs ${test(Array.from({length:restart?4:8},(_,i)=>({user_id:user.id,run_id:'recovery-'+randomUUID(),ticker:'MOCK',trade_date:'2026-10-13',analysts:'[]',provider:'mock',base_url:'mock://isolated',status:'running'})))}`;
+ await test`insert into analysis_jobs ${test(Array.from({length:restart?4:8},(_,i)=>({user_id:user.id,run_id:'recovery-'+randomUUID(),ticker:'MOCK',trade_date:'2026-10-13',analysts:'[]',...mockConfig,status:'running'})))}`;
  const expected=restart?4:8,active=new Set(),starts=new Map();let peak=0,firstStart=0,lastEnd=0,maxRssKb=0,maxCpuTicks=0;
  const children=[];
  const launch=()=>{
@@ -77,10 +77,11 @@ async function scenario(mode,round,workerCount=1,restart=false){
   results.push(result);console.log(JSON.stringify(result));
  }finally{for(const child of [...workers])await stop(child);}
 }
-let testUrl;
+let testUrl, mockConfig;
 (async()=>{try{
  await admin`create database ${admin(name)}`;created=true;sourceUrl.pathname='/'+name;testUrl=sourceUrl.toString();
  test=postgres(testUrl,{max:2});await migrate(drizzle(test),{migrationsFolder:root+'/apps/web/lib/db/migrations'});
+ mockConfig=await require('./mock-job-config.cjs').mockJobConfig(test);
  await test`insert into users(email,password_hash) values('mock-recovery@test.invalid','unused')`;
 await test`update billing_accounts set analysis_credits=100,ledger_opening_balance=100`;
  for(let round=1;round<=3;round++){await scenario('before',round);await scenario('after',round);}

@@ -44,11 +44,13 @@ async function stopWorker() {
     // Verify that all migrations can initialize an entirely new database.
     const tables = await test`select tablename from pg_tables where schemaname='public'`;
     if (!['analysis_jobs','analysis_model_calls','paper_analysis_runs','paper_model_calls'].every(name => tables.some(table => table.tablename === name))) throw Error('Fresh initialization failed');
+    const configs=[];
+    for(let i=0;i<4;i++)configs.push(await require('./mock-job-config.cjs').mockJobConfig(test,`mock-${i}`));
     for (const concurrency of [1, 2, 4]) {
       const queued = Date.now();
       const values = Array.from({ length: 8 }, (_, i) => ({ user_id: user.id,
         run_id: `capacity-${concurrency}-${i}`, ticker: 'MOCK', trade_date: '2026-10-12',
-        analysts: '[]', provider: `mock-${i % 4}`, base_url: 'mock://test' }));
+        analysts: '[]', ...configs[i % 4] }));
       await test`insert into analysis_jobs ${test(values)}`;
       worker = spawn(process.env.STOCKDEPTH_RUNTIME_BIN + '/tsx', ['src/analysis-worker.ts'], {
         cwd: root + '/apps/workers', detached: true,

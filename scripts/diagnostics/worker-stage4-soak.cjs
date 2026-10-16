@@ -17,7 +17,8 @@ await admin`create database ${admin(name)}`;created=true;source.pathname='/'+nam
 const [user]=await db`insert into users(email,password_hash) values('soak@test.invalid','unused') returning id`;
 await db`update billing_accounts set analysis_credits=100,ledger_opening_balance=100`;
 await db`insert into analysis_worker_settings(key,system_concurrency,user_concurrency) values('analysis_worker',2,10) on conflict(key) do update set system_concurrency=2,user_concurrency=10`;
-const insert=async count=>db`insert into analysis_jobs ${db(Array.from({length:count},()=>({user_id:user.id,run_id:'soak-'+randomUUID(),ticker:'MOCK',trade_date:'2026-10-13',analysts:'[]',provider:'mock',base_url:'mock://isolated',status:'running'})))}`;
+const mockConfig=await require('./mock-job-config.cjs').mockJobConfig(db);
+const insert=async count=>db`insert into analysis_jobs ${db(Array.from({length:count},()=>({user_id:user.id,run_id:'soak-'+randomUUID(),ticker:'MOCK',trade_date:'2026-10-13',analysts:'[]',...mockConfig,status:'running'})))}`;
 await insert(8);launch(source.toString());launch(source.toString());const start=Date.now();let submitted=8,nextBatch=10000;
 while(Date.now()-start<60000){const elapsed=Date.now()-start;if(!killed&&active.size===2){await stop([...workers][0],'SIGKILL');launch(source.toString());killed=true;}
 if(elapsed>=nextBatch&&submitted<40){await insert(8);submitted+=8;nextBatch+=10000;}

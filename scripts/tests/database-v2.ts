@@ -55,6 +55,28 @@ async function main(){
   const [unknown]=await upgrade.sql`select * from analysis_jobs where id=${job.id}`;
   assert.equal(unknown.quick_model_version_id,null);assert.equal(unknown.deep_model_version_id,null);assert.equal(unknown.charged_credits,null,'unknown old charge remains unknown');
   assert.equal((await upgrade.sql`select content from analysis_reports where job_id=${job.id}`)[0].content,'PRESERVE');
+  // Import into 0043 must keep the soon-to-be-removed balance synchronized.
+  const compatibility=path.join(temporary,'compatibility');await mkdir(path.join(compatibility,'meta'),{recursive:true});
+  const compatibleJournal=JSON.parse(await readFile(path.join(folder,'meta/_journal.json'),'utf8'));
+  compatibleJournal.entries=compatibleJournal.entries.filter((e:{idx:number})=>e.idx<=43);
+  await writeFile(path.join(compatibility,'meta/_journal.json'),JSON.stringify(compatibleJournal));
+  for(const entry of compatibleJournal.entries)await copyFile(path.join(folder,entry.tag+'.sql'),path.join(compatibility,entry.tag+'.sql'));
+  const merged=await database('merged');await migrate(drizzle(merged.sql),{migrationsFolder:compatibility});
+  const [mergeUser]=await merged.sql`insert into users(email,password_hash,role,analysis_credits) values('merge@example.test','fixture','super_admin',10) returning *`;
+  await merged.sql`update billing_accounts set analysis_credits=10,ledger_sequence=1 where user_id=${mergeUser.id}`;
+  await merged.sql`insert into credit_transactions(user_id,amount,reason,ledger_sequence,balance_after,operation_key) values(${mergeUser.id},10,'initial_admin_grant',1,10,'merge-fixture-grant')`;
+  const sourceRows:Record<string,any[]>={};
+  for(const {tablename} of await merged.sql`select tablename from pg_tables where schemaname='public'`)sourceRows[tablename]=[];
+  sourceRows.users=[{...mergeUser,id:101,analysis_credits:37}];
+  const {importSnapshot}=await import('../migrate-legacy-database');
+  const source={rows:sourceRows,counts:Object.fromEntries(Object.entries(sourceRows).map(([key,rows])=>[key,rows.length])),digest:'synthetic-merge-regression'};
+  const imported=await importSnapshot(merged.sql,source,'synthetic_source',merged.url.pathname.slice(1));assert.equal(imported.mergedUserCount,1);
+  const [balances]=await merged.sql`select u.analysis_credits legacy,b.analysis_credits current from users u join billing_accounts b on b.user_id=u.id where u.id=${mergeUser.id}`;
+  assert.equal(balances.legacy,37);assert.equal(balances.current,37);
+  assert.equal((await merged.sql`select amount from credit_transactions where reason='legacy_balance_merge'`)[0].amount,27);
+  assert.equal((await importSnapshot(merged.sql,source,'synthetic_source',merged.url.pathname.slice(1))).idempotent,true);
+  await migrate(drizzle(merged.sql),{migrationsFolder:folder});
+  assert.equal((await merged.sql`select analysis_credits from billing_accounts where user_id=${mergeUser.id}`)[0].analysis_credits,37,'merged account upgrades through normalization');
   const fresh=await database('fresh');
   for(let i=0;i<2;i++){const result=spawnSync(process.execPath,[root+'/scripts/initialize-database.cjs'],{cwd:root,env:{...process.env,POSTGRES_URL:fresh.url.toString(),STOCKDEPTH_ADMIN_EMAIL:'',STOCKDEPTH_ADMIN_PASSWORD:''},encoding:'utf8'});assert.equal(result.status,0,'initializer succeeds on fresh DB and repeat');}
   assert.equal(Number((await fresh.sql`select count(*) from pg_tables where schemaname='public'`)[0].count),31);

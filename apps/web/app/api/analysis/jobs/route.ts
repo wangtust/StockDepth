@@ -1,9 +1,11 @@
+import { lockBillingAccounts, mutateCredits } from '@/lib/credits/ledger';
+import { ModelSelectionError, pinModelVersions } from '@/lib/analysis/model-versions';
 import { analysisDateSchema } from '@/lib/analysis/date-validation';
 import { publicAnalysisJob } from '@/lib/analysis/public-job';
 import { ensureInstrument } from '@/lib/market/catalogue';
 import { getJobsPage } from '@/lib/analysis/jobs-page';
 import { RequestTiming } from '@/lib/http/request-timing';
-import { and, eq, gte, isNull, sql } from 'drizzle-orm';
+import { and, eq, isNull } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
@@ -12,11 +14,8 @@ import { db } from '@/lib/db/drizzle';
 import {
   llmModelConfigs,
   analysisJobs,
-  creditTransactions,
-  users
 } from '@/lib/db/schema';
 import { getDepthCreditCostFromDb } from '@/lib/analysis/pricing-server';
-import { immutableModelSnapshot } from '@/lib/analysis/model-snapshot';
 import { normalizeTicker } from '@/lib/market/tickers';
 
 const createJobSchema = z.object({
@@ -57,6 +56,14 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
+  try { return await enqueueJob(request); }
+  catch (error) {
+    if (error instanceof ModelSelectionError) return NextResponse.json({error:error.message},{status:400});
+    throw error;
+  }
+}
+
+async function enqueueJob(request: NextRequest) {
   const currentUser = await getCurrentUserFromSession();
   if (currentUser instanceof NextResponse) {
     return currentUser;
@@ -88,33 +95,10 @@ export async function POST(request: NextRequest) {
       { status: 400 }
     );
   }
-  let quickConfigSnapshot: string;
-  let deepConfigSnapshot: string;
-  try {
-    quickConfigSnapshot = immutableModelSnapshot(quickConfig);
-    deepConfigSnapshot = immutableModelSnapshot(deepConfig);
-  } catch (error) {
-    return NextResponse.json({ error: (error as Error).message }, { status: 503 });
-  }
-
   const job = await db.transaction(async (tx) => {
-    const [updatedUser] = await tx
-      .update(users)
-      .set({
-        analysisCredits: sql`${users.analysisCredits} - ${creditCost}`,
-        updatedAt: new Date()
-      })
-      .where(
-        and(
-          eq(users.id, currentUser.id),
-          gte(users.analysisCredits, creditCost)
-        )
-      )
-      .returning({ analysisCredits: users.analysisCredits });
-
-    if (!updatedUser) {
-      return null;
-    }
+    const [account] = await lockBillingAccounts(tx,[currentUser.id]);
+    if (!account || account.analysisCredits < creditCost) return null;
+    const pinned = await pinModelVersions(tx,quickConfig,deepConfig);
 
     const instrument = await ensureInstrument(ticker, tx);
     const [createdJob] = await tx
@@ -129,30 +113,19 @@ export async function POST(request: NextRequest) {
         language: data.language,
         depth: data.depth,
         analysts: JSON.stringify(data.analysts),
-        provider: quickConfig.provider,
-        baseUrl: quickConfig.baseUrl,
-        quickModel: quickConfig.modelName,
-        deepModel: deepConfig.modelName,
-        modelConfigId: quickConfig.id,
-        quickModelConfigId: quickConfig.id,
-        deepModelConfigId: deepConfig.id,
-        quickConfigSnapshot,
-        deepConfigSnapshot,
+        ...pinned,
+        chargedCredits: creditCost,
         status: 'queued'
       })
       .returning();
 
-    await tx.insert(creditTransactions).values({
-      userId: currentUser.id,
-      jobId: createdJob.id,
-      amount: -creditCost,
-      reason: 'analysis_job_created'
-    });
+    const charged = await mutateCredits(tx,{userId:currentUser.id,jobId:createdJob.id,amount:-creditCost,
+      reason:'analysis_job_created',operationKey:`analysis-charge:${createdJob.id}`});
 
     return {
       ...createdJob,
       creditCost,
-      remainingCredits: updatedUser.analysisCredits
+      remainingCredits: charged.balance
     };
   });
 

@@ -6,6 +6,7 @@ import { db } from '@/lib/db/drizzle';
 import {
   adminAuditLogs,
   analysisJobs,
+  billingAccounts,
   users
 } from '@/lib/db/schema';
 import { formatAdminDateTime } from '@/app/admin/_components/admin-ui';
@@ -43,9 +44,9 @@ export default async function AdminOverviewPage() {
       .orderBy(analysisJobs.status),
     db
       .select({
-        totalCredits: sql<number>`coalesce(sum(${users.analysisCredits}), 0)::int`
+        totalCredits: sql<number>`coalesce(sum(${billingAccounts.analysisCredits}), 0)::int`
       })
-      .from(users),
+      .from(billingAccounts),
     db
       .select({
         id: analysisJobs.id,

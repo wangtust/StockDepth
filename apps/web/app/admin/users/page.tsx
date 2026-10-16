@@ -1,10 +1,10 @@
-import { desc, ilike, or } from 'drizzle-orm';
+import { eq, desc, ilike, or } from 'drizzle-orm';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { requirePlatformAdmin } from '@/lib/auth/admin';
 import { db } from '@/lib/db/drizzle';
-import { users } from '@/lib/db/schema';
+import { billingAccounts, users } from '@/lib/db/schema';
 import { setUserRole, setUserStatus } from '@/app/admin/actions';
 import { formatAdminDateTime, StatusBadge } from '@/app/admin/_components/admin-ui';
 
@@ -38,10 +38,11 @@ export default async function AdminUsersPage({ searchParams }: PageProps) {
       role: users.role,
       status: users.status,
       createdAt: users.createdAt,
-      analysisCredits: users.analysisCredits,
+      analysisCredits: billingAccounts.analysisCredits,
       inviteCode: users.inviteCode
     })
     .from(users)
+    .leftJoin(billingAccounts, eq(users.id,billingAccounts.userId))
     .where(
       query
         ? or(ilike(users.email, `%${query}%`), ilike(users.name, `%${query}%`))

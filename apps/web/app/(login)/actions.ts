@@ -1,5 +1,7 @@
 'use server';
 
+import { lockBillingAccounts, mutateCredits } from '@/lib/credits/ledger';
+
 import { recordInitialCreditGrant } from '@/lib/credits/initial-grant';
 import { consumeSignupCode } from '@/lib/auth/signup-email';
 import { z } from 'zod';
@@ -9,7 +11,6 @@ import {
   User,
   users,
   activityLogs,
-  creditTransactions,
   type NewUser,
   type NewActivityLog,
   ActivityType
@@ -163,6 +164,8 @@ export const signUp = validatedAction(signUpSchema, async (data, formData) => {
     email,
     passwordHash,
     inviteCode,
+    analysisCredits: 0,
+    referredByUserId: referrer?.id ?? null,
     role: 'member'
   };
 
@@ -179,6 +182,7 @@ export const signUp = validatedAction(signUpSchema, async (data, formData) => {
         throw new Error('Failed to create user.');
       }
 
+      await lockBillingAccounts(tx, [createdUser.id, ...(referrer ? [referrer.id] : [])]);
       await recordInitialCreditGrant(tx,createdUser,'signup_grant');
 
       await tx.insert(activityLogs).values({
@@ -188,19 +192,7 @@ export const signUp = validatedAction(signUpSchema, async (data, formData) => {
       });
 
       if (referrer?.id) {
-        await tx
-          .update(users)
-          .set({
-            analysisCredits: sql`${users.analysisCredits} + 5`,
-            updatedAt: new Date()
-          })
-          .where(eq(users.id, referrer.id));
-
-        await tx.insert(creditTransactions).values({
-          userId: referrer.id,
-          amount: 5,
-          reason: 'invite_code_reward'
-        });
+        await mutateCredits(tx, {userId:referrer.id,amount:5,reason:'invite_code_reward',operationKey:`referral-reward:${createdUser.id}`,metadata:{referredUserId:createdUser.id}});
 
         await tx.insert(activityLogs).values({
           userId: referrer.id,

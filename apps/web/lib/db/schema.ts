@@ -15,6 +15,7 @@ import {
   jsonb,
   check,
   customType,
+  type AnyPgColumn,
   foreignKey,
 } from 'drizzle-orm/pg-core';
 import { relations, sql } from 'drizzle-orm';
@@ -37,7 +38,8 @@ export const users = pgTable('users', {
   email: varchar('email', { length: 255 }).notNull().unique(),
   passwordHash: text('password_hash').notNull(),
   inviteCode: varchar('invite_code', { length: 6 }).unique(),
-  analysisCredits: integer('analysis_credits').notNull().default(10),
+  referredByUserId: integer('referred_by_user_id').references((): AnyPgColumn => users.id),
+  analysisCredits: integer('analysis_credits').notNull().default(0),
   stripeCustomerId: text('stripe_customer_id').unique(),
   stripeSubscriptionId: text('stripe_subscription_id').unique(),
   stripeProductId: text('stripe_product_id'),
@@ -48,7 +50,29 @@ export const users = pgTable('users', {
   createdAt: timestamp('created_at').notNull().defaultNow(),
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
   deletedAt: timestamp('deleted_at'),
-}, t => [check('users_analysis_credits_nonnegative', sql`${t.analysisCredits} >= 0`)]);
+}, t => [check('users_analysis_credits_nonnegative', sql`${t.analysisCredits} >= 0`),
+  check('users_referrer_not_self', sql`${t.referredByUserId} IS NULL OR ${t.referredByUserId} <> ${t.id}`)]);
+
+// V2 authoritative credit account. Legacy users billing columns remain dual-written
+// during rollout; opening balances describe the cutover, not invented old grants.
+export const billingAccounts = pgTable('billing_accounts', {
+  userId: integer('user_id').primaryKey().references(() => users.id),
+  analysisCredits: integer('analysis_credits').notNull().default(0),
+  ledgerSequence: bigint('ledger_sequence', { mode: 'number' }).notNull().default(0),
+  ledgerOpeningBalance: integer('ledger_opening_balance').notNull().default(0),
+  ledgerOpenedAt: timestamp('ledger_opened_at', { withTimezone: true }).notNull().defaultNow(),
+  stripeCustomerId: text('stripe_customer_id'),
+  stripeSubscriptionId: text('stripe_subscription_id'),
+  stripeProductId: text('stripe_product_id'),
+  planName: varchar('plan_name', { length: 50 }),
+  subscriptionStatus: varchar('subscription_status', { length: 40 }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, t => [
+  check('billing_accounts_nonnegative', sql`${t.analysisCredits} >= 0 AND ${t.ledgerOpeningBalance} >= 0 AND ${t.ledgerSequence} >= 0 AND ${t.ledgerSequence} <= 9007199254740991`),
+  uniqueIndex('billing_accounts_customer_unique').on(t.stripeCustomerId).where(sql`${t.stripeCustomerId} IS NOT NULL`),
+  uniqueIndex('billing_accounts_subscription_unique').on(t.stripeSubscriptionId).where(sql`${t.stripeSubscriptionId} IS NOT NULL`),
+]);
 
 export const activityLogs = pgTable('activity_logs', {
   id: serial('id').primaryKey(),
@@ -155,6 +179,10 @@ export const analysisJobs = pgTable(
     deepModelConfigId: integer('deep_model_config_id').references(() => llmModelConfigs.id),
     quickConfigSnapshot: text('quick_config_snapshot'),
     deepConfigSnapshot: text('deep_config_snapshot'),
+    quickModelVersionId: integer('quick_model_version_id').references(() => llmModelConfigVersions.id),
+    deepModelVersionId: integer('deep_model_version_id').references(() => llmModelConfigVersions.id),
+    configurationState: text('configuration_state').notNull().default('legacy_unknown'),
+    chargedCredits: integer('charged_credits'),
     inputTokens: bigint('input_tokens', { mode: 'number' }).notNull().default(0),
     outputTokens: bigint('output_tokens', { mode: 'number' }).notNull().default(0),
     totalTokens: bigint('total_tokens', { mode: 'number' }).notNull().default(0),
@@ -173,6 +201,10 @@ export const analysisJobs = pgTable(
   },
   (table) => [
     uniqueIndex('analysis_jobs_id_owner_idx').on(table.id,table.userId),
+    foreignKey({name:'analysis_jobs_quick_version_config_fk',columns:[table.quickModelVersionId,table.quickModelConfigId],foreignColumns:[llmModelConfigVersions.id,llmModelConfigVersions.configId]}),
+    foreignKey({name:'analysis_jobs_deep_version_config_fk',columns:[table.deepModelVersionId,table.deepModelConfigId],foreignColumns:[llmModelConfigVersions.id,llmModelConfigVersions.configId]}),
+    check('analysis_jobs_configuration_state', sql`(${table.configurationState} = 'legacy_unknown' AND ${table.quickModelVersionId} IS NULL AND ${table.deepModelVersionId} IS NULL) OR (${table.configurationState} = 'versioned' AND ${table.quickModelVersionId} IS NOT NULL AND ${table.deepModelVersionId} IS NOT NULL AND ${table.quickModelConfigId} IS NOT NULL AND ${table.deepModelConfigId} IS NOT NULL)`),
+    check('analysis_jobs_charged_credits_nonnegative', sql`${table.chargedCredits} IS NULL OR ${table.chargedCredits} >= 0`),
     index('analysis_jobs_status_created_at_idx').on(table.status, table.createdAt),
     index('analysis_jobs_worker_lease_idx').on(table.status, table.workerLeaseUntil, table.createdAt),
     index('analysis_jobs_user_created_at_idx').on(table.userId, table.createdAt),
@@ -191,6 +223,7 @@ export const analysisWorkerSettings = pgTable('analysis_worker_settings', {
 
 export const llmModelConfigs = pgTable('llm_model_configs', {
   id: serial('id').primaryKey(),
+  currentVersionId: integer('current_version_id'),
   name: varchar('name', { length: 120 }).notNull(),
   provider: varchar('provider', { length: 80 }).notNull(),
   baseUrl: text('base_url').notNull(),
@@ -210,7 +243,29 @@ export const llmModelConfigs = pgTable('llm_model_configs', {
   retiredAt: timestamp('retired_at'),
   createdAt: timestamp('created_at').notNull().defaultNow(),
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
-});
+}, t => [foreignKey({ name: 'model_configs_current_version_owner_fk', columns: [t.currentVersionId,t.id], foreignColumns: [llmModelConfigVersions.id,llmModelConfigVersions.configId] })]);
+
+export const llmModelConfigVersions = pgTable('llm_model_config_versions', {
+  id: serial('id').primaryKey(),
+  configId: integer('config_id').notNull().references((): AnyPgColumn => llmModelConfigs.id),
+  version: integer('version').notNull(),
+  provider: varchar('provider', { length: 80 }).notNull(),
+  baseUrl: text('base_url').notNull(),
+  modelName: varchar('model_name', { length: 160 }).notNull(),
+  modelOptions: jsonb('model_options').$type<Record<string, string | number | boolean>>().notNull().default(sql`'{}'::jsonb`),
+  encryptedApiKey: text('encrypted_api_key').notNull(),
+  inputPrice: numeric('input_price', { precision: 15, scale: 6 }),
+  cachePrice: numeric('cache_price', { precision: 15, scale: 6 }),
+  outputPrice: numeric('output_price', { precision: 15, scale: 6 }),
+  priceCurrency: varchar('price_currency', { length: 3 }).notNull().default('CNY'),
+  priceUnitTokens: integer('price_unit_tokens').notNull().default(1000000),
+  provenance: text('provenance').notNull().default('configured'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, t => [
+  uniqueIndex('model_versions_config_version_unique').on(t.configId,t.version),
+  uniqueIndex('model_versions_id_config_unique').on(t.id,t.configId),
+  check('model_versions_values_valid', sql`${t.version} > 0 AND ${t.priceUnitTokens} > 0 AND (${t.inputPrice} IS NULL OR ${t.inputPrice} >= 0) AND (${t.cachePrice} IS NULL OR ${t.cachePrice} >= 0) AND (${t.outputPrice} IS NULL OR ${t.outputPrice} >= 0) AND jsonb_typeof(${t.modelOptions}) = 'object' AND ${t.provenance} IN ('configured','historical_snapshot') AND ${t.encryptedApiKey} LIKE 'sdkey:%'`),
+]);
 
 export const analysisReports = pgTable('analysis_reports', {
   id: serial('id').primaryKey(),
@@ -237,8 +292,19 @@ export const creditTransactions = pgTable('credit_transactions', {
   amount: integer('amount').notNull(),
   reason: varchar('reason', { length: 80 }).notNull(),
   stripeCheckoutSessionId: text('stripe_checkout_session_id').unique(),
+  ledgerSequence: bigint('ledger_sequence', { mode: 'number' }),
+  balanceAfter: integer('balance_after'),
+  operationKey: varchar('operation_key', { length: 160 }),
+  metadata: jsonb('metadata').$type<Record<string, unknown>>().notNull().default(sql`'{}'::jsonb`),
   createdAt: timestamp('created_at').notNull().defaultNow(),
-}, t => [foreignKey({name:'credit_transactions_job_owner_fk',columns:[t.jobId,t.userId],foreignColumns:[analysisJobs.id,analysisJobs.userId]})]);
+}, t => [foreignKey({name:'credit_transactions_job_owner_fk',columns:[t.jobId,t.userId],foreignColumns:[analysisJobs.id,analysisJobs.userId]}),
+  foreignKey({name:'credit_transactions_billing_account_fk',columns:[t.userId],foreignColumns:[billingAccounts.userId]}),
+  uniqueIndex('credit_transactions_user_sequence_unique').on(t.userId,t.ledgerSequence).where(sql`${t.ledgerSequence} IS NOT NULL`),
+  uniqueIndex('credit_transactions_user_operation_unique').on(t.userId,t.operationKey).where(sql`${t.operationKey} IS NOT NULL`),
+  index('credit_transactions_user_id_idx').on(t.userId,t.id),
+  index('credit_transactions_job_owner_idx').on(t.jobId,t.userId).where(sql`${t.jobId} IS NOT NULL`),
+  check('credit_transactions_v2_balance_valid', sql`(${t.ledgerSequence} IS NULL AND ${t.balanceAfter} IS NULL) OR (${t.ledgerSequence} IS NOT NULL AND ${t.balanceAfter} IS NOT NULL AND ${t.ledgerSequence} > 0 AND ${t.ledgerSequence} <= 9007199254740991 AND ${t.balanceAfter} >= 0)`),
+]);
 
 export const analysisPricing = pgTable('analysis_pricing', {
   depth: integer('depth').primaryKey(),
@@ -403,6 +469,7 @@ export const paperAnalysisRuns = pgTable(
     workerLeaseUntil: timestamp('worker_lease_until', { withTimezone: true }),
     modelSubmittedAt: timestamp('model_submitted_at', { withTimezone: true }),
     modelCallId: varchar('model_call_id', { length: 100 }),
+    traderModelVersionId: integer('trader_model_version_id').references(() => llmModelConfigVersions.id),
     createdAt: timestamp('created_at').notNull().defaultNow(),
   },
   (table) => [
@@ -422,6 +489,8 @@ export const paperModelCalls = pgTable('paper_model_calls', {
   paperRunId: integer('paper_run_id').notNull().references(() => paperAnalysisRuns.id, { onDelete: 'cascade' }),
   callId: varchar('call_id', { length: 100 }).notNull(),
   modelConfigId: integer('model_config_id'),
+  modelVersionId: integer('model_version_id').references(() => llmModelConfigVersions.id),
+  costCurrency: varchar('cost_currency', { length: 3 }),
   provider: varchar('provider', { length: 80 }).notNull(),
   model: text('model').notNull(),
   status: varchar('status', { length: 30 }).notNull(),
@@ -434,7 +503,8 @@ export const paperModelCalls = pgTable('paper_model_calls', {
   costComplete: boolean('cost_complete').notNull().default(false),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   endedAt: timestamp('ended_at', { withTimezone: true }),
-}, (table) => [uniqueIndex('paper_model_calls_run_call_idx').on(table.paperRunId, table.callId)]);
+}, (table) => [uniqueIndex('paper_model_calls_run_call_idx').on(table.paperRunId, table.callId),
+  foreignKey({name:'paper_calls_version_config_fk',columns:[table.modelVersionId,table.modelConfigId],foreignColumns:[llmModelConfigVersions.id,llmModelConfigVersions.configId]})]);
 
 export const paperTradeDecisions = pgTable(
   'paper_trade_decisions',
@@ -705,6 +775,8 @@ export const analysisModelCalls = pgTable('analysis_model_calls', {
   model: text('model').notNull(),
   role: varchar('role', { length: 20 }).notNull().default('legacy'),
   modelConfigId: integer('model_config_id'),
+  modelVersionId: integer('model_version_id').references(() => llmModelConfigVersions.id),
+  costCurrency: varchar('cost_currency', { length: 3 }),
   provider: varchar('provider', { length: 80 }),
   startedAt: timestamp('started_at', { withTimezone: true }).notNull(),
   endedAt: timestamp('ended_at', { withTimezone: true }),
@@ -720,7 +792,8 @@ export const analysisModelCalls = pgTable('analysis_model_calls', {
   costComplete: boolean('cost_complete').notNull().default(false),
   isRetry: boolean('is_retry').notNull().default(false),
   requestKind: varchar('request_kind', { length: 30 }).notNull().default('standard'),
-}, (table) => [uniqueIndex('analysis_model_calls_job_call_idx').on(table.jobId, table.callId)]);
+}, (table) => [uniqueIndex('analysis_model_calls_job_call_idx').on(table.jobId, table.callId),
+  foreignKey({name:'analysis_calls_version_config_fk',columns:[table.modelVersionId,table.modelConfigId],foreignColumns:[llmModelConfigVersions.id,llmModelConfigVersions.configId]})]);
 
 export const analysisDecisions = pgTable('analysis_decisions', {
   id: serial('id').primaryKey(),
@@ -759,6 +832,14 @@ export const analysisJobResumptions = pgTable('analysis_job_resumptions', {
   previousDeepConfigSnapshot: text('previous_deep_config_snapshot'),
   nextQuickConfigSnapshot: text('next_quick_config_snapshot').notNull(),
   nextDeepConfigSnapshot: text('next_deep_config_snapshot').notNull(),
+  previousQuickVersionId: integer('previous_quick_version_id').references(() => llmModelConfigVersions.id),
+  previousDeepVersionId: integer('previous_deep_version_id').references(() => llmModelConfigVersions.id),
+  nextQuickVersionId: integer('next_quick_version_id').references(() => llmModelConfigVersions.id),
+  nextDeepVersionId: integer('next_deep_version_id').references(() => llmModelConfigVersions.id),
+  configurationState: text('configuration_state').notNull().default('legacy_unknown'),
+  initiator: text('initiator').notNull().default('legacy_unknown'),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 }, t => [foreignKey({name:'analysis_resumptions_job_owner_fk',columns:[t.jobId,t.userId],foreignColumns:[analysisJobs.id,analysisJobs.userId]}),
+  check('analysis_resumptions_initiator_valid', sql`${t.initiator} IN ('user','automatic','admin','legacy_unknown')`),
+  check('analysis_resumptions_state_valid', sql`(${t.configurationState} = 'legacy_unknown' AND ${t.nextQuickVersionId} IS NULL AND ${t.nextDeepVersionId} IS NULL) OR (${t.configurationState} = 'versioned' AND ${t.nextQuickVersionId} IS NOT NULL AND ${t.nextDeepVersionId} IS NOT NULL)`),
   index('analysis_resumptions_job_created_idx').on(t.jobId,t.createdAt)]);

@@ -1,4 +1,5 @@
 'use server';
+import { ensureModelVersion } from '@/lib/analysis/model-versions';
 
 import { adjustCreditBalance } from '@/lib/credits/admin-adjustment';
 import { modelConfigWrite, encryptModelKey } from '@/lib/security/model-key';
@@ -120,6 +121,7 @@ export async function createModelConfig(formData: FormData) {
   try {
     await db.transaction(async (tx) => {
       const [created] = await tx.insert(llmModelConfigs).values(storedData).returning();
+      await ensureModelVersion(tx, created);
       if (data.isDefault) {
         await tx.update(llmModelConfigs).set({ isDefault: false, updatedAt: new Date() })
           .where(sql`${llmModelConfigs.id} <> ${created.id}`);
@@ -184,11 +186,13 @@ export async function updateModelConfig(formData: FormData) {
     ...(storedApiKey ? { apiKey: storedApiKey } : {})
   };
 
-  const [updated] = await db
-    .update(llmModelConfigs)
-    .set(updateValues)
-    .where(and(eq(llmModelConfigs.id, configId), isNull(llmModelConfigs.retiredAt)))
-    .returning();
+  const updated = await db.transaction(async tx => {
+    const [current] = await tx.select().from(llmModelConfigs).where(and(eq(llmModelConfigs.id,configId),isNull(llmModelConfigs.retiredAt))).for('update');
+    if (!current) return null;
+    const [saved] = await tx.update(llmModelConfigs).set(updateValues).where(eq(llmModelConfigs.id,configId)).returning();
+    await ensureModelVersion(tx,saved);
+    return saved;
+  });
 
   if (!updated) {
     return { error: 'Model config not found.' };

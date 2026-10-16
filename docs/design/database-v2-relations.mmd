@@ -1,0 +1,55 @@
+%% Target design, not the current deployed schema. FK field details: database-v2.md
+erDiagram
+    users ||--|| billing_accounts : billing
+    users o|--o{ users : referral
+    billing_accounts ||--o{ credit_transactions : ledger
+    users ||--o{ activity_logs : activity
+    users ||--o{ admin_audit_logs : administrator
+    users ||--o{ analysis_jobs : owns
+    analysis_jobs o|--o{ credit_transactions : charged_for
+    llm_model_configs ||--|{ llm_model_config_versions : versions
+    llm_model_config_versions o|--o{ analysis_jobs : quick_and_deep
+    llm_model_config_versions o|--o{ analysis_model_calls : executed_version
+    analysis_jobs ||--o{ analysis_model_calls : calls
+    analysis_jobs ||--o{ analysis_reports : reports
+    analysis_jobs ||--o| analysis_decisions : extracted
+    analysis_jobs ||--o{ analysis_job_resumptions : replacements
+    llm_model_config_versions o|--o{ analysis_job_resumptions : before_and_after
+    instruments o|--o{ analysis_jobs : analyzed
+    instruments ||--o{ instrument_sources : mappings
+    instruments ||--o{ price_snapshots : quotes
+    instruments ||--o{ daily_prices : bars
+    instruments ||--o{ market_sync_state : schedules
+    users ||--o{ watchlist_items : follows
+    instruments ||--o{ watchlist_items : followed
+    users ||--o{ paper_portfolios : portfolios
+    paper_portfolios ||--o{ paper_positions : holdings
+    instruments ||--o{ paper_positions : instrument
+    paper_portfolios ||--o{ paper_trades : executions
+    instruments ||--o{ paper_trades : instrument
+    paper_positions o|--o{ paper_trades : position
+    price_snapshots o|--o{ paper_trades : price_evidence
+    paper_portfolios ||--o{ paper_trade_requests : idempotency
+    paper_portfolios ||--o{ paper_analysis_runs : analysis
+    watchlist_items o|--o{ paper_analysis_runs : selected_item
+    analysis_jobs ||--o| paper_analysis_runs : research
+    llm_model_config_versions o|--o{ paper_analysis_runs : trader_version
+    paper_analysis_runs ||--o{ paper_model_calls : trader_calls
+    llm_model_config_versions o|--o{ paper_model_calls : executed_version
+    paper_analysis_runs ||--o| paper_trade_decisions : proposed_decision
+    paper_trade_decisions o|--o| paper_trades : executed_once
+    signup_email_verifications {
+        varchar email PK
+    }
+    signup_email_limits {
+        varchar scope PK
+    }
+    analysis_pricing {
+        smallint depth PK
+    }
+    analysis_worker_settings {
+        varchar key PK
+    }
+    market_sync_runs {
+        integer id PK
+    }

@@ -17,9 +17,9 @@ class MultiModelClientTests(unittest.TestCase):
         factory.side_effect = [Mock(get_llm=Mock(return_value=quick_model)),
                                Mock(get_llm=Mock(return_value=deep_model))]
         graph = self.build(
-            {"id": 12, "provider": "qwen", "model": "qwen-fast", "base_url": "https://qwen.example/v1",
+            {"id": 12, "model_version_id": 112, "provider": "qwen", "model": "qwen-fast", "base_url": "https://qwen.example/v1",
              "api_key": "quick-secret", "options": {"temperature": 0.2}, "prices": {"input": "1"}},
-            {"id": 25, "provider": "openai", "model": "gpt-deep", "base_url": "https://openai.example/v1",
+            {"id": 25, "model_version_id": 125, "provider": "openai", "model": "gpt-deep", "base_url": "https://openai.example/v1",
              "api_key": "deep-secret", "options": {"reasoning_effort": "high"}, "prices": {"input": "8"}},
         )
 
@@ -29,6 +29,7 @@ class MultiModelClientTests(unittest.TestCase):
         self.assertIs(quick, quick_model)
         self.assertIs(deep, deep_model)
         self.assertEqual(quick.metadata["existing"], "kept")
+        self.assertEqual((quick.metadata["model_version_id"], deep.metadata["model_version_id"]), (112, 125))
         self.assertEqual((quick.metadata["model_role"], quick.metadata["model_config_id"],
                           quick.metadata["model_provider"]), ("quick", 12, "qwen"))
         self.assertEqual((deep.metadata["model_role"], deep.metadata["model_config_id"],

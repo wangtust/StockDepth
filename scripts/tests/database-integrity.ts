@@ -26,7 +26,7 @@ async function main() {
   for(let i=0;i<2;i++) {const result=spawnSync(process.execPath,[root+'/scripts/initialize-database.cjs'],{cwd:root,env:{...process.env,POSTGRES_URL:fresh.url.toString(),STOCKDEPTH_ADMIN_EMAIL:'',STOCKDEPTH_ADMIN_PASSWORD:''},encoding:'utf8'});assert.equal(result.status,0,'real initializer must create/upgrade safely');}
   await validated(fresh.sql);
   for(const table of ['users','analysis_jobs','analysis_reports','analysis_model_calls','credit_transactions','paper_trades'])assert.equal(Number((await fresh.sql.unsafe(`select count(*) from "${table}"`))[0].count),0,'business table is empty: '+table);
-  const tableCount=Number((await fresh.sql`select count(*) from pg_tables where schemaname='public'`)[0].count);assert.equal(tableCount,28);
+  const tableCount=Number((await fresh.sql`select count(*) from pg_tables where schemaname='public'`)[0].count);assert.equal(tableCount,30);
   const columns=await fresh.sql`select is_nullable from information_schema.columns where table_name='credit_transactions' and column_name='user_id'`;assert.equal(columns[0].is_nullable,'NO');
   await initializeAdmin(fresh.sql,{STOCKDEPTH_ADMIN_EMAIL:'fixture-admin@example.test',STOCKDEPTH_ADMIN_PASSWORD:'FixturePassword123!'});
   await initializeAdmin(fresh.sql,{STOCKDEPTH_ADMIN_EMAIL:'fixture-admin@example.test',STOCKDEPTH_ADMIN_PASSWORD:'FixturePassword123!'});
@@ -47,6 +47,9 @@ async function main() {
   const {adjustCreditBalance}=await import('../../apps/web/lib/credits/admin-adjustment');
   const {recordInitialCreditGrant}=await import('../../apps/web/lib/credits/initial-grant');
   const {users}=await import('../../apps/web/lib/db/schema');
+  const {mutateCredits}=await import('../../apps/web/lib/credits/ledger');
+  // V2 new accounts start at zero; fund the synthetic fixture through the real ledger.
+  await db.transaction(tx=>mutateCredits(tx,{userId:user.id,amount:5,reason:'fixture_funding',operationKey:'fixture-funding:'+user.id}));
   const [actor]=await fresh.sql`select id from users where role='super_admin'`;
   const before=Number((await fresh.sql`select count(*) from credit_transactions`)[0].count);
   assert((await adjustCreditBalance(actor.id,user.id,-10)).error);assert.equal((await fresh.sql`select analysis_credits from users where id=${user.id}`)[0].analysis_credits,5);assert.equal(Number((await fresh.sql`select count(*) from credit_transactions`)[0].count),before);
@@ -56,7 +59,7 @@ async function main() {
   assert((await adjustCreditBalance(actor.id,user.id,0)).error);
   const registered=await db.transaction(async tx=>{const [newUser]=await tx.insert(users).values({email:'new-signup@example.test',passwordHash:'fixture'}).returning();await recordInitialCreditGrant(tx,newUser,'signup_grant');return newUser;});assert.equal((await fresh.sql`select amount from credit_transactions where user_id=${registered.id}`)[0].amount,10);
   const {analysisDateSchema}=await import('../../apps/web/lib/analysis/date-validation');for(const value of ['2026-02-30','2026-99-99','0000-01-01','2026/10/15'])assert(!analysisDateSchema.safeParse(value).success);for(const value of ['2024-02-29','2026-10-17'])assert(analysisDateSchema.safeParse(value).success);
-  const oldFolder=path.join(temp,'migrations');await mkdir(path.join(oldFolder,'meta'),{recursive:true});const journal=JSON.parse(await readFile(path.join(folder,'meta/_journal.json'),'utf8'));const last=journal.entries.at(-1);journal.entries=journal.entries.slice(0,-1);await writeFile(path.join(oldFolder,'meta/_journal.json'),JSON.stringify(journal));for(const entry of journal.entries)await copyFile(path.join(folder,entry.tag+'.sql'),path.join(oldFolder,entry.tag+'.sql'));
+  const oldFolder=path.join(temp,'migrations');await mkdir(path.join(oldFolder,'meta'),{recursive:true});const journal=JSON.parse(await readFile(path.join(folder,'meta/_journal.json'),'utf8'));const baseline=journal.entries.findIndex((entry:{tag:string})=>entry.tag==='0038_overjoyed_gamora');assert(baseline>=0,'0038 baseline must exist');journal.entries=journal.entries.slice(0,baseline+1);await writeFile(path.join(oldFolder,'meta/_journal.json'),JSON.stringify(journal));for(const entry of journal.entries)await copyFile(path.join(folder,entry.tag+'.sql'),path.join(oldFolder,entry.tag+'.sql'));
   const upgrade=await database('upgrade');await migrate(drizzle(upgrade.sql),{migrationsFolder:oldFolder});
   const [owner]=await upgrade.sql`insert into users(email,password_hash,analysis_credits) values('legacy@example.test','fixture',17) returning id`;const [wrong]=await upgrade.sql`insert into users(email,password_hash) values('wrong@example.test','fixture') returning id`;
   const [legacy]=await upgrade.sql`insert into analysis_jobs(user_id,run_id,ticker,trade_date,analysts) values(${owner.id},${randomUUID()},'MOCK','2026-10-15','[]') returning id`;
@@ -65,7 +68,7 @@ async function main() {
   await upgrade.sql`update analysis_reports set user_id=${owner.id} where id=${report.id}`;
   await migrate(drizzle(upgrade.sql),{migrationsFolder:folder});await migrate(drizzle(upgrade.sql),{migrationsFolder:folder});await validated(upgrade.sql);
   assert.equal((await upgrade.sql`select content from analysis_reports where id=${report.id}`)[0].content,'DO NOT DELETE');assert.equal((await upgrade.sql`select analysis_credits from users where id=${owner.id}`)[0].analysis_credits,17);assert.equal(Number((await upgrade.sql`select count(*) from credit_transactions`)[0].count),0,'historical opening balances are not invented');
-  console.log('PASS: real empty-DB initialization twice, 28 tables, all constraints validated, report ownership/uniqueness, ledger ownership/non-null, calendar dates, atomic concurrent credits/audit rollback, initial grants, historical preservation, unsafe migration rejection and upgrade idempotency. No providers or email.');
+  console.log('PASS: real empty-DB initialization twice, 30 tables, all constraints validated, report ownership/uniqueness, ledger ownership/non-null, calendar dates, atomic concurrent credits/audit rollback, initial grants, historical preservation, unsafe migration rejection and upgrade idempotency. No providers or email.');
  }finally{if(client)await client.end();for(const sql of connections)await sql.end();for(const name of created)await admin.unsafe(`drop database if exists "${name}" with (force)`);await admin.end();await rm(temp,{recursive:true,force:true});}
 }
-main().catch(e=>{console.error(e.message);process.exitCode=1;});
+main().catch(e=>{console.error('FAIL database-integrity: '+(e?.name || 'Error')+' '+(e?.code || '')+' '+String(e?.stack || '').split('\n').filter(line=>line.includes('scripts/tests/database-integrity.ts')).join(' ').trim());process.exitCode=1;});

@@ -38,6 +38,8 @@ export async function GET(
     .select({
       id: analysisJobs.id, ticker: analysisJobs.ticker, status: analysisJobs.status,
       quickModelConfigId: analysisJobs.quickModelConfigId, deepModelConfigId: analysisJobs.deepModelConfigId,
+      quickModelVersionId: analysisJobs.quickModelVersionId, deepModelVersionId: analysisJobs.deepModelVersionId,
+      configurationState: analysisJobs.configurationState, chargedCredits: analysisJobs.chargedCredits,
       externalStatus: analysisJobs.externalStatus, errorMessage: analysisJobs.errorMessage,
       hiddenAt: analysisJobs.hiddenAt,
       startedAt: analysisJobs.startedAt, completedAt: analysisJobs.completedAt,
@@ -50,6 +52,7 @@ export async function GET(
       resumptions: sql`coalesce((select json_agg(json_build_object('id', h.id, 'previousQuickModel', h.previous_quick_model, 'previousDeepModel', h.previous_deep_model, 'nextQuickModel', h.next_quick_model, 'nextDeepModel', h.next_deep_model, 'createdAt', h.created_at) order by h.id) from analysis_job_resumptions h where h.job_id = analysis_jobs.id and h.user_id = ${currentUser.id}), '[]'::json)`,
       calls: sql`coalesce((select json_agg(json_build_object('callId', c.call_id, 'agent', c.agent,
         'model', c.model, 'role', c.role, 'provider', c.provider, 'modelConfigId', c.model_config_id,
+        'modelVersionId', c.model_version_id, 'costCurrency', c.cost_currency,
         'status', c.status, 'startedAt', c.started_at,
         'endedAt', c.ended_at, 'inputTokens', c.input_tokens,
         'outputTokens', c.output_tokens, 'totalTokens', c.total_tokens, 'cachedInputTokens', c.cached_input_tokens,

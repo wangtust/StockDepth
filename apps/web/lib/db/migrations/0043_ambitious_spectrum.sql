@@ -1,0 +1,1 @@
+ALTER TABLE "users" ALTER COLUMN "analysis_credits" SET DEFAULT 0;

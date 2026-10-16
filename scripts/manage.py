@@ -49,7 +49,8 @@ def main():
     if args.action == 'build':
         raise SystemExit(subprocess.run([str(RUNTIME / 'pnpm'), 'build'], cwd=ROOT / 'apps/web', env=env).returncode)
     if args.action in ('start', 'restart') and 'web' in names:
-        if not (ROOT / 'apps/web/.next/BUILD_ID').exists():
+        dist_dir = env.get('STOCKDEPTH_NEXT_DIST_DIR') or '.next'
+        if not (ROOT / 'apps/web' / dist_dir / 'BUILD_ID').exists():
             raise SystemExit('请先运行 ./bin/stockdepth build，生成生产构建。')
     if args.action in ('start', 'restart'):
         result = subprocess.run(

@@ -5,7 +5,7 @@ export const JOB_PAGE_SIZE = 20;
 export function jobsPageQuery(userId: number, before?: number) {
   return sql`
     select
-      (select analysis_credits from users where id = ${userId}) as credits,
+      (select analysis_credits from billing_accounts where user_id = ${userId}) as credits,
       coalesce((select jsonb_object_agg(depth, credit_cost) from analysis_pricing), '{}'::jsonb) as pricing,
       coalesce((select jsonb_agg(jsonb_build_object('id', id, 'name', name,
         'modelName', model_name, 'provider', provider, 'isDefault', is_default,

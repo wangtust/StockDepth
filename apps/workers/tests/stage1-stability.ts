@@ -118,6 +118,8 @@ async function main() {
   assert.equal(await claimAnalysis(settings), null);
   check('existing-runner-monitoring-does-not-admit-extra-starts');
   await db.update(analysisJobs).set({ status: 'complete', workerOwner: null, workerLeaseUntil: null });
+  // Paper pins authoritative configuration rows, not the caller's stale adapter.
+  await db.update(llmModelConfigs).set({ inputPrice: '2' }).where(eq(llmModelConfigs.id,config.id));
   const [portfolio] = await db.insert(paperPortfolios).values({ userId: user.id, initialCashCents: 10000, cashCents: 10000, autoTradeEnabled: false }).returning();
   const paperFixture = async () => {
     const job = await fixtureJob('complete');
@@ -145,6 +147,27 @@ async function main() {
   assert.equal(requestCount, requestBefore);
   await processRun(secondOwner, model);
   check('pre-submit-reclaim-fences-old-paper-owner');
+  const [pinnedRun] = await db.select().from(paperAnalysisRuns).where(eq(paperAnalysisRuns.id,secondOwner.id));
+  assert(pinnedRun.traderModelVersionId,'paper submission records an immutable model pin');
+  const recovery = await paperFixture();
+  await db.update(paperAnalysisRuns).set({traderModelVersionId:pinnedRun.traderModelVersionId}).where(eq(paperAnalysisRuns.id,recovery.id));
+  const recoveryOwner = await claimPaperRun(); assert(recoveryOwner && recoveryOwner.id===recovery.id);
+  await db.update(llmModelConfigs).set({modelName:'changed-after-pin',inputPrice:'999'}).where(eq(llmModelConfigs.id,config.id));
+  await processRun(recoveryOwner,model);
+  const [recoveryCall] = await db.select().from(paperModelCalls).where(eq(paperModelCalls.paperRunId,recovery.id));
+  assert.equal(recoveryCall.modelVersionId,pinnedRun.traderModelVersionId);
+  assert.equal(recoveryCall.model,config.modelName);
+  assert.equal(recoveryCall.estimatedCost,'0.000026000000','recovery uses pinned prices after configuration edits');
+  const blocked = await paperFixture();
+  await db.update(paperAnalysisRuns).set({traderModelVersionId:pinnedRun.traderModelVersionId}).where(eq(paperAnalysisRuns.id,blocked.id));
+  const blockedOwner=await claimPaperRun(); assert(blockedOwner && blockedOwner.id===blocked.id);
+  await db.update(llmModelConfigs).set({isActive:false,retiredAt:new Date(),unavailableReason:'quota_exhausted'}).where(eq(llmModelConfigs.id,config.id));
+  const beforeBlocked=requestCount;
+  await assert.rejects(processRun(blockedOwner,model),/Pinned trading model is unavailable/);
+  assert.equal(requestCount,beforeBlocked,'disabled identity rejects pinned execution before sending requests');
+  assert.equal((await db.select().from(paperModelCalls).where(eq(paperModelCalls.paperRunId,blocked.id))).length,0);
+  await db.update(llmModelConfigs).set({isActive:true,retiredAt:null,unavailableReason:null,modelName:config.modelName,inputPrice:'2'}).where(eq(llmModelConfigs.id,config.id));
+  check('paper-pinned-recovery-preserves-version-and-enforces-identity-availability');
   const uncertain = await paperFixture();
   const uncertainClaim = await claimPaperRun(); assert(uncertainClaim && uncertainClaim.id === uncertain.id);
   const callId = randomUUID();
@@ -159,7 +182,9 @@ async function main() {
   assert.equal(unknownDecision.status, 'failed'); assert(unknownDecision.errorMessage?.includes('结果未知'));
   check('submitted-crash-is-unknown-not-auto-rebilled');
   mode = 'no-usage'; await paperFixture(); const missing = await claimPaperRun(); assert(missing);
+  await db.update(llmModelConfigs).set({inputPrice:null,cachePrice:null,outputPrice:null}).where(eq(llmModelConfigs.id,config.id));
   await processRun(missing, { ...model, inputPrice: null, cachePrice: null, outputPrice: null });
+  await db.update(llmModelConfigs).set({inputPrice:'2',cachePrice:'1',outputPrice:'4'}).where(eq(llmModelConfigs.id,config.id));
   const [missingCall] = await db.select().from(paperModelCalls).where(eq(paperModelCalls.paperRunId, missing.id));
   assert.equal(missingCall.estimatedCost, null); assert.equal(missingCall.costComplete, false);
   check('paper-missing-usage-and-price-are-unknown');
@@ -231,5 +256,5 @@ async function main() {
   await writeFile(process.env.STAGE1_TEST_OUTPUT!, JSON.stringify({ tests: results, resources: metrics }, null, 2));
   await timeout(10);
 }
-main().catch(error => { console.error('Isolated stability test failed:', error.name, error.code || error.message); process.exitCode=1; })
+main().catch(error => { console.error('Isolated stability test failed:', error.name, error.code || error.message, String(error.stack).split('\n').filter(line=>/^\s+at /.test(line)).join('\n')); process.exitCode=1; })
   .finally(async () => { http.closeAllConnections(); await new Promise<void>(resolve=>http.close(()=>resolve())); await client.end(); });

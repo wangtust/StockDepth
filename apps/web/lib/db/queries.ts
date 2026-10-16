@@ -1,7 +1,7 @@
 import { cache } from 'react';
 import { desc, and, eq, isNull } from 'drizzle-orm';
 import { db } from './drizzle';
-import { activityLogs, analysisJobs, users } from './schema';
+import { activityLogs, analysisJobs, billingAccounts, users } from './schema';
 import { cookies } from 'next/headers';
 import { verifyToken } from '@/lib/auth/session';
 import { ensureUserInviteCode } from '@/lib/referrals/invite-codes';
@@ -12,7 +12,13 @@ export const getUser = cache(async function getUser() {
     return null;
   }
 
-  const sessionData = await verifyToken(sessionCookie.value);
+  let sessionData;
+  try {
+    sessionData = await verifyToken(sessionCookie.value);
+  } catch {
+    // Expired or pre-cutover signatures are unauthenticated, not server errors.
+    return null;
+  }
   if (
     !sessionData ||
     !sessionData.user ||
@@ -26,8 +32,9 @@ export const getUser = cache(async function getUser() {
   }
 
   const user = await db
-    .select()
+    .select({ user: users, billing: billingAccounts })
     .from(users)
+    .leftJoin(billingAccounts, eq(users.id, billingAccounts.userId))
     .where(
       and(
         eq(users.id, sessionData.user.id),
@@ -41,7 +48,7 @@ export const getUser = cache(async function getUser() {
     return null;
   }
 
-  return user[0];
+  return billingUser(user[0]);
 });
 
 export async function getPublicUser() {
@@ -59,12 +66,13 @@ export async function getPublicUser() {
 
 export async function getUserByStripeCustomerId(customerId: string) {
   const result = await db
-    .select()
+    .select({ user: users, billing: billingAccounts })
     .from(users)
-    .where(eq(users.stripeCustomerId, customerId))
+    .leftJoin(billingAccounts, eq(users.id, billingAccounts.userId))
+    .where(eq(billingAccounts.stripeCustomerId, customerId))
     .limit(1);
 
-  return result.length > 0 ? result[0] : null;
+  return result.length > 0 ? billingUser(result[0]) : null;
 }
 
 export async function updateUserSubscription(
@@ -76,13 +84,10 @@ export async function updateUserSubscription(
     subscriptionStatus: string;
   }
 ) {
-  await db
-    .update(users)
-    .set({
-      ...subscriptionData,
-      updatedAt: new Date()
-    })
-    .where(eq(users.id, userId));
+  await db.transaction(async tx => {
+    await tx.update(billingAccounts).set({...subscriptionData, updatedAt:new Date()}).where(eq(billingAccounts.userId,userId));
+    await tx.update(users).set({...subscriptionData, updatedAt:new Date()}).where(eq(users.id,userId));
+  });
 }
 
 export async function getActivityLogs() {
@@ -128,4 +133,10 @@ export async function getAccountForUser() {
 
   const { passwordHash, ...account } = user;
   return account;
+}
+
+function billingUser(row: {user: typeof users.$inferSelect; billing: typeof billingAccounts.$inferSelect | null}) {
+  if (!row.billing) return row.user;
+  const {analysisCredits,stripeCustomerId,stripeSubscriptionId,stripeProductId,planName,subscriptionStatus} = row.billing;
+  return {...row.user,analysisCredits,stripeCustomerId,stripeSubscriptionId,stripeProductId,planName,subscriptionStatus};
 }

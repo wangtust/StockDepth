@@ -26,6 +26,18 @@ class UsageTests(unittest.TestCase):
         self.recorder.on_chat_model_start({}, [], run_id=run_id,
             metadata={'langgraph_node': 'Research Manager'}, invocation_params={'model': 'test-model'})
 
+    def test_version_reference_survives_resume_without_backfilling_legacy_calls(self):
+        legacy, versioned = uuid4(), uuid4()
+        self.start(legacy)
+        self.recorder.on_chat_model_start({}, [], run_id=versioned,
+            metadata={'model_role': 'quick', 'model_config_id': 7, 'model_version_id': 71},
+            invocation_params={'model': 'test-model'})
+        resumed = UsageRecorder(self.path)
+        calls = {call['call_id']: call for call in resumed.calls}
+        self.assertIsNone(calls[str(legacy)].get('model_version_id'))
+        self.assertEqual(calls[str(versioned)]['model_version_id'], 71)
+        self.assertEqual(calls[str(versioned)]['model_config_id'], 7)
+
     def test_usage_and_duplicate_completion(self):
         run_id = uuid4()
         self.start(run_id)

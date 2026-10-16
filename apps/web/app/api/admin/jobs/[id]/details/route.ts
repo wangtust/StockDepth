@@ -22,6 +22,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   const calls = await timing.measure('calls', () => db.select({
     callId: analysisModelCalls.callId, agent: analysisModelCalls.agent, model: analysisModelCalls.model,
     role: analysisModelCalls.role, provider: analysisModelCalls.provider, modelConfigId: analysisModelCalls.modelConfigId,
+    modelVersionId: analysisModelCalls.modelVersionId, costCurrency: analysisModelCalls.costCurrency,
     inputTokens: analysisModelCalls.inputTokens, outputTokens: analysisModelCalls.outputTokens,
     cachedInputTokens: analysisModelCalls.cachedInputTokens, pricingSnapshot: analysisModelCalls.pricingSnapshot,
     estimatedCost: analysisModelCalls.estimatedCost, costComplete: analysisModelCalls.costComplete,
@@ -30,6 +31,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   const paperCalls = await timing.measure('paper_calls', () => db.select({
     callId: paperModelCalls.callId, model: paperModelCalls.model, provider: paperModelCalls.provider,
     modelConfigId: paperModelCalls.modelConfigId, status: paperModelCalls.status,
+    modelVersionId: paperModelCalls.modelVersionId, costCurrency: paperModelCalls.costCurrency,
     inputTokens: paperModelCalls.inputTokens, outputTokens: paperModelCalls.outputTokens,
     cachedInputTokens: paperModelCalls.cachedInputTokens, pricingSnapshot: paperModelCalls.pricingSnapshot,
     estimatedCost: paperModelCalls.estimatedCost, costComplete: paperModelCalls.costComplete,

@@ -1,6 +1,7 @@
 node_modules/
 .next/
 .next-dev/
+.next-v2/
 __pycache__/
 *.pyc
 *.tsbuildinfo

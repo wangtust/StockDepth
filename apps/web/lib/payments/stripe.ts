@@ -1,13 +1,14 @@
+import { mutateCredits } from '@/lib/credits/ledger';
 import Stripe from 'stripe';
 import { redirect } from 'next/navigation';
-import { User, creditTransactions, users } from '@/lib/db/schema';
+import { User, billingAccounts, users } from '@/lib/db/schema';
 import {
   getUserByStripeCustomerId,
   getUser,
   updateUserSubscription
 } from '@/lib/db/queries';
 import { db } from '@/lib/db/drizzle';
-import { eq, sql } from 'drizzle-orm';
+import { eq } from 'drizzle-orm';
 import { getCreditPack } from '@/lib/payments/credit-packs';
 
 export const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
@@ -113,33 +114,12 @@ export async function applyCreditPurchaseFromCheckoutSession(
     typeof session.customer === 'string' ? session.customer : session.customer?.id;
 
   await db.transaction(async (tx) => {
-    const [existing] = await tx
-      .select({ id: creditTransactions.id })
-      .from(creditTransactions)
-      .where(eq(creditTransactions.stripeCheckoutSessionId, session.id))
-      .limit(1);
-
-    if (existing) {
-      return;
-    }
-
-    await tx
-      .update(users)
-      .set({
-        analysisCredits: sql`${users.analysisCredits} + ${credits}`,
-        ...(customerId ? { stripeCustomerId: customerId } : {}),
-        planName: 'Credit Pack',
-        subscriptionStatus: 'credits',
-        updatedAt: new Date()
-      })
-      .where(eq(users.id, userId));
-
-    await tx.insert(creditTransactions).values({
-      userId,
-      amount: credits,
-      reason: 'stripe_credit_purchase',
-      stripeCheckoutSessionId: session.id
-    });
+    const result = await mutateCredits(tx, {userId,amount:credits,reason:'stripe_credit_purchase',
+      operationKey:`stripe-checkout:${session.id}`,stripeCheckoutSessionId:session.id});
+    if (!result.applied) return;
+    const fields = { ...(customerId ? {stripeCustomerId:customerId} : {}), planName:'Credit Pack', subscriptionStatus:'credits',updatedAt:new Date() };
+    await tx.update(billingAccounts).set(fields).where(eq(billingAccounts.userId,userId));
+    await tx.update(users).set(fields).where(eq(users.id,userId));
   });
 }
 

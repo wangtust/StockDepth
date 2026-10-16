@@ -49,6 +49,7 @@ class UsageRecorder(BaseCallbackHandler):
                 'agent': metadata.get('langgraph_node', 'Model'),
                 'role': metadata.get('model_role', 'legacy'),
                 'model_config_id': metadata.get('model_config_id'),
+                'model_version_id': metadata.get('model_version_id'),
                 'provider': metadata.get('model_provider'),
                 'model': model,
                 'started_at': dt.datetime.now(dt.timezone.utc).isoformat(),

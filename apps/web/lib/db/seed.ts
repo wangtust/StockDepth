@@ -68,6 +68,7 @@ async function seed() {
         passwordHash: passwordHash,
         inviteCode: 'AAAAAA',
         role: 'super_admin',
+        analysisCredits: 0,
       },
     ])
     .returning();

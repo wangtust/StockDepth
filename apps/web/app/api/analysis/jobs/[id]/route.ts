@@ -1,3 +1,4 @@
+import { resumptionHistory } from '@/lib/analysis/resumption-history';
 import { jobModelFields } from '@/lib/analysis/job-models';
 import { RequestTiming } from '@/lib/http/request-timing';
 import { and, eq, isNull, sql } from 'drizzle-orm';
@@ -50,7 +51,7 @@ export async function GET(
       reports: sql`coalesce((select json_agg(json_build_object('id', r.id, 'reportKey', r.report_key,
         'title', r.title, 'updatedAt', r.updated_at at time zone 'UTC') order by r.id)
         from analysis_reports r where r.job_id = analysis_jobs.id and r.user_id = ${currentUser.id}), '[]'::json)`,
-      resumptions: sql`coalesce((select json_agg(json_build_object('id', h.id, 'previousQuickModel', h.previous_quick_model, 'previousDeepModel', h.previous_deep_model, 'nextQuickModel', h.next_quick_model, 'nextDeepModel', h.next_deep_model, 'createdAt', h.created_at) order by h.id) from analysis_job_resumptions h where h.job_id = analysis_jobs.id and h.user_id = ${currentUser.id}), '[]'::json)`,
+      resumptions: resumptionHistory(currentUser.id),
       calls: sql`coalesce((select json_agg(json_build_object('callId', c.call_id, 'agent', c.agent,
         'model', c.model, 'role', c.role, 'provider', c.provider, 'modelConfigId', c.model_config_id,
         'modelVersionId', c.model_version_id, 'costCurrency', c.cost_currency,

@@ -2,7 +2,7 @@ import {pinModelVersions,readModelVersion,ModelSelectionError} from './model-ver
 import {and,eq,isNull,desc,asc,sql} from 'drizzle-orm';
 import {db} from '../db/drizzle';
 import {analysisJobs,analysisJobLegacyConfigs,analysisJobResumptions,llmModelConfigs} from '../db/schema';
-import {immutableModelSnapshot,encryptedHistoricalSnapshot} from './model-snapshot';
+import {encryptedHistoricalSnapshot} from './model-snapshot';
 import {unavailableJobModels} from './model-availability';
 export type ReplacementModels={quickModelConfigId:number;deepModelConfigId:number};
 export async function resumeAnalysisJob(userId:number,jobId:number,replacement?:ReplacementModels, autoOwner?:string) {
@@ -38,17 +38,16 @@ export async function resumeAnalysisJob(userId:number,jobId:number,replacement?:
       let pinned;
       try { pinned=await pinModelVersions(tx,{id:selection.quickModelConfigId},{id:selection.deepModelConfigId}); }
       catch(error) { if(error instanceof ModelSelectionError)return {error:error.message,status:400} as const; throw error; }
-      const quick=await readModelVersion(tx,pinned.quickModelVersionId),deep=await readModelVersion(tx,pinned.deepModelVersionId);
       await tx.insert(analysisJobResumptions).values({jobId,userId,
         previousQuickVersionId:existing.quickModelVersionId,previousDeepVersionId:existing.deepModelVersionId,
         nextQuickVersionId:pinned.quickModelVersionId,nextDeepVersionId:pinned.deepModelVersionId,
         configurationState:'versioned',initiator:autoOwner?'automatic':'user',
-        previousQuickModel:quickVersion?.modelName ?? (historical.quickModel as string|null) ?? null,
-        previousDeepModel:deepVersion?.modelName ?? (historical.deepModel as string|null) ?? null,
-        nextQuickModel:quick.modelName,nextDeepModel:deep.modelName,
-        previousQuickConfigSnapshot:quickVersion ? immutableModelSnapshot(quickVersion) : encryptedHistoricalSnapshot((historical.quickConfigSnapshot as string|null) ?? null),
-        previousDeepConfigSnapshot:deepVersion ? immutableModelSnapshot(deepVersion) : encryptedHistoricalSnapshot((historical.deepConfigSnapshot as string|null) ?? null),
-        nextQuickConfigSnapshot:immutableModelSnapshot(quick),nextDeepConfigSnapshot:immutableModelSnapshot(deep)});
+        legacyEvidence: !quickVersion || !deepVersion ? {
+          ...(!quickVersion ? {previousQuickModel:historical.quickModel ?? null,
+            previousQuickConfigSnapshot:encryptedHistoricalSnapshot((historical.quickConfigSnapshot as string|null) ?? null)} : {}),
+          ...(!deepVersion ? {previousDeepModel:historical.deepModel ?? null,
+            previousDeepConfigSnapshot:encryptedHistoricalSnapshot((historical.deepConfigSnapshot as string|null) ?? null)} : {})
+        } : null});
       changed=pinned;
     }else if(!quickVersion || !deepVersion) {
       return {error:'旧任务缺少可靠模型版本，请选择模型后继续。',status:409} as const;

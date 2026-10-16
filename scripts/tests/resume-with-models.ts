@@ -24,10 +24,11 @@ async function main() {
   assert.equal((await client`select current_schema() as name`)[0].name,schema);
   const {analysisJobs:jobs,analysisJobResumptions:history,llmModelConfigs:models,analysisModelCalls:calls,analysisReports:reports,users,billingAccounts}=await import('../../apps/web/lib/db/schema');
   const {resumeAnalysisJob}=await import('../../apps/web/lib/analysis/resume-job');
-  const {createModelFixture}=await import('./model-fixture');
+  const {createModelFixture,updateModelFixture}=await import('./model-fixture');
   const {pinModelVersions,readModelVersion,readCurrentModelConfig}=await import('../../apps/web/lib/analysis/model-versions');
   const {decryptModelKey}=await import('../../apps/web/lib/security/model-key');
   const {publicAnalysisJob}=await import('../../apps/web/lib/analysis/public-job');
+  const {resumptionHistory}=await import('../../apps/web/lib/analysis/resumption-history');
   const {eq}=await import('../../apps/web/node_modules/drizzle-orm');
   await db.insert(users).values({id:1,email:'fixture@example.test',passwordHash:'fixture'});
   await db.insert(billingAccounts).values({userId:1,analysisCredits:100,ledgerOpeningBalance:100});
@@ -50,8 +51,17 @@ async function main() {
   assert.equal(resumed.runId,job.runId,'checkpoint identity preserved');assert.equal(resumed.status,'queued');assert.equal(resumed.externalStatus,'resume-queued');
   assert.equal(resumed.startedAt?.getTime(),job.startedAt?.getTime());assert.equal(resumed.totalTokens,123);assert.equal((await readModelVersion(db,resumed.quickModelVersionId!)).id,2);assert.equal((await readModelVersion(db,resumed.deepModelVersionId!)).id,3);
   const resumedDeep=await readModelVersion(db,resumed.deepModelVersionId!);assert.equal(resumedDeep.modelName,deep.modelName);assert.equal(decryptModelKey(resumedDeep.apiKey),decryptModelKey(deep.apiKey));
-  const [audit]=await db.select().from(history);assert.equal(audit.previousDeepModel,old.modelName);assert.equal(audit.nextDeepModel,deep.modelName);
-  assert(JSON.parse(audit.previousDeepConfigSnapshot!).apiKey.startsWith('sdkey:'));assert(JSON.parse(audit.nextDeepConfigSnapshot).apiKey.startsWith('sdkey:'));
+  const [audit]=await db.select().from(history);
+  assert.equal(audit.previousDeepVersionId,old.currentVersionId);assert.equal(audit.nextDeepVersionId,deep.currentVersionId);
+  assert.equal(audit.legacyEvidence,null,'versioned history has no duplicate names or credentials');
+  assert.equal((await readModelVersion(db,audit.previousDeepVersionId!)).modelName,old.modelName);
+  assert.equal((await readModelVersion(db,audit.nextDeepVersionId!)).modelName,deep.modelName);
+  const historyFor=async(userId:number,jobId:number)=>(await db.select({history:resumptionHistory(userId)}).from(jobs).where(eq(jobs.id,jobId)))[0].history as any[];
+  const publicHistory=await historyFor(1,job.id);
+  assert.equal(publicHistory[0].previousDeepModel,old.modelName);assert.equal(publicHistory[0].nextDeepModel,deep.modelName);
+  assert(!JSON.stringify(publicHistory).includes('sdkey:'));assert.deepEqual(await historyFor(2,job.id),[],'history stays scoped to owner');
+  await updateModelFixture(db,deep.id,{modelName:'changed-after-resume'});
+  assert.equal((await historyFor(1,job.id))[0].nextDeepModel,deep.modelName,'history uses pinned version after configuration edits');
   assert.equal((await db.select().from(calls))[0].modelVersionId,null,'legacy calls do not gain invented version lineage');
   assert.equal((await db.select().from(calls))[0].estimatedCost,'0.500000000000');assert.equal((await db.select().from(calls))[0].modelConfigId,1);assert.equal((await db.select().from(reports))[0].content,'KEEP THIS REPORT');assert.equal((await db.select().from(billingAccounts))[0].analysisCredits,100);
   assert(!JSON.stringify(publicAnalysisJob(resumed)).includes('sdkey:'));
@@ -60,6 +70,11 @@ async function main() {
   assert.equal((await resumeAnalysisJob(1,legacy.id)).status,409,'legacy jobs require explicit model selection');
   const rollback=await addJob();await client`create function fail_resume_fixture() returns trigger language plpgsql as $$begin raise exception 'synthetic audit failure'; end$$`;await client`create trigger fail_resume_fixture before insert on analysis_job_resumptions for each row execute function fail_resume_fixture()`;
   await assert.rejects(resumeAnalysisJob(1,rollback.id,selection));assert.equal((await db.select().from(history)).length,1);assert.equal((await db.select().from(jobs).where(eq(jobs.id,rollback.id)))[0].status,'failed','audit and version update roll back together');await client`drop trigger fail_resume_fixture on analysis_job_resumptions`;await client`drop function fail_resume_fixture()`;
+  await db.insert((await import('../../apps/web/lib/db/schema')).analysisJobLegacyConfigs).values({jobId:legacy.id,evidence:{quickModel:'unknown-old-quick',deepModel:'unknown-old-deep'}});
+  assert.equal((await resumeAnalysisJob(1,legacy.id,selection)).status,200);
+  const legacyHistory=await historyFor(1,legacy.id);
+  assert.equal(legacyHistory[0].previousQuickModel,'unknown-old-quick');assert.equal(legacyHistory[0].previousDeepModel,'unknown-old-deep');
+  assert.equal(legacyHistory[0].nextQuickModel,quick.modelName);
   const automatic=await addJob('running');
   await db.update(jobs).set({workerOwner:'automatic-owner',workerLeaseUntil:new Date(Date.now()+60000)}).where(eq(jobs.id,automatic.id));
   assert.equal((await resumeAnalysisJob(1,automatic.id,undefined,'wrong-owner')).status,409);
@@ -101,7 +116,7 @@ async function main() {
   const none=await addJob('running');await db.update(jobs).set({workerOwner:'none-owner',workerLeaseUntil:new Date(Date.now()+60000)}).where(eq(jobs.id,none.id));
   assert.equal((await resumeAnalysisJob(1,none.id,undefined,'none-owner')).status,503,'no candidates stops instead of looping');
   assert.equal((await db.select().from(billingAccounts).where(eq(billingAccounts.userId,1)))[0].analysisCredits,100,'automatic retry never charges analysis credits again');
-  console.log('PASS: atomic model replacement, checkpoint identity, original reports/tokens/costs/credits, encrypted audit history, ownership, role/disabled/quota/retired rejection, duplicate submissions, rollback and public credential filtering. No model calls.');
+  console.log('PASS: atomic model replacement, checkpoint identity, original reports/tokens/costs/credits, pinned audit history and legacy fallback, ownership, role/disabled/quota/retired rejection, duplicate submissions, rollback and public credential filtering. No model calls.');
  }finally{if(client)await client.end();if(schemaCreated)await admin`drop schema if exists ${admin(schema)} cascade`;await admin.end();}
 }
 main().catch(error=>{console.error(error.message);process.exitCode=1;});

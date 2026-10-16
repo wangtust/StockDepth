@@ -1,6 +1,6 @@
 # 数据库 V2：独立库验证与兼容阶段
 
-当前结构已进入 0044 字段收敛阶段：删除 23 个重复字段，新增旧任务证据表。以下兼容阶段内容为历史记录；当前字段与升级要求以[字段收敛说明](database-normalization.md)为准。
+当前结构已进入 0045 字段收敛阶段：累计删除 31 个重复字段，旧任务与换模审计证据单独保留。以下兼容阶段内容为历史记录；当前字段与升级要求以[字段收敛说明](database-normalization.md)为准。
 
 2026-10-16。V2数据库名为 `stockdepth_dev`，运行服务及根 `.env` 均使用该库，保留 `.next-v2` 生产构建目录。本地Git分支为 `dev`。旧业务数据已合并导入，原 `stockdepth` 仍保留不动，详见 [迁移记录](legacy-database-import.md)。完整目标设计见 [database-v2.md](design/database-v2.md)。
 

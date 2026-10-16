@@ -1,4 +1,4 @@
-import { ensureModelVersion, readModelVersion } from '@/lib/analysis/model-versions';
+import { ensureModelVersion, readModelVersion, loadModelConfigs } from '@/lib/analysis/model-versions';
 import '../env';
 import { isQuotaExhausted, markModelQuotaUnavailable } from '@/lib/analysis/model-availability';
 import { randomUUID } from 'node:crypto';
@@ -12,6 +12,7 @@ import {
   analysisJobs,
   analysisReports,
   llmModelConfigs,
+  type LlmModelConfig,
   paperAnalysisRuns,
   paperModelCalls,
   paperPortfolios,
@@ -28,7 +29,7 @@ type ClaimedRun = typeof paperAnalysisRuns.$inferSelect & {
 
 type Position = typeof paperPositions.$inferSelect;
 type Portfolio = typeof paperPortfolios.$inferSelect;
-type ModelConfig = Pick<typeof llmModelConfigs.$inferSelect, 'id'|'provider'|'baseUrl'|'modelName'|'modelOptions'|'apiKey'|'inputPrice'|'cachePrice'|'outputPrice'|'updatedAt'> & {modelVersionId?:number;priceCurrency?:string;priceUnitTokens?:number};
+type ModelConfig = Pick<LlmModelConfig, 'id'|'provider'|'baseUrl'|'modelName'|'modelOptions'|'apiKey'|'inputPrice'|'cachePrice'|'outputPrice'|'updatedAt'> & {modelVersionId?:number;priceCurrency?:string;priceUnitTokens?:number};
 
 type DecisionJson = {
   action?: string;
@@ -58,12 +59,7 @@ function sleep(ms: number) {
 }
 
 async function getDefaultModelConfig() {
-  const [config] = await db
-    .select()
-    .from(llmModelConfigs)
-    .where(and(eq(llmModelConfigs.isActive, true), isNull(llmModelConfigs.retiredAt), isNull(llmModelConfigs.unavailableReason)))
-    .orderBy(sql`${llmModelConfigs.isDefault} desc`, asc(llmModelConfigs.id))
-    .limit(1);
+  const [config] = await loadModelConfigs(db,and(eq(llmModelConfigs.isActive,true),isNull(llmModelConfigs.retiredAt),isNull(llmModelConfigs.unavailableReason)),{limit:1});
   return config ? readModelConfig(config) : null;
 }
 

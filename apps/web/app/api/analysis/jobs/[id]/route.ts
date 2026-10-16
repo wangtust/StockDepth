@@ -1,3 +1,4 @@
+import { jobModelFields } from '@/lib/analysis/job-models';
 import { RequestTiming } from '@/lib/http/request-timing';
 import { and, eq, isNull, sql } from 'drizzle-orm';
 import { NextRequest, NextResponse } from 'next/server';
@@ -37,7 +38,7 @@ export async function GET(
   const [job] = await timing.measure('job', () => db
     .select({
       id: analysisJobs.id, ticker: analysisJobs.ticker, status: analysisJobs.status,
-      quickModelConfigId: analysisJobs.quickModelConfigId, deepModelConfigId: analysisJobs.deepModelConfigId,
+      quickModelConfigId: jobModelFields.quickModelConfigId, deepModelConfigId: jobModelFields.deepModelConfigId,
       quickModelVersionId: analysisJobs.quickModelVersionId, deepModelVersionId: analysisJobs.deepModelVersionId,
       configurationState: analysisJobs.configurationState, chargedCredits: analysisJobs.chargedCredits,
       externalStatus: analysisJobs.externalStatus, errorMessage: analysisJobs.errorMessage,

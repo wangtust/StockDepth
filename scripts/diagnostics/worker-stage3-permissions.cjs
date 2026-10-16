@@ -34,7 +34,8 @@ async function main() {
  try {
   const [database] = await client\`select current_database() as name\`;
   assert(database.name.startsWith('stockdepth_s3_worker_perm_'));
-  const [user] = await db.insert(s.users).values({email:'coordinator@test.invalid',passwordHash:'unused',analysisCredits:100}).returning();
+  const [user] = await db.insert(s.users).values({email:'coordinator@test.invalid',passwordHash:'unused'}).returning();
+await db.update(s.billingAccounts).set({analysisCredits:100,ledgerOpeningBalance:100}).where(eq(s.billingAccounts.userId,user.id));
   const [instrument] = await db.insert(s.instruments).values({symbol:'MOCK',exchange:'UNRESOLVED'}).returning();
   (globalThis as any).fixtureInstrument = instrument;
   await db.insert(s.analysisPricing).values({depth:1,label:'Mock',creditCost:10}).onConflictDoUpdate({target:s.analysisPricing.depth,set:{creditCost:10}});
@@ -61,12 +62,12 @@ async function main() {
   await db.update(s.llmModelConfigs).set({inputPrice:'999',modelName:'changed'}).where(eq(s.llmModelConfigs.id,quick.id));
   assert.equal(JSON.parse((await db.select().from(s.analysisJobs))[0].quickConfigSnapshot!).inputPrice,'1.123456');
   const ledger = await db.select().from(s.creditTransactions); assert.equal(ledger.length,1); assert.equal(ledger[0].amount,-10);
-  await db.update(s.users).set({analysisCredits:0}).where(eq(s.users.id,user.id));
+  await db.update(s.billingAccounts).set({analysisCredits:0}).where(eq(s.billingAccounts.userId,user.id));
   assert.equal((await request(body)).status,402);
   assert.equal((await db.select().from(s.creditTransactions)).length,1);
   assert.equal((await db.select().from(s.analysisJobs)).length,1);
   await db.update(s.llmModelConfigs).set({quickEnabled:true,deepEnabled:true}).where(eq(s.llmModelConfigs.id,deep.id));
-  await db.update(s.users).set({analysisCredits:20}).where(eq(s.users.id,user.id));
+  await db.update(s.billingAccounts).set({analysisCredits:20}).where(eq(s.billingAccounts.userId,user.id));
   assert.equal((await request({ticker:'MOCK',depth:1,modelConfigId:deep.id})).status,201);
   delete process.env.STOCKDEPTH_MODEL_KEYRING;
   assert.equal((await request(body)).status,503);

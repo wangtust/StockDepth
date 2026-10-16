@@ -1,3 +1,4 @@
+import { jobModelFields } from '@/lib/analysis/job-models';
 import { ErrorPresentation } from '@/components/error-presentation';
 import { LiveAnalysisRefresh } from '@/components/live-analysis-refresh';
 import { ModelCosts } from '@/app/admin/_components/model-costs';
@@ -63,9 +64,9 @@ export default async function AdminJobDetailPage({ params, searchParams }: PageP
       language: analysisJobs.language,
       depth: analysisJobs.depth,
       analysts: analysisJobs.analysts,
-      provider: analysisJobs.provider,
-      quickModel: analysisJobs.quickModel,
-      deepModel: analysisJobs.deepModel,
+      provider: jobModelFields.provider,
+      quickModel: jobModelFields.quickModel,
+      deepModel: jobModelFields.deepModel,
       status: analysisJobs.status,
       hiddenAt: analysisJobs.hiddenAt,
       externalStatus: analysisJobs.externalStatus,

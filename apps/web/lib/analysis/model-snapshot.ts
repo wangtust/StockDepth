@@ -1,6 +1,6 @@
 import {encryptModelKey} from '../security/model-key';
-import type {llmModelConfigs} from '../db/schema';
-export function immutableModelSnapshot(config:typeof llmModelConfigs.$inferSelect) {
+import type {LlmModelConfig} from '../db/schema';
+export function immutableModelSnapshot(config:Pick<LlmModelConfig,'id'|'provider'|'baseUrl'|'modelName'|'modelOptions'|'apiKey'|'inputPrice'|'cachePrice'|'outputPrice'>) {
   try {
     const apiKey=config.apiKey.startsWith('sdkey:')?config.apiKey:encryptModelKey(config.apiKey);
     const options=config.modelOptions||{};

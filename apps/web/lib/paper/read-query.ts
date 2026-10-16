@@ -1,3 +1,4 @@
+import { llmModelConfigVersions } from '../db/schema';
 import 'server-only';
 import { enrichPositions } from '../market/service';
 
@@ -76,8 +77,8 @@ const tradeFields = {
 const modelFields = {
   id: llmModelConfigs.id,
   name: llmModelConfigs.name,
-  provider: llmModelConfigs.provider,
-  modelName: llmModelConfigs.modelName,
+  provider: llmModelConfigVersions.provider,
+  modelName: llmModelConfigVersions.modelName,
   isDefault: llmModelConfigs.isDefault,
 };
 
@@ -98,6 +99,7 @@ export async function readPaperOverview(userId: number) {
       .orderBy(desc(watchlistItems.createdAt)),
     getAnalysisPricingConfig(),
     db.select(modelFields).from(llmModelConfigs)
+      .innerJoin(llmModelConfigVersions,and(eq(llmModelConfigs.currentVersionId,llmModelConfigVersions.id),eq(llmModelConfigs.id,llmModelConfigVersions.configId)))
       .where(and(eq(llmModelConfigs.isActive, true), isNull(llmModelConfigs.retiredAt), isNull(llmModelConfigs.unavailableReason)))
       .orderBy(desc(llmModelConfigs.isDefault), asc(llmModelConfigs.id)).limit(1)
   ]);

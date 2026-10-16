@@ -1,5 +1,7 @@
 # StockDepth 数据库 V2 目标设计
 
+当前结构已进入 0044 字段收敛阶段：删除 23 个重复字段，新增旧任务证据表。以下兼容阶段内容为历史记录；当前字段与升级要求以[字段收敛说明](../database-normalization.md)为准。
+
 日期：2026-10-16。状态：完整目标设计；30表的兼容阶段已实施，当前数据库名为stockdepth_dev，尚未完成全部目标字段清理。实际落地范围见 [V2落地说明](../database-v2-rollout.md)。依据原有28张业务表、实际Web/Worker查询、支付和模拟成交事务设计。
 
 本稿是此前 database-refactor-proposal.md 的完整目标结构扩展。推荐 **30 张业务表**：保留现有 28 张表的业务边界，增加 billing_accounts 和 llm_model_config_versions。表的数量不是性能指标；性能目标是小范围定位、控制列表读取量、减少重复配置和不必要的写锁竞争。

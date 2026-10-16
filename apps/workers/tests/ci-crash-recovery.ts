@@ -1,3 +1,5 @@
+import { billingAccounts } from '@/lib/db/schema';
+import { mutateCredits } from '@/lib/credits/ledger';
 // Kill a real worker process mid-fixture, then recover through its expired lease.
 import assert from 'node:assert/strict';
 import {spawn, type ChildProcess} from 'node:child_process';
@@ -30,8 +32,9 @@ function launch(delay: number) {
 async function main() {
   const [identity] = await db.execute(sql`select current_database() name`);
   assert(String(identity.name).startsWith('stockdepth_ci_crash_'));
-  const [user] = await db.insert(users).values({email: 'crash@example.test', passwordHash: 'fixture', analysisCredits: 100}).returning();
-  const [job] = await db.insert(analysisJobs).values({userId: user.id, runId: randomUUID(), ticker: 'MOCK', tradeDate: '2026-10-15', analysts: '[]', provider: 'mock'}).returning();
+  const [user] = await db.insert(users).values({email: 'crash@example.test', passwordHash: 'fixture'}).returning();
+ await db.transaction(tx => mutateCredits(tx, {userId:user.id, amount:100, reason:'fixture_funding', operationKey:'fixture-funding:'+user.id}));
+  const [job] = await db.insert(analysisJobs).values({userId: user.id, runId: randomUUID(), ticker: 'MOCK', tradeDate: '2026-10-15', analysts: '[]'}).returning();
   const read = async () => (await db.select().from(analysisJobs).where(eq(analysisJobs.id, job.id)))[0];
   const first = launch(30000);
   const claimed = await until(read, value => value.status === 'running' && !!value.workerOwner);
@@ -47,7 +50,7 @@ async function main() {
   const reports = await db.select().from(analysisReports).where(eq(analysisReports.jobId, job.id));
   assert.deepEqual(reports.map(report => report.reportKey).sort(), ['decision', 'market', 'news']);
   assert.equal((await db.select().from(analysisModelCalls)).length, 0);
-  assert.equal((await db.select().from(users).where(eq(users.id, user.id)))[0].analysisCredits, 100);
+  assert.equal((await db.select().from(billingAccounts).where(eq(billingAccounts.userId, user.id)))[0].analysisCredits, 100);
   await pause(200);
   assert.equal((await db.select().from(analysisReports)).length, 3);
   await stop(recovered);

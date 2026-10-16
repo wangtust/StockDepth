@@ -27,12 +27,11 @@ async function initializeAdmin(sql, config) {
   }
   const passwordHash = await hash(password, 10);
   await sql.begin(async tx => {
-    const [created] = await tx`insert into users (email, password_hash, role, analysis_credits) values (${email}, ${passwordHash}, 'super_admin', 0) returning id,analysis_credits`;
+    const [created] = await tx`insert into users (email, password_hash, role) values (${email}, ${passwordHash}, 'super_admin') returning id`;
     await tx`select user_id from billing_accounts where user_id = ${created.id} for update`;
     await tx`insert into credit_transactions (user_id,amount,reason,ledger_sequence,balance_after,operation_key)
       values (${created.id},10,'initial_admin_grant',1,10,${`initial-grant:${created.id}`})`;
     await tx`update billing_accounts set analysis_credits=10,ledger_sequence=1,updated_at=now() where user_id=${created.id}`;
-    await tx`update users set analysis_credits=10,updated_at=now() where id=${created.id}`;
   });
   console.log('已根据 .env 创建初始管理员。');
 }

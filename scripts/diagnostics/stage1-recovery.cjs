@@ -81,7 +81,8 @@ let testUrl;
 (async()=>{try{
  await admin`create database ${admin(name)}`;created=true;sourceUrl.pathname='/'+name;testUrl=sourceUrl.toString();
  test=postgres(testUrl,{max:2});await migrate(drizzle(test),{migrationsFolder:root+'/apps/web/lib/db/migrations'});
- await test`insert into users(email,password_hash,analysis_credits) values('mock-recovery@test.invalid','unused',100)`;
+ await test`insert into users(email,password_hash) values('mock-recovery@test.invalid','unused')`;
+await test`update billing_accounts set analysis_credits=100,ledger_opening_balance=100`;
  for(let round=1;round<=3;round++){await scenario('before',round);await scenario('after',round);}
  await scenario('after',4,2);await scenario('after',5,1,true);
  fs.writeFileSync(directory+'/recovery-comparison.json',JSON.stringify({scope:'Mock queue/report writes only; no Python/LLM or trading. Before fixture differs only by injected matching latency/events.',results},null,2));

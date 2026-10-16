@@ -1,6 +1,6 @@
 import { and, eq, inArray, or } from 'drizzle-orm';
 import { db } from '@/lib/db/drizzle';
-import { billingAccounts, creditTransactions, users } from '@/lib/db/schema';
+import { billingAccounts, creditTransactions } from '@/lib/db/schema';
 
 export type BillingTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
@@ -39,6 +39,5 @@ export async function mutateCredits(tx: BillingTransaction, input: {
     ledgerSequence: sequence, balanceAfter: balance, metadata: input.metadata ?? {} });
   await tx.update(billingAccounts).set({ analysisCredits: balance, ledgerSequence: sequence, updatedAt: new Date() })
     .where(eq(billingAccounts.userId, input.userId));
-  await tx.update(users).set({ analysisCredits: balance, updatedAt: new Date() }).where(eq(users.id, input.userId));
   return { balance, applied: true };
 }

@@ -64,6 +64,13 @@ export async function getPublicUser() {
   };
 }
 
+export async function getUserWithBilling(userId: number) {
+  const [row] = await db.select({user: users, billing: billingAccounts}).from(users)
+    .leftJoin(billingAccounts, eq(users.id, billingAccounts.userId))
+    .where(and(eq(users.id, userId), eq(users.status, 'active'), isNull(users.deletedAt))).limit(1);
+  return row ? billingUser(row) : null;
+}
+
 export async function getUserByStripeCustomerId(customerId: string) {
   const result = await db
     .select({ user: users, billing: billingAccounts })
@@ -86,7 +93,6 @@ export async function updateUserSubscription(
 ) {
   await db.transaction(async tx => {
     await tx.update(billingAccounts).set({...subscriptionData, updatedAt:new Date()}).where(eq(billingAccounts.userId,userId));
-    await tx.update(users).set({...subscriptionData, updatedAt:new Date()}).where(eq(users.id,userId));
   });
 }
 
@@ -136,7 +142,7 @@ export async function getAccountForUser() {
 }
 
 function billingUser(row: {user: typeof users.$inferSelect; billing: typeof billingAccounts.$inferSelect | null}) {
-  if (!row.billing) return row.user;
+  if (!row.billing) throw new Error('Billing account not initialized.');
   const {analysisCredits,stripeCustomerId,stripeSubscriptionId,stripeProductId,planName,subscriptionStatus} = row.billing;
   return {...row.user,analysisCredits,stripeCustomerId,stripeSubscriptionId,stripeProductId,planName,subscriptionStatus};
 }

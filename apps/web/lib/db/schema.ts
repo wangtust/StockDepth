@@ -39,22 +39,15 @@ export const users = pgTable('users', {
   passwordHash: text('password_hash').notNull(),
   inviteCode: varchar('invite_code', { length: 6 }).unique(),
   referredByUserId: integer('referred_by_user_id').references((): AnyPgColumn => users.id),
-  analysisCredits: integer('analysis_credits').notNull().default(0),
-  stripeCustomerId: text('stripe_customer_id').unique(),
-  stripeSubscriptionId: text('stripe_subscription_id').unique(),
-  stripeProductId: text('stripe_product_id'),
-  planName: varchar('plan_name', { length: 50 }),
-  subscriptionStatus: varchar('subscription_status', { length: 20 }),
   role: varchar('role', { length: 20 }).notNull().default('member'),
   status: varchar('status', { length: 20 }).notNull().default('active'),
   createdAt: timestamp('created_at').notNull().defaultNow(),
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
   deletedAt: timestamp('deleted_at'),
-}, t => [check('users_analysis_credits_nonnegative', sql`${t.analysisCredits} >= 0`),
-  check('users_referrer_not_self', sql`${t.referredByUserId} IS NULL OR ${t.referredByUserId} <> ${t.id}`)]);
+}, t => [check('users_referrer_not_self', sql`${t.referredByUserId} IS NULL OR ${t.referredByUserId} <> ${t.id}`)]);
 
-// V2 authoritative credit account. Legacy users billing columns remain dual-written
-// during rollout; opening balances describe the cutover, not invented old grants.
+// Authoritative credit and subscription account. Opening balances describe the
+// historical cutover, not invented old grants.
 export const billingAccounts = pgTable('billing_accounts', {
   userId: integer('user_id').primaryKey().references(() => users.id),
   analysisCredits: integer('analysis_credits').notNull().default(0),
@@ -170,15 +163,6 @@ export const analysisJobs = pgTable(
     language: varchar('language', { length: 40 }).notNull().default('Chinese'),
     depth: integer('depth').notNull().default(1),
     analysts: text('analysts').notNull(),
-    provider: varchar('provider', { length: 80 }),
-    baseUrl: text('base_url'),
-    quickModel: varchar('quick_model', { length: 160 }),
-    deepModel: varchar('deep_model', { length: 160 }),
-    modelConfigId: integer('model_config_id').references(() => llmModelConfigs.id),
-    quickModelConfigId: integer('quick_model_config_id').references(() => llmModelConfigs.id),
-    deepModelConfigId: integer('deep_model_config_id').references(() => llmModelConfigs.id),
-    quickConfigSnapshot: text('quick_config_snapshot'),
-    deepConfigSnapshot: text('deep_config_snapshot'),
     quickModelVersionId: integer('quick_model_version_id').references(() => llmModelConfigVersions.id),
     deepModelVersionId: integer('deep_model_version_id').references(() => llmModelConfigVersions.id),
     configurationState: text('configuration_state').notNull().default('legacy_unknown'),
@@ -201,9 +185,7 @@ export const analysisJobs = pgTable(
   },
   (table) => [
     uniqueIndex('analysis_jobs_id_owner_idx').on(table.id,table.userId),
-    foreignKey({name:'analysis_jobs_quick_version_config_fk',columns:[table.quickModelVersionId,table.quickModelConfigId],foreignColumns:[llmModelConfigVersions.id,llmModelConfigVersions.configId]}),
-    foreignKey({name:'analysis_jobs_deep_version_config_fk',columns:[table.deepModelVersionId,table.deepModelConfigId],foreignColumns:[llmModelConfigVersions.id,llmModelConfigVersions.configId]}),
-    check('analysis_jobs_configuration_state', sql`(${table.configurationState} = 'legacy_unknown' AND ${table.quickModelVersionId} IS NULL AND ${table.deepModelVersionId} IS NULL) OR (${table.configurationState} = 'versioned' AND ${table.quickModelVersionId} IS NOT NULL AND ${table.deepModelVersionId} IS NOT NULL AND ${table.quickModelConfigId} IS NOT NULL AND ${table.deepModelConfigId} IS NOT NULL)`),
+    check('analysis_jobs_configuration_state', sql`(${table.configurationState} = 'legacy_unknown' AND ${table.quickModelVersionId} IS NULL AND ${table.deepModelVersionId} IS NULL) OR (${table.configurationState} = 'versioned' AND ${table.quickModelVersionId} IS NOT NULL AND ${table.deepModelVersionId} IS NOT NULL)`),
     check('analysis_jobs_charged_credits_nonnegative', sql`${table.chargedCredits} IS NULL OR ${table.chargedCredits} >= 0`),
     index('analysis_jobs_status_created_at_idx').on(table.status, table.createdAt),
     index('analysis_jobs_worker_lease_idx').on(table.status, table.workerLeaseUntil, table.createdAt),
@@ -213,6 +195,12 @@ export const analysisJobs = pgTable(
     index('analysis_jobs_user_visible_id_idx').on(table.userId, table.id).where(sql`hidden_at is null`),
   ]
 );
+
+// Historical evidence for jobs without reliable model version lineage only.
+export const analysisJobLegacyConfigs = pgTable('analysis_job_legacy_configs', {
+  jobId: integer('job_id').primaryKey().references(() => analysisJobs.id, { onDelete: 'cascade' }),
+  evidence: jsonb('evidence').$type<Record<string, unknown>>().notNull(),
+}, t => [check('job_legacy_evidence_object', sql`jsonb_typeof(${t.evidence}) = 'object'`)]);
 
 export const analysisWorkerSettings = pgTable('analysis_worker_settings', {
   key: varchar('key', { length: 50 }).primaryKey(),
@@ -225,16 +213,8 @@ export const llmModelConfigs = pgTable('llm_model_configs', {
   id: serial('id').primaryKey(),
   currentVersionId: integer('current_version_id'),
   name: varchar('name', { length: 120 }).notNull(),
-  provider: varchar('provider', { length: 80 }).notNull(),
-  baseUrl: text('base_url').notNull(),
-  apiKey: text('api_key').notNull(),
-  modelName: varchar('model_name', { length: 160 }).notNull(),
-  modelOptions: jsonb('model_options').$type<Record<string, string | number | boolean>>().notNull().default(sql`'{}'::jsonb`),
   quickEnabled: boolean('quick_enabled').notNull().default(true),
   deepEnabled: boolean('deep_enabled').notNull().default(true),
-  inputPrice: numeric('input_price', { precision: 15, scale: 6 }),
-  cachePrice: numeric('cache_price', { precision: 15, scale: 6 }),
-  outputPrice: numeric('output_price', { precision: 15, scale: 6 }),
   isDefault: boolean('is_default').notNull().default(false),
   isActive: boolean('is_active').notNull().default(true),
   unavailableReason: varchar('unavailable_reason', { length: 40 }),
@@ -253,7 +233,7 @@ export const llmModelConfigVersions = pgTable('llm_model_config_versions', {
   baseUrl: text('base_url').notNull(),
   modelName: varchar('model_name', { length: 160 }).notNull(),
   modelOptions: jsonb('model_options').$type<Record<string, string | number | boolean>>().notNull().default(sql`'{}'::jsonb`),
-  encryptedApiKey: text('encrypted_api_key').notNull(),
+  encryptedApiKey: text('encrypted_api_key'),
   inputPrice: numeric('input_price', { precision: 15, scale: 6 }),
   cachePrice: numeric('cache_price', { precision: 15, scale: 6 }),
   outputPrice: numeric('output_price', { precision: 15, scale: 6 }),
@@ -596,10 +576,7 @@ export const analysisJobsRelations = relations(analysisJobs, ({ one, many }) => 
   }),
   reports: many(analysisReports),
   creditTransactions: many(creditTransactions),
-  modelConfig: one(llmModelConfigs, {
-    fields: [analysisJobs.modelConfigId],
-    references: [llmModelConfigs.id],
-  }),
+
   paperAnalysisRun: many(paperAnalysisRuns),
   paperTradeDecisions: many(paperTradeDecisions),
 }));
@@ -730,7 +707,7 @@ export type ActivityLog = typeof activityLogs.$inferSelect;
 export type NewActivityLog = typeof activityLogs.$inferInsert;
 export type AnalysisJob = typeof analysisJobs.$inferSelect;
 export type NewAnalysisJob = typeof analysisJobs.$inferInsert;
-export type LlmModelConfig = typeof llmModelConfigs.$inferSelect;
+export type LlmModelConfig = typeof llmModelConfigs.$inferSelect & Pick<typeof llmModelConfigVersions.$inferSelect, 'provider' | 'baseUrl' | 'modelName' | 'modelOptions' | 'inputPrice' | 'cachePrice' | 'outputPrice'> & { apiKey: string; modelVersionId: number };
 export type NewLlmModelConfig = typeof llmModelConfigs.$inferInsert;
 export type AnalysisReport = typeof analysisReports.$inferSelect;
 export type NewAnalysisReport = typeof analysisReports.$inferInsert;

@@ -8,12 +8,9 @@ import { decryptModelKey } from '../security/model-key';
 export function isQuotaExhausted(message: string) {
   return /insufficient_quota|quota_exhausted|401008|free trial quota.*exhausted|insufficient (?:account )?(?:balance|credits)|credit balance.*(?:too low|insufficient)|(?:余额|额度|配额).{0,12}(?:不足|耗尽|用尽)|billing_hard_limit_reached/i.test(message);
 }
-type Snapshot = Pick<typeof llmModelConfigs.$inferSelect,'id'|'provider'|'modelName'|'baseUrl'> & {updatedAt:Date|string};
-type Job = Pick<typeof analysisJobs.$inferSelect,'quickConfigSnapshot'|'deepConfigSnapshot'> & Partial<Pick<typeof analysisJobs.$inferSelect,'quickModelConfigId'|'deepModelConfigId'|'modelConfigId'>>;
+type Snapshot = {id:number;provider:string;modelName:string;baseUrl:string;updatedAt:Date|string;modelVersionId?:number|null};
+type Job = {quickModelVersionId:number|null;deepModelVersionId:number|null};
 type FailedCall = {status:string;model:string;model_config_id?:number|null;model_version_id?:number|null;ended_at?:string|null;failure_reason?:string|null};
-function snapshots(job:Job):Snapshot[] {
-  return [job.quickConfigSnapshot,job.deepConfigSnapshot].flatMap(value=>{try{return value?[JSON.parse(value)]:[];}catch{return [];}});
-}
 export async function markModelQuotaUnavailable(snapshot:Pick<Snapshot,'id'> & Partial<Omit<Snapshot,'id'>> & {modelVersionId?:number|null},eventAt=new Date()) {
   return db.transaction(async tx=>{
     await tx.execute(sql`select pg_advisory_xact_lock(739421, 3)`);
@@ -25,10 +22,13 @@ export async function markModelQuotaUnavailable(snapshot:Pick<Snapshot,'id'> & P
     if (snapshot.modelVersionId) {
       const [version] = await tx.select().from(llmModelConfigVersions).where(and(
         eq(llmModelConfigVersions.id,snapshot.modelVersionId),eq(llmModelConfigVersions.configId,current.id)));
-      if (!version || version.provider!==current.provider || version.baseUrl!==current.baseUrl ||
-          decryptModelKey(version.encryptedApiKey)!==decryptModelKey(current.apiKey)) return false;
-    } else if (!snapshot.updatedAt || current.modelName!==snapshot.modelName || current.provider!==snapshot.provider ||
-        current.baseUrl!==snapshot.baseUrl || current.updatedAt.getTime()!==new Date(snapshot.updatedAt).getTime()) return false;
+      const [active]=current.currentVersionId?await tx.select().from(llmModelConfigVersions).where(and(eq(llmModelConfigVersions.id,current.currentVersionId),eq(llmModelConfigVersions.configId,current.id))):[];
+      if (!version || !active || version.provider!==active.provider || version.baseUrl!==active.baseUrl ||
+          !version.encryptedApiKey || !active.encryptedApiKey || decryptModelKey(version.encryptedApiKey)!==decryptModelKey(active.encryptedApiKey)) return false;
+    } else {
+      // Unversioned events cannot prove which credentials failed after configuration edits.
+      return false;
+    }
     if (!Number.isFinite(eventAt.getTime()) || (current.availabilityCheckedAt && eventAt<=current.availabilityCheckedAt)) return false;
     if (current.unavailableReason!=='quota_exhausted') await tx.update(llmModelConfigs).set({unavailableReason:'quota_exhausted',unavailableAt:eventAt}).where(eq(llmModelConfigs.id,current.id));
     const available=rows.filter(row=>row.id!==current.id&&row.isActive&&!row.retiredAt&&!row.unavailableReason&&(row.quickEnabled||row.deepEnabled));
@@ -58,13 +58,18 @@ export async function recordQuotaFailures(job:Job,calls:FailedCall[],fatalLog?:s
       await markModelQuotaUnavailable({id:failure.model_config_id,modelVersionId:failure.model_version_id},failure.ended_at?new Date(failure.ended_at):new Date());
       continue;
     }
-    const candidates=[...new Map(snapshots(job).filter(s=>s.modelName===failure.model&&(!failure.model_config_id||s.id===failure.model_config_id)).map(s=>[s.id,s])).values()];
-    if(candidates.length===1)await markModelQuotaUnavailable(candidates[0],failure.ended_at?new Date(failure.ended_at):new Date());
+    const ids=[job.quickModelVersionId,job.deepModelVersionId].filter((id):id is number=>id!=null);
+    if(!ids.length)continue;
+    const versions=await db.select().from(llmModelConfigVersions).where(inArray(llmModelConfigVersions.id,ids));
+    const candidates=[...new Map(versions.filter(v=>v.modelName===failure.model&&(!failure.model_config_id||v.configId===failure.model_config_id)).map(v=>[v.configId,v])).values()];
+    if(candidates.length===1)await markModelQuotaUnavailable({id:candidates[0].configId,modelVersionId:candidates[0].id},failure.ended_at?new Date(failure.ended_at):new Date());
   }
 }
 export async function unavailableJobModels(job:Job,reader:Pick<typeof db,'select'>=db) {
-  const ids=[...new Set([job.quickModelConfigId ?? job.modelConfigId,job.deepModelConfigId ?? job.modelConfigId,...snapshots(job).map(s=>s.id)].filter((id):id is number=>id!=null))];if(!ids.length)return [];
-  const rows=await reader.select().from(llmModelConfigs).where(and(inArray(llmModelConfigs.id,ids),
+  const versionIds=[job.quickModelVersionId,job.deepModelVersionId].filter((id):id is number=>id!=null);
+  if(!versionIds.length)return [];
+  const versions=await reader.select({configId:llmModelConfigVersions.configId}).from(llmModelConfigVersions).where(inArray(llmModelConfigVersions.id,versionIds));
+  const ids=[...new Set(versions.map(v=>v.configId))];if(!ids.length)return [];
+  return reader.select().from(llmModelConfigs).where(and(inArray(llmModelConfigs.id,ids),
     or(eq(llmModelConfigs.isActive,false),isNotNull(llmModelConfigs.retiredAt),isNotNull(llmModelConfigs.unavailableReason))));
-  return rows;
 }

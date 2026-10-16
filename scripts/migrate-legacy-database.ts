@@ -157,7 +157,6 @@ async function importSnapshot(client:any,source:Snapshot,sourceName:string,targe
       const desired=old.analysis_credits+account.analysis_credits-bootstrap;check(desired>=0&&desired<=2147483647,'Merged balance outside supported range');
       const delta=desired-account.analysis_credits;
       if(delta){const seq=Number(account.ledger_sequence)+1;const next=Math.max(0,...(await tx`select id from credit_transactions`).map((r:Row)=>r.id))+1;await tx`insert into credit_transactions(id,user_id,amount,reason,ledger_sequence,balance_after,operation_key,metadata) values(${next},${userId},${delta},'legacy_balance_merge',${seq},${desired},${'legacy-balance:'+sourceName+':'+old.id},${tx.json({sourceDatabase:sourceName,legacyUserId:old.id})})`;added.credit_transactions++;await tx`update billing_accounts set analysis_credits=${desired},ledger_sequence=${seq},updated_at=now() where user_id=${userId}`;}
-      await tx`update users set analysis_credits=${desired} where id=${userId}`;
     }
   }
   // Verify reports, monetary facts and IDs with server-side exact comparisons.
@@ -187,6 +186,8 @@ async function main(){
  try{const data=await snapshot(source);check(Object.keys(data.rows).every(t=>order.includes(t)||excluded.includes(t)),'Unexpected source schema');
    if(args.includes('--rehearse')){rehearsal='stockdepth_import_rehearsal_'+randomUUID().replaceAll('-','');await admin.unsafe('create database "'+rehearsal+'"');const u=new URL(urlFor(rehearsal));const env={...process.env,PGHOST:u.hostname,PGPORT:u.port||'5432',PGUSER:decodeURIComponent(u.username),PGPASSWORD:decodeURIComponent(u.password),PGDATABASE:rehearsal};if(u.searchParams.has('sslmode'))env.PGSSLMODE=u.searchParams.get('sslmode')!;check(spawnSync('pg_restore',['--no-owner','--no-acl','--exit-on-error','--dbname',rehearsal,path.join(directory,'target.dump')],{env,encoding:'utf8'}).status===0,'Rehearsal restore failed');target=connect(urlFor(rehearsal));}
    else target=connect(urlFor(targetName));
+   const legacyColumns=await target`select 1 from information_schema.columns where table_schema='public' and table_name='users' and column_name='analysis_credits'`;
+   check(legacyColumns.length===1,'Legacy import requires the 0043 compatibility schema. Restore the verified pre-normalization target backup into a disposable database, import there, then run the normal initializer to upgrade. Do not reimport into a normalized live database.');
    let collision:any;
    if(args.includes('--collision-check')){
      const legacyJob=data.rows.analysis_job_resumptions[0]?.job_id??data.rows.analysis_jobs[0].id;

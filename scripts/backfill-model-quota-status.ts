@@ -11,9 +11,10 @@ async function main() {
   const jobs=await db.select().from(analysisJobs).where(and(inArray(analysisJobs.id,ids),eq(analysisJobs.status,'failed')));
   for(const job of jobs) {
    const calls=await db.select().from(analysisModelCalls).where(eq(analysisModelCalls.jobId,job.id));
-   await recordQuotaFailures(job,calls.map(c=>({status:c.status,model:c.model,model_config_id:c.modelConfigId,ended_at:c.endedAt?.toISOString()})),job.errorMessage||undefined);
+   await recordQuotaFailures(job,calls.map(c=>({status:c.status,model:c.model,model_config_id:c.modelConfigId,model_version_id:c.modelVersionId,ended_at:c.endedAt?.toISOString()})),job.errorMessage||undefined);
   }
-  const unavailable=await db.select({id:llmModelConfigs.id,name:llmModelConfigs.name,model:llmModelConfigs.modelName,reason:llmModelConfigs.unavailableReason}).from(llmModelConfigs).where(eq(llmModelConfigs.unavailableReason,'quota_exhausted'));
+  const {loadModelConfigs}=await import('../apps/web/lib/analysis/model-versions');
+  const unavailable=(await loadModelConfigs(db,eq(llmModelConfigs.unavailableReason,'quota_exhausted'))).map(c=>({id:c.id,name:c.name,model:c.modelName,reason:c.unavailableReason}));
   console.log(JSON.stringify({reviewed:jobs.length,unavailable}));
  }finally{await client.end();}
 }

@@ -10,7 +10,7 @@ async function main() {
   const { readOriginalPaper } = await import('./paper-original-query');
   const { readPaperOverview, readPaperDetails } = await import('../../apps/web/lib/paper/read-query');
   try {
-    const [user] = await db.execute(sql`select id, analysis_credits from users where status='active' and deleted_at is null
+    const [user] = await db.execute(sql`select id,(select b.analysis_credits from billing_accounts b where b.user_id=users.id) as analysis_credits from users where status='active' and deleted_at is null
       and exists(select 1 from paper_portfolios where user_id=users.id and status='active') order by (role='member') desc,id limit 1`);
     assert(user, 'Needs active portfolio fixture');
     const currentUser = {id: Number(user.id), analysisCredits: Number(user.analysis_credits)};

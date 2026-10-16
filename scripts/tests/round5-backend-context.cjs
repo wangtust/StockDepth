@@ -17,7 +17,7 @@ async function fixture(cash=1000,quantity=1,cost=100,pnl=0){
  const [q]=await sql`insert into paper_positions(portfolio_id,user_id,ticker,quantity,avg_cost_cents,last_price_cents,realized_pnl_cents) values(${p.id},${u.id},'TEST',${quantity},${cost},${cost},${pnl}) returning id`;
  return {u,p,q};
 }
-async function state(f){const [s]=await sql`select u.analysis_credits,(select count(*)::int from analysis_jobs where user_id=u.id) as jobs,(select count(*)::int from credit_transactions where user_id=u.id) as credits from users u where u.id=${f.u.id}`;return s;}
+async function state(f){const [s]=await sql`select (select b.analysis_credits from billing_accounts b where b.user_id=u.id) as analysis_credits,(select count(*)::int from analysis_jobs where user_id=u.id) as jobs,(select count(*)::int from credit_transactions where user_id=u.id) as credits from users u where u.id=${f.u.id}`;return s;}
 (async()=>{
  const [i]=await sql`select current_database() as name,inet_server_addr()::text as host,inet_server_port() as port`;
  assert.equal(i.name,name);assert.equal(i.host,'127.0.0.1/32');assert.equal(i.port,55483);

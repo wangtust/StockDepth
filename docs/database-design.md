@@ -3,6 +3,8 @@
 更新日期：2026-10-15。以 schema.ts、截至 0039_neat_dagger.sql 的全部迁移和迁移后的本机 PostgreSQL 元数据核对。
 当前 **28 张业务表、54 个物理外键**，未验证约束 **0 条**。drizzle.__drizzle_migrations 不计入业务表。
 
+2026-10-16 补充：上段及下方ER图是原库0039历史快照；当前服务使用stockdepth_dev数据库，为V2兼容结构，共30张业务表、72个已验证物理外键，新增计费账户与模型版本。旧业务数据已合并导入，原stockdepth保留不动，见 [迁移记录](legacy-database-import.md)。本地Git dev分支为后续开发基线。当前实施范围见 [V2落地说明](database-v2-rollout.md)，完整目标字段见 [V2设计](design/database-v2.md)。
+
 完整字段与外键图：[database-er.mmd](database-er.mmd)。图中 nullable 表示字段可为空，复合外键以约束名标识；联合唯一索引不能仅通过单字段 UK 标识理解。
 
 ## 表清单

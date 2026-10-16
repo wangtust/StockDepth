@@ -1,3 +1,4 @@
+import { ensureModelVersion, readModelVersion } from '@/lib/analysis/model-versions';
 import '../env';
 import { isQuotaExhausted, markModelQuotaUnavailable } from '@/lib/analysis/model-availability';
 import { randomUUID } from 'node:crypto';
@@ -27,7 +28,7 @@ type ClaimedRun = typeof paperAnalysisRuns.$inferSelect & {
 
 type Position = typeof paperPositions.$inferSelect;
 type Portfolio = typeof paperPortfolios.$inferSelect;
-type ModelConfig = typeof llmModelConfigs.$inferSelect;
+type ModelConfig = Pick<typeof llmModelConfigs.$inferSelect, 'id'|'provider'|'baseUrl'|'modelName'|'modelOptions'|'apiKey'|'inputPrice'|'cachePrice'|'outputPrice'|'updatedAt'> & {modelVersionId?:number;priceCurrency?:string;priceUnitTokens?:number};
 
 type DecisionJson = {
   action?: string;
@@ -221,7 +222,7 @@ function paperCost(usage: any, config: ModelConfig) {
   const details = usage.prompt_tokens_details || usage.input_tokens_details || {};
   const cached = usage.prompt_cache_hit_tokens ?? usage.cache_read_input_tokens ?? details.cached_tokens ?? details.cache_read ?? usage.cachedContentTokenCount ?? null;
   const prices = config.inputPrice != null && config.cachePrice != null && config.outputPrice != null
-    ? { currency: 'CNY', unit: 'million_tokens', input: config.inputPrice, cache: config.cachePrice, output: config.outputPrice } : null;
+    ? { currency: config.priceCurrency ?? 'CNY', unit: 'million_tokens', unit_tokens:config.priceUnitTokens ?? 1000000, input: config.inputPrice, cache: config.cachePrice, output: config.outputPrice } : null;
   if (!prices || !Number.isSafeInteger(input) || !Number.isSafeInteger(output) ||
       (cached != null && (!Number.isSafeInteger(cached) || cached < 0 || cached > input)) ||
       usage.cache_creation_input_tokens || (usage.input_tokens_details || {}).cache_creation) {
@@ -233,7 +234,8 @@ function paperCost(usage: any, config: ModelConfig) {
   };
   const hit = BigInt(cached || 0);
   const numerator = (BigInt(input - Number(hit)) * micros(String(prices.input))) + hit * micros(String(prices.cache)) + BigInt(output) * micros(String(prices.output));
-  const q = numerator / 1000000000000n; const r = (numerator % 1000000000000n).toString().padStart(12, '0');
+  const scaled = numerator * 1000000n / BigInt(config.priceUnitTokens ?? 1000000);
+  const q = scaled / 1000000000000n; const r = (scaled % 1000000000000n).toString().padStart(12, '0');
   return { input, output, cached, prices, cost: `${q}.${r}`, complete: cached != null || prices.input === prices.cache };
 }
 
@@ -313,6 +315,27 @@ async function saveDecision({
 }
 
 export async function processRun(run: ClaimedRun, modelConfig: ModelConfig) {
+  // Pin at the explicit claim boundary, before any model submission. A recovery
+  // must use the existing pin even when the default identity has since changed.
+  modelConfig = await db.transaction(async tx => {
+    await assertPaperOwner(tx,run);
+    const [current] = await tx.select().from(paperAnalysisRuns).where(ownedPaper(run)).for('update');
+    if (!current) throw new LostOwnershipError();
+    if (current.traderModelVersionId) {
+      const version=await readModelVersion(tx,current.traderModelVersionId);
+      const [identity]=await tx.select({id:llmModelConfigs.id}).from(llmModelConfigs).where(and(
+        eq(llmModelConfigs.id,version.id),eq(llmModelConfigs.isActive,true),isNull(llmModelConfigs.retiredAt),
+        isNull(llmModelConfigs.unavailableReason))).for('share');
+      if (!identity) throw new Error('Pinned trading model is unavailable');
+      return readModelConfig(version);
+    }
+    const [candidate] = await tx.select().from(llmModelConfigs).where(and(eq(llmModelConfigs.id,modelConfig.id),
+      eq(llmModelConfigs.isActive,true),isNull(llmModelConfigs.retiredAt),isNull(llmModelConfigs.unavailableReason))).for('update');
+    if (!candidate) throw new Error('Selected trading model is unavailable');
+    const version = await ensureModelVersion(tx,candidate);
+    await tx.update(paperAnalysisRuns).set({traderModelVersionId:version.id}).where(ownedPaper(run));
+    return readModelConfig(await readModelVersion(tx,version.id));
+  });
   const [portfolio, positions, reports] = await Promise.all([
     getPortfolio(run),
     getPositions(run),
@@ -350,7 +373,7 @@ export async function processRun(run: ClaimedRun, modelConfig: ModelConfig) {
     reports: formatReports(reports)
   });
   const callId = randomUUID();
-  const prices = modelConfig.inputPrice == null ? null : JSON.stringify({ currency: 'CNY', unit: 'million_tokens',
+  const prices = modelConfig.inputPrice == null ? null : JSON.stringify({ currency: modelConfig.priceCurrency ?? 'CNY', unit: 'million_tokens', unit_tokens:modelConfig.priceUnitTokens ?? 1000000,
     input: modelConfig.inputPrice, cache: modelConfig.cachePrice, output: modelConfig.outputPrice });
   await db.transaction(async tx => {
     await assertPaperOwner(tx, run);
@@ -358,6 +381,7 @@ export async function processRun(run: ClaimedRun, modelConfig: ModelConfig) {
       .where(and(ownedPaper(run), eq(paperAnalysisRuns.processingState, 'claimed'))).returning({ id: paperAnalysisRuns.id });
     if (!rows.length) throw new LostOwnershipError();
     await tx.insert(paperModelCalls).values({ paperRunId: run.id, callId, modelConfigId: modelConfig.id,
+      modelVersionId:modelConfig.modelVersionId ?? null, costCurrency:modelConfig.priceCurrency ?? 'CNY',
       provider: modelConfig.provider, model: modelConfig.modelName, status: 'running', pricingSnapshot: prices });
   });
   let modelResult: Awaited<ReturnType<typeof callDecisionModel>>;
@@ -442,16 +466,16 @@ async function main() {
 
   while (true) {
     await expireSubmittedRuns();
-    const modelConfig = await getDefaultModelConfig();
-    if (!modelConfig) {
-      console.log('No active model config available for paper trader worker.');
-      await sleep(pollIntervalMs);
-      continue;
-    }
-
     const run = await claimNextRun();
     if (!run) {
       await sleep(pollIntervalMs);
+      continue;
+    }
+    const modelConfig = run.traderModelVersionId
+      ? readModelConfig(await readModelVersion(db,run.traderModelVersionId))
+      : await getDefaultModelConfig();
+    if (!modelConfig) {
+      await saveDecision({run,decision:fallbackDecision('No active model config available.'),raw:'{}',status:'failed',errorMessage:'No active model config available.'});
       continue;
     }
 

@@ -1,9 +1,11 @@
+import { lockBillingAccounts, mutateCredits } from '@/lib/credits/ledger';
+import { ModelSelectionError, pinModelVersions } from '@/lib/analysis/model-versions';
 import { analysisDateSchema } from '@/lib/analysis/date-validation';
 import { publicAnalysisJob } from '@/lib/analysis/public-job';
 import { AmountRangeError } from '@/lib/paper/amount';
 import { buildPortfolioContext } from '@/lib/paper/portfolio-context';
 import { ensureInstrument } from '@/lib/market/catalogue';
-import { and, eq, gte, inArray, sql } from 'drizzle-orm';
+import { and, eq, inArray } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
@@ -13,11 +15,9 @@ import { getDefaultModelConfig } from '@/lib/analysis/model-configs-server';
 import { getDepthCreditCostFromDb } from '@/lib/analysis/pricing-server';
 import {
   analysisJobs,
-  creditTransactions,
   paperAnalysisRuns,
   paperPortfolios,
   paperPositions,
-  users,
   watchlistItems
 } from '@/lib/db/schema';
 import { normalizeTicker } from '@/lib/market/tickers';
@@ -47,6 +47,7 @@ function today() {
 export async function POST(request: NextRequest) {
   try { return await enqueueAnalysis(request); }
   catch (error) {
+    if (error instanceof ModelSelectionError) return NextResponse.json({error:error.message},{status:400});
     if (error instanceof AmountRangeError) return NextResponse.json(
       { error: 'Monetary valuation exceeds the supported safe integer range.' }, { status: 422 }
     );
@@ -128,23 +129,10 @@ async function enqueueAnalysis(request: NextRequest) {
   })]));
 
   const jobs = await db.transaction(async (tx) => {
-    const [updatedUser] = await tx
-      .update(users)
-      .set({
-        analysisCredits: sql`${users.analysisCredits} - ${totalCreditCost}`,
-        updatedAt: new Date()
-      })
-      .where(
-        and(
-          eq(users.id, currentUser.id),
-          gte(users.analysisCredits, totalCreditCost)
-        )
-      )
-      .returning({ analysisCredits: users.analysisCredits });
-
-    if (!updatedUser) {
-      return null;
-    }
+    const [account] = await lockBillingAccounts(tx,[currentUser.id]);
+    if (!account || account.analysisCredits < totalCreditCost) return null;
+    const pinned = await pinModelVersions(tx,modelConfig,modelConfig);
+    let remainingCredits = account.analysisCredits;
 
     const createdJobs = [];
     for (const item of items) {
@@ -164,21 +152,15 @@ async function enqueueAnalysis(request: NextRequest) {
           language: data.language,
           depth: data.depth,
           analysts: JSON.stringify(data.analysts),
-          provider: modelConfig.provider,
-          baseUrl: modelConfig.baseUrl,
-          quickModel: modelConfig.modelName,
-          deepModel: modelConfig.modelName,
-          modelConfigId: modelConfig.id,
+          ...pinned,
+          chargedCredits: creditCost,
           status: 'queued'
         })
         .returning();
 
-      await tx.insert(creditTransactions).values({
-        userId: currentUser.id,
-        jobId: createdJob.id,
-        amount: -creditCost,
-        reason: 'paper_portfolio_analysis'
-      });
+      const charged = await mutateCredits(tx,{userId:currentUser.id,jobId:createdJob.id,amount:-creditCost,
+        reason:'paper_portfolio_analysis',operationKey:`analysis-charge:${createdJob.id}`});
+      remainingCredits = charged.balance;
 
       await tx.insert(paperAnalysisRuns).values({
         portfolioId: portfolio.id,
@@ -196,7 +178,7 @@ async function enqueueAnalysis(request: NextRequest) {
       jobs: createdJobs,
       creditCost,
       totalCreditCost,
-      remainingCredits: updatedUser.analysisCredits
+      remainingCredits
     };
   });
 

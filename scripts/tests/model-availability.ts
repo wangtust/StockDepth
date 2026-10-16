@@ -16,13 +16,13 @@ async function main() {
   const {and,eq,isNull}=await import('../../apps/web/node_modules/drizzle-orm');
   for(const msg of ['401008','insufficient_quota','HTTP 402: free trial quota for the service has been exhausted','余额不足','额度已耗尽','insufficient credits'])assert(isQuotaExhausted(msg));
   for(const msg of ['HTTP 429 rate_limit_exceeded','HTTP 500','timeout','HTTP 400 invalid request','quota per minute exceeded'])assert(!isQuotaExhausted(msg));
-  const add=async(id:number,name:string)=>(await db.insert(models).values({id,name,provider:'fixture',modelName:name,baseUrl:'http://127.0.0.1:1',apiKey:'fixture-unused',isActive:true}).returning())[0];
+  const add=async(id:number,name:string)=>(await db.insert(models).values({id,name,provider:'fixture',modelName:name,baseUrl:'http://127.0.0.1:1',apiKey:'fixture-unused',isActive:true,isDefault:id===2}).returning())[0];
   const quick=await add(1,'quick'),deep=await add(2,'deep');
   const job={quickConfigSnapshot:JSON.stringify(quick),deepConfigSnapshot:JSON.stringify(deep)};
   const eventAt=new Date();
   await recordQuotaFailures(job,[{model:'deep',model_config_id:2,status:'failed',ended_at:eventAt.toISOString(),failure_reason:'quota_exhausted'},{model:'quick',model_config_id:1,status:'failed',ended_at:eventAt.toISOString()}]);
   assert.equal((await unavailableJobModels(job)).length,1);
-  let rows=await db.select().from(models).orderBy(models.id);assert.equal(rows[0].unavailableReason,null);assert.equal(rows[1].unavailableReason,'quota_exhausted');assert.equal(rows[1].isActive,true,'automatic state does not overwrite manual enable switch');
+  let rows=await db.select().from(models).orderBy(models.id);assert.equal(rows[0].unavailableReason,null);assert.equal(rows[1].unavailableReason,'quota_exhausted');assert.equal(rows[0].isDefault,true,'replacement becomes persisted default');assert.equal(rows[1].isDefault,false,'unavailable default is cleared');assert.equal(rows[1].isActive,true,'automatic state does not overwrite manual enable switch');
   assert.equal((await db.select().from(models).where(and(eq(models.isActive,true),isNull(models.retiredAt),isNull(models.unavailableReason)))).length,1);
   await db.update(models).set({unavailableReason:null,unavailableAt:null,availabilityCheckedAt:new Date(eventAt.getTime()+1000)}).where(eq(models.id,2));
   assert.equal(await markModelQuotaUnavailable(deep,eventAt),false,'old failure cannot undo a successful recovery');

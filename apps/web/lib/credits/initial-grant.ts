@@ -1,5 +1,4 @@
-import {db} from '../db/drizzle';
-import {creditTransactions} from '../db/schema';
-export async function recordInitialCreditGrant(tx:Pick<typeof db,'insert'>,user:{id:number;analysisCredits:number},reason:'signup_grant'|'seed_initial_grant') {
-  await tx.insert(creditTransactions).values({userId:user.id,amount:user.analysisCredits,reason});
+import { mutateCredits, type BillingTransaction } from './ledger';
+export async function recordInitialCreditGrant(tx: BillingTransaction, user: {id:number}, reason:'signup_grant'|'seed_initial_grant') {
+  return mutateCredits(tx, { userId: user.id, amount: 10, reason, operationKey: `initial-grant:${user.id}` });
 }

@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { requirePlatformAdmin } from '@/lib/auth/admin';
 import { db } from '@/lib/db/drizzle';
-import { analysisJobs, users } from '@/lib/db/schema';
+import { analysisJobs, billingAccounts, users } from '@/lib/db/schema';
 import { adjustUserCredits } from '@/app/admin/actions';
 import { StatusBadge } from '@/app/admin/_components/admin-ui';
 
@@ -30,13 +30,14 @@ export default async function AdminAccountsPage({ searchParams }: PageProps) {
       name: users.name,
       email: users.email,
       inviteCode: users.inviteCode,
-      analysisCredits: users.analysisCredits,
-      planName: users.planName,
-      subscriptionStatus: users.subscriptionStatus,
+      analysisCredits: billingAccounts.analysisCredits,
+      planName: billingAccounts.planName,
+      subscriptionStatus: billingAccounts.subscriptionStatus,
       createdAt: users.createdAt,
       jobCount: sql<number>`count(distinct ${analysisJobs.id})::int`
     })
     .from(users)
+    .leftJoin(billingAccounts, eq(users.id,billingAccounts.userId))
     .leftJoin(analysisJobs, eq(users.id, analysisJobs.userId))
     .where(
       query
@@ -48,7 +49,7 @@ export default async function AdminAccountsPage({ searchParams }: PageProps) {
           )
         : undefined
     )
-    .groupBy(users.id)
+    .groupBy(users.id,billingAccounts.userId)
     .orderBy(desc(users.createdAt))
     .limit(100);
 

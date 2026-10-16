@@ -281,6 +281,34 @@
       "when": 1792046940339,
       "tag": "0039_neat_dagger",
       "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1792122702959,
+      "tag": "0040_dazzling_tarantula",
+      "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1792122771772,
+      "tag": "0041_clumsy_kitty_pryde",
+      "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "7",
+      "when": 1792122972327,
+      "tag": "0042_handy_kylun",
+      "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "7",
+      "when": 1792123190921,
+      "tag": "0043_ambitious_spectrum",
+      "breakpoints": true
     }
   ]
 }

@@ -73,7 +73,7 @@ chmod 600 .env
 
 ```dotenv
 STOCKDEPTH_RUNTIME_BIN=/home/ubuntu/miniforge3/envs/stockdepth/bin
-POSTGRES_URL=postgresql://user:password@127.0.0.1:5432/database_name
+POSTGRES_URL=postgresql://user:password@127.0.0.1:5432/stockdepth_dev
 BASE_URL=http://localhost:3000
 AUTH_SECRET=replace-with-random-secret
 
@@ -91,7 +91,8 @@ STOCKDEPTH_WEB_USERNAME=admin
 STOCKDEPTH_WEB_PASSWORD=replace-with-your-internal-api-password
 ```
 
-- `POSTGRES_URL` 指向已有数据库；密码中的 URL 特殊字符需要进行 URL 编码。
+- 默认本地开发基线为 Git `dev` 分支和 PostgreSQL `stockdepth_dev` 数据库（V2兼容结构，30张业务表）。`POSTGRES_URL` 选择实际连接库，Git切换分支不会自动切换数据库；其他环境可以使用不同库名。
+- `POSTGRES_URL` 指向已有数据库；密码中的 URL 特殊字符需要进行 URL 编码。有创建数据库权限时，可运行 `node scripts/database-v2.cjs prepare` 创建并初始化开发库，重复运行不会清空数据。
 - `BASE_URL` 使用实际网站地址，公网访问时填写 `http://服务器公网IP:3000` 或对应域名。
 - `AUTH_SECRET` 可通过 `openssl rand -base64 32` 生成。
 - `STOCKDEPTH_API_USERNAME / PASSWORD` 与 `STOCKDEPTH_WEB_USERNAME / PASSWORD` 必须分别一致；它们用于内部 API 认证，不是网页登录账户。

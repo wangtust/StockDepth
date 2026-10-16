@@ -1,5 +1,7 @@
+import { readModelVersion } from '@/lib/analysis/model-versions';
 import '../env';
 import { extractDecision } from '@/lib/analysis/decision-extraction';
+import { resumeAnalysisJob } from '@/lib/analysis/resume-job';
 import { recordQuotaFailures, unavailableJobModels } from '@/lib/analysis/model-availability';
 import { decryptModelKey } from '@/lib/security/model-key';
 import { isAnalysisRunner } from '@/lib/analysis/runner-process';
@@ -8,10 +10,10 @@ import { RunPoller, reportValues, reportMatches } from './analysis-polling';
 import { ResourceMonitor } from './resources';
 import { claimAnalysis, ownedAnalysis, assertAnalysisOwner, renewAnalysis, LostOwnershipError, analysisLeaseMs } from './analysis-ownership';
 import { fetchWithBackoff } from './request';
-import { eq, sql } from 'drizzle-orm';
+import { eq, sql, desc } from 'drizzle-orm';
 import { getAnalysisConcurrencySettings } from '@/lib/analysis/concurrency-settings';
 import { db } from '@/lib/db/drizzle';
-import { analysisJobs, analysisReports, analysisDecisions, analysisModelCalls, llmModelConfigs } from '@/lib/db/schema';
+import { analysisJobs, analysisReports, analysisDecisions, analysisModelCalls, llmModelConfigs, analysisJobResumptions } from '@/lib/db/schema';
 
 type ClaimedJob = typeof analysisJobs.$inferSelect;
 
@@ -27,7 +29,7 @@ type StockDepthReport = {
 type ModelCall = {
   call_id: string; agent: string; model: string;
   failure_reason?: string | null;
-  role?: string; model_config_id?: number | null; provider?: string | null;
+  role?: string; model_config_id?: number | null; model_version_id?: number | null; provider?: string | null;
   started_at: string; ended_at: string | null; status: string;
   input_tokens: number | null; output_tokens: number | null; total_tokens: number | null;
   cached_input_tokens?: number | null; raw_usage?: object | null;
@@ -165,6 +167,9 @@ function shouldRestartRecoveredJob(job: ClaimedJob) {
 
 async function startStockDepth(job: ClaimedJob) {
   async function configFor(role: 'quick' | 'deep') {
+    const versionId = role === 'quick' ? job.quickModelVersionId : job.deepModelVersionId;
+    if (versionId) return readModelVersion(db,versionId);
+    if (job.configurationState === 'versioned') throw new Error('Versioned job is missing a pinned model version');
     const snapshot = role === 'quick' ? job.quickConfigSnapshot : job.deepConfigSnapshot;
     if (snapshot) return JSON.parse(snapshot) as typeof llmModelConfigs.$inferSelect;
     const configId = role === 'quick' ? (job.quickModelConfigId || job.modelConfigId) : (job.deepModelConfigId || job.modelConfigId);
@@ -183,23 +188,25 @@ async function startStockDepth(job: ClaimedJob) {
   if (!quickConfig || !deepConfig) {
     throw new Error('任务缺少模型配置快照，无法安全恢复；请重新提交分析。');
   }
-  if (!job.quickConfigSnapshot || !job.deepConfigSnapshot) {
-    const changedLegacyConfig = [quickConfig, deepConfig].some(config =>
-      !config.isActive || !!config.retiredAt || config.updatedAt > job.createdAt ||
+  if ((!job.quickModelVersionId && !job.quickConfigSnapshot) || (!job.deepModelVersionId && !job.deepConfigSnapshot)) {
+    const changedLegacyConfig = ([['quick',quickConfig],['deep',deepConfig]] as const).some(([role,config]) =>
+      !(role === 'quick' ? job.quickModelVersionId || job.quickConfigSnapshot : job.deepModelVersionId || job.deepConfigSnapshot) && (
+      ('isActive' in config && !config.isActive) || ('retiredAt' in config && !!config.retiredAt) || config.updatedAt > job.createdAt ||
       config.provider !== job.provider || config.baseUrl !== job.baseUrl ||
-      (config.id === quickConfig.id && job.quickModel && config.modelName !== job.quickModel) ||
-      (config.id === deepConfig.id && job.deepModel && config.modelName !== job.deepModel));
+      (role === 'quick' && job.quickModel && config.modelName !== job.quickModel) ||
+      (role === 'deep' && job.deepModel && config.modelName !== job.deepModel)));
     if (changedLegacyConfig) {
       throw new Error('旧任务的模型配置在排队后已变更或停用，系统为避免切换供应商而停止恢复；请重新提交分析。');
     }
   }
   function payloadConfig(config: typeof quickConfig, role: 'quick' | 'deep') {
     if (!config) throw new Error(`${role} model config unavailable`);
-    return { id: config.id, provider: config.provider, base_url: config.baseUrl || undefined,
-      model: role === 'quick' ? job.quickModel || config.modelName : job.deepModel || config.modelName,
+    return { id: config.id, model_version_id: role === 'quick' ? job.quickModelVersionId : job.deepModelVersionId, provider: config.provider, base_url: config.baseUrl || undefined,
+      model: config.modelName,
       options: config.modelOptions || {},
       api_key: decryptModelKey(config.apiKey), prices: config.inputPrice == null ? null : {
-        currency: 'CNY', unit: 'million_tokens', input: config.inputPrice,
+        currency: 'priceCurrency' in config ? config.priceCurrency : 'CNY', unit: 'million_tokens',
+        unit_tokens: 'priceUnitTokens' in config ? config.priceUnitTokens : 1000000, input: config.inputPrice,
         cache: config.cachePrice, output: config.outputPrice,
       } };
   }
@@ -281,6 +288,8 @@ export async function syncUsage(job: ClaimedJob, run: StockDepthRun, previousCal
       if (previousCalls.get(call.call_id) === JSON.stringify(call)) continue;
       const values = {
         jobId: job.id, callId: call.call_id, agent: call.agent, model: call.model,
+        modelVersionId: call.model_version_id ?? null,
+        costCurrency: (call.pricing_snapshot as {currency?:string}|null)?.currency ?? null,
         role: call.role || 'legacy', modelConfigId: call.model_config_id ?? null, provider: call.provider ?? null,
         startedAt: new Date(call.started_at), endedAt: call.ended_at ? new Date(call.ended_at) : null,
         status: call.status, inputTokens: call.input_tokens, outputTokens: call.output_tokens,
@@ -292,7 +301,8 @@ export async function syncUsage(job: ClaimedJob, run: StockDepthRun, previousCal
         estimatedCost: call.estimated_cost ?? null, costComplete: call.cost_complete ?? false,
       };
       await tx.insert(analysisModelCalls).values(values).onConflictDoUpdate({
-        target: [analysisModelCalls.jobId, analysisModelCalls.callId], set: values,
+        target: [analysisModelCalls.jobId, analysisModelCalls.callId], set: {...values,
+          modelVersionId:sql`coalesce(${analysisModelCalls.modelVersionId}, ${values.modelVersionId})`},
       });
     }
     const [totals] = await tx.select({
@@ -387,6 +397,21 @@ async function processMockJob(job: ClaimedJob) {
   console.log(JSON.stringify({ event: 'mock_execution_end', jobId: job.id }));
 }
 
+async function retryUnavailableModels(job: ClaimedJob) {
+  if (!(await unavailableJobModels(job)).length) return false;
+  // Stop the old runner before publishing the next attempt; its saved siblings
+  // remain in the same checkpoint, reports and usage history.
+  await terminateExternalRun(job);
+  const result = await resumeAnalysisJob(job.userId, job.id, undefined, job.workerOwner || undefined);
+  if ('error' in result) {
+    if(result.status===409) throw new LostOwnershipError();
+    await db.update(analysisJobs).set({externalStatus:'model-unavailable',externalPid:null}).where(ownedAnalysis(job));
+    throw new Error(result.error);
+  }
+  console.log(`Analysis job #${job.id}: unavailable model replaced; queued checkpoint retry`);
+  return true;
+}
+
 export async function processJob(job: ClaimedJob, options: { startRun?: boolean } = {}) {
   const startRun = options.startRun ?? true;
   console.log(
@@ -398,11 +423,12 @@ export async function processJob(job: ClaimedJob, options: { startRun?: boolean 
   }
 
   if (startRun) {
-    if ((await unavailableJobModels(job)).length) throw new Error('模型额度不足，暂不可用，请更换模型后重新提交分析。');
+    if (await retryUnavailableModels(job)) return;
     await startStockDepth(job);
   }
 
-  const startedAt = job.startedAt?.getTime() || Date.now();
+  const [resumption] = await db.select({createdAt:analysisJobResumptions.createdAt}).from(analysisJobResumptions).where(eq(analysisJobResumptions.jobId,job.id)).orderBy(desc(analysisJobResumptions.createdAt)).limit(1);
+  const startedAt = Math.max(job.startedAt?.getTime() || Date.now(), resumption?.createdAt.getTime() || 0);
   let lastProgressAt = startedAt;
   let lastSignature = '';
   let lastReportsSignature = '';
@@ -432,6 +458,8 @@ export async function processJob(job: ClaimedJob, options: { startRun?: boolean 
       await syncUsage(job, run, previousCalls);
       lastUsageSignature = usageSignature;
     }
+
+    if (await retryUnavailableModels(job)) return;
 
     const signature = progressSignature(run);
     if (signature !== lastSignature) {

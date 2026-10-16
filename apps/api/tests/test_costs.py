@@ -13,6 +13,12 @@ from stockdepth.api.usage import UsageRecorder, read_usage
 PRICES = {'input': '1', 'cache': '0.25', 'output': '4'}
 
 class CostTests(unittest.TestCase):
+    def test_version_price_unit(self):
+        prices = {**PRICES, 'unit_tokens': 1000, 'currency': 'USD'}
+        self.assertEqual(estimate_cost(1000, 100, 400, prices)['estimated_cost'], '1.100000000000')
+        for unit in (0, -1, True, '1000'):
+            self.assertIsNone(estimate_cost(1000, 100, 400, {**prices, 'unit_tokens': unit})['estimated_cost'])
+
     def test_no_double_counting_cache(self):
         cost = estimate_cost(1_000_000, 100_000, 400_000, PRICES)
         self.assertEqual(cost, {'estimated_cost': '1.100000000000', 'cost_complete': True})

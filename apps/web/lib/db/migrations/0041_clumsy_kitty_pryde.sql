@@ -1,0 +1,3 @@
+ALTER TABLE "analysis_jobs" ADD CONSTRAINT "analysis_jobs_quick_version_config_fk" FOREIGN KEY ("quick_model_version_id","quick_model_config_id") REFERENCES "public"."llm_model_config_versions"("id","config_id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "analysis_jobs" ADD CONSTRAINT "analysis_jobs_deep_version_config_fk" FOREIGN KEY ("deep_model_version_id","deep_model_config_id") REFERENCES "public"."llm_model_config_versions"("id","config_id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "credit_transactions" ADD CONSTRAINT "credit_transactions_billing_account_fk" FOREIGN KEY ("user_id") REFERENCES "public"."billing_accounts"("user_id") ON DELETE no action ON UPDATE no action;

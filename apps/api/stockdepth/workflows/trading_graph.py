@@ -175,6 +175,7 @@ class StockDepthGraph:
             kwargs["rate_limit_scope"] = f"model-config-{model_config.get('id')}"
             prices = model_config.get("prices")
             metadata = {"model_role": role, "model_config_id": model_config.get("id"),
+                        "model_version_id": model_config.get("model_version_id"),
                         "model_provider": provider, "model_name": model,
                         "pricing_snapshot": prices}
         else:

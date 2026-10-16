@@ -23,6 +23,9 @@ def estimate_cost(inp, out, cached, prices, usage=None):
     if usage.get('cache_creation_input_tokens') or (usage.get('input_token_details') or {}).get('cache_creation'):
         return unknown
     try:
+        unit = prices.get('unit_tokens', 1_000_000)
+        if not isinstance(unit, int) or isinstance(unit, bool) or unit <= 0:
+            return unknown
         rates = [Decimal(str(prices[k])) for k in ('input', 'cache', 'output')]
         if any(not rate.is_finite() or rate < 0 for rate in rates):
             return unknown
@@ -32,6 +35,6 @@ def estimate_cost(inp, out, cached, prices, usage=None):
     if cached is not None and not valid_cache:
         return unknown
     hit = cached if valid_cache else 0
-    cost = ((inp - hit) * rates[0] + hit * rates[1] + out * rates[2]) / Decimal(1_000_000)
+    cost = ((inp - hit) * rates[0] + hit * rates[1] + out * rates[2]) / Decimal(unit)
     return {'estimated_cost': format(cost.quantize(Decimal('0.000000000001')), 'f'),
             'cost_complete': valid_cache or rates[0] == rates[1]}

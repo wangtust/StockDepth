@@ -140,12 +140,14 @@ export default function AnalysisClient({ initialPayload }: { initialPayload: Job
       refreshInterval: detailRefreshInterval
     }
   );
-  const selectedReports: Report[] = canRetainAnalysisData(detailError) && detail?.job?.id === selectedJobId ? detail?.reports || [] : [];
+  const selectedReports: Report[] = canRetainAnalysisData(detailError) && detail?.job?.id === selectedJobId
+    ? (detail?.reports || []).filter((report: Report) => report.reportKey !== 'execution') : [];
   const usageJob: Job | null = canRetainAnalysisData(detailError) && detail?.job?.id === selectedJobId ? detail?.job || null : null;
   const calls: UsageCall[] = canRetainAnalysisData(detailError) && detail?.job?.id === selectedJobId ? detail?.calls || [] : [];
   const statusJob = usageJob?.id === selectedJobId ? usageJob : selectedJob;
   const effectiveReportKey = selectedReports.some(r => r.reportKey === selectedReportKey)
-    ? selectedReportKey : (selectedReports.find(r => r.reportKey === 'progress') || selectedReports[0])?.reportKey || selectedJob?.defaultReportKey || '';
+    ? selectedReportKey : (selectedReports.find(r => r.reportKey === 'progress') || selectedReports[0])?.reportKey ||
+      (selectedJob?.defaultReportKey !== 'execution' ? selectedJob?.defaultReportKey : '') || '';
   const reportStatus = usageJob?.status || selectedJob?.status || '';
   const reportRefreshInterval = useCallback(() => LIVE_JOB_STATUSES.has(reportStatus)
     ? REPORT_POLL_INTERVAL_MS : 0, [reportStatus]);

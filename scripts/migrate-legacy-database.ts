@@ -2,6 +2,7 @@
 // database are required before the live transaction. Never prints row payloads.
 import fs from 'node:fs';
 import path from 'node:path';
+import {fileURLToPath} from 'node:url';
 import {spawnSync} from 'node:child_process';
 import {createHash,randomUUID} from 'node:crypto';
 import postgres from '../apps/web/node_modules/postgres';
@@ -47,7 +48,7 @@ const aliases:Record<string,string>={userId:'users',user_id:'users',adminUserId:
   instrumentId:'instruments',instrument_id:'instruments',decisionId:'paper_trade_decisions',decision_id:'paper_trade_decisions',
   watchlistItemId:'watchlist_items',watchlist_item_id:'watchlist_items',tradeId:'paper_trades',trade_id:'paper_trades'};
 
-async function importSnapshot(client:any,source:Snapshot,sourceName:string,targetName:string){
+export async function importSnapshot(client:any,source:Snapshot,sourceName:string,targetName:string){
  return client.begin(async(tx:any)=>{
   await tx`select pg_advisory_xact_lock(739421,51)`;
   for(const table of [...order,'billing_accounts','llm_model_config_versions'].sort())await tx`lock table ${tx(table)} in share row exclusive mode`;
@@ -156,9 +157,11 @@ async function importSnapshot(client:any,source:Snapshot,sourceName:string,targe
       const bootstrap=records.filter((r:Row)=>r.reason==='initial_admin_grant'||r.reason==='signup_grant'||r.reason==='seed_initial_grant').reduce((n:number,r:Row)=>n+r.amount,0);
       const desired=old.analysis_credits+account.analysis_credits-bootstrap;check(desired>=0&&desired<=2147483647,'Merged balance outside supported range');
       const delta=desired-account.analysis_credits;
-      if(delta){const seq=Number(account.ledger_sequence)+1;const next=Math.max(0,...(await tx`select id from credit_transactions`).map((r:Row)=>r.id))+1;await tx`insert into credit_transactions(id,user_id,amount,reason,ledger_sequence,balance_after,operation_key,metadata) values(${next},${userId},${delta},'legacy_balance_merge',${seq},${desired},${'legacy-balance:'+sourceName+':'+old.id},${tx.json({sourceDatabase:sourceName,legacyUserId:old.id})})`;added.credit_transactions++;await tx`update billing_accounts set analysis_credits=${desired},ledger_sequence=${seq},updated_at=now() where user_id=${userId}`;}
-      await tx`update users set analysis_credits=${desired} where id=${userId}`;
+      if(delta){const seq=Number(account.ledger_sequence)+1;const next=Math.max(0,...(await tx`select id from credit_transactions`).map((r:Row)=>r.id))+1;await tx`insert into credit_transactions(id,user_id,amount,reason,ledger_sequence,balance_after,operation_key,metadata) values(${next},${userId},${delta},'legacy_balance_merge',${seq},${desired},${'legacy-balance:'+sourceName+':'+old.id},${JSON.stringify({sourceDatabase:sourceName,legacyUserId:old.id})}::jsonb)`;added.credit_transactions++;await tx`update billing_accounts set analysis_credits=${desired},ledger_sequence=${seq},updated_at=now() where user_id=${userId}`;}
     }
+    // This importer only accepts 0043. Keep its legacy balance reconciled until
+    // 0044 checks equality and removes the compatibility column.
+    await tx`update users set analysis_credits=(select analysis_credits from billing_accounts where user_id=${userId}) where id=${userId}`;
   }
   // Verify reports, monetary facts and IDs with server-side exact comparisons.
   for(const table of ['analysis_reports','paper_trades','paper_positions','paper_portfolios','daily_prices','price_snapshots','analysis_model_calls','analysis_job_resumptions','credit_transactions']){
@@ -187,6 +190,8 @@ async function main(){
  try{const data=await snapshot(source);check(Object.keys(data.rows).every(t=>order.includes(t)||excluded.includes(t)),'Unexpected source schema');
    if(args.includes('--rehearse')){rehearsal='stockdepth_import_rehearsal_'+randomUUID().replaceAll('-','');await admin.unsafe('create database "'+rehearsal+'"');const u=new URL(urlFor(rehearsal));const env={...process.env,PGHOST:u.hostname,PGPORT:u.port||'5432',PGUSER:decodeURIComponent(u.username),PGPASSWORD:decodeURIComponent(u.password),PGDATABASE:rehearsal};if(u.searchParams.has('sslmode'))env.PGSSLMODE=u.searchParams.get('sslmode')!;check(spawnSync('pg_restore',['--no-owner','--no-acl','--exit-on-error','--dbname',rehearsal,path.join(directory,'target.dump')],{env,encoding:'utf8'}).status===0,'Rehearsal restore failed');target=connect(urlFor(rehearsal));}
    else target=connect(urlFor(targetName));
+   const legacyColumns=await target`select 1 from information_schema.columns where table_schema='public' and table_name='users' and column_name='analysis_credits'`;
+   check(legacyColumns.length===1,'Legacy import requires the 0043 compatibility schema. Restore the verified pre-normalization target backup into a disposable database, import there, then run the normal initializer to upgrade. Do not reimport into a normalized live database.');
    let collision:any;
    if(args.includes('--collision-check')){
      const legacyJob=data.rows.analysis_job_resumptions[0]?.job_id??data.rows.analysis_jobs[0].id;
@@ -205,4 +210,4 @@ async function main(){
    const filename=path.join(directory,collision?'collision-report.json':rehearsal?'rehearsal-report.json':report.idempotent?'idempotency-report.json':'import-report.json');fs.writeFileSync(filename,JSON.stringify(report,null,2),{mode:0o600});console.log(JSON.stringify({mode:collision?'collision-rehearsal':rehearsal?'rehearsal':'apply',report:filename,added:report.added,mergedUsers:report.mergedUserCount,pausedJobs:report.pausedJobs,interruptedCalls:report.interruptedCalls,idempotent:report.idempotent}));
  }finally{await source.end();if(target)await target.end();if(rehearsal)await admin.unsafe('drop database if exists "'+rehearsal+'" with (force)');await admin.end();}
 }
-main().catch((e:any)=>{console.error('Legacy import failed: '+(e instanceof MigrationValidationError?e.message:e.code||e.name));process.exitCode=1;});
+if(process.argv[1] && path.resolve(process.argv[1])===fileURLToPath(import.meta.url)) main().catch((e:any)=>{console.error('Legacy import failed: '+(e instanceof MigrationValidationError?e.message:e.code||e.name));process.exitCode=1;});

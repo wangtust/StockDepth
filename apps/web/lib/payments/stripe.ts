@@ -1,15 +1,18 @@
 import { mutateCredits } from '@/lib/credits/ledger';
 import Stripe from 'stripe';
 import { redirect } from 'next/navigation';
-import { User, billingAccounts, users } from '@/lib/db/schema';
+import { User, billingAccounts } from '@/lib/db/schema';
 import {
   getUserByStripeCustomerId,
+  getUserWithBilling,
   getUser,
   updateUserSubscription
 } from '@/lib/db/queries';
 import { db } from '@/lib/db/drizzle';
 import { eq } from 'drizzle-orm';
 import { getCreditPack } from '@/lib/payments/credit-packs';
+
+type BillingUser = NonNullable<Awaited<ReturnType<typeof getUser>>>;
 
 export const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
   apiVersion: '2025-04-30.basil'
@@ -57,7 +60,7 @@ export async function createCheckoutSession({
     redirect('/pricing');
   }
 
-  const currentUser = user || (await getUser());
+  const currentUser = user ? await getUserWithBilling(user.id) : await getUser();
 
   if (!currentUser) {
     redirect(`/sign-up?redirect=checkout&packId=${pack.id}`);
@@ -119,11 +122,10 @@ export async function applyCreditPurchaseFromCheckoutSession(
     if (!result.applied) return;
     const fields = { ...(customerId ? {stripeCustomerId:customerId} : {}), planName:'Credit Pack', subscriptionStatus:'credits',updatedAt:new Date() };
     await tx.update(billingAccounts).set(fields).where(eq(billingAccounts.userId,userId));
-    await tx.update(users).set(fields).where(eq(users.id,userId));
   });
 }
 
-export async function createCustomerPortalSession(user: User) {
+export async function createCustomerPortalSession(user: BillingUser) {
   if (!isStripeConfigured()) {
     redirect('/pricing');
   }

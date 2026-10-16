@@ -5,7 +5,7 @@ function compile(source,mocks){const out=ts.transpileModule(source,{compilerOpti
 const keys=compile(fs.readFileSync(root+'/apps/web/lib/security/model-key.ts','utf8'),{});
 const schema={adminAuditLogs:{},llmModelConfigs:{},users:{},analysisJobs:{},analysisPricing:{},creditTransactions:{}};
 let writes=[],audits=[],versions=[],probes=0;
-let currentModel;
+let currentModel;let execution;
 const db = {
  transaction: async fn => fn(db),
  select() { return { from() { return { where() { return { for: async () => currentModel ? [currentModel] : [] }; } }; } }; },
@@ -27,7 +27,7 @@ const db = {
  }
 };
 const actions=compile(fs.readFileSync(process.env.ROUND5_ADMIN_ACTIONS_SOURCE || root+'/apps/web/app/admin/actions.ts','utf8'),{
- '@/lib/analysis/model-versions':{ensureModelVersion:async(tx,model)=>{assert.equal(tx,db);assert(model.apiKey.startsWith('sdkey:'));assert.equal(keys.decryptModelKey(model.apiKey),'synthetic-admin-secret');versions.push({...model});return {id:versions.length};}},
+ '@/lib/analysis/model-versions':{saveModelVersion:async(tx,id,model)=>{assert.equal(tx,db);assert(model.apiKey.startsWith('sdkey:'));assert.equal(keys.decryptModelKey(model.apiKey),'synthetic-admin-secret');versions.push({...model});execution=model;return {id:versions.length};},readCurrentModelConfig:async()=>({...currentModel,...execution})},
  '@/lib/credits/admin-adjustment':{adjustCreditBalance:async()=>assert.fail('Credit adjustment is outside this test')},'@/lib/analysis/runner-process':{isAnalysisRunner:()=>false},'@/lib/security/model-key':keys,'@/lib/analysis/test-model-server':{testModelConnection:async()=>{probes++;return {success:true}}},'next/cache':{revalidatePath(){}},'drizzle-orm':{and(){},eq(){},isNull(){},sql(){}},'zod':require(root+'/apps/web/node_modules/zod'),
  '@/lib/auth/admin':{requirePlatformAdmin:async()=>({id:1}),writeAdminAuditLog:async data=>audits.push(data)},'@/lib/analysis/concurrency-settings':{},'@/lib/db/drizzle':{db},'@/lib/db/schema':schema,'@/lib/analysis/pricing':{}
 });
@@ -37,8 +37,8 @@ function form(withKey=true){const f=new FormData();Object.entries({configId:'1',
  assert((await actions.createModelConfig(form())).error);assert.equal(probes,0);assert.equal(writes.length,0);
  assert((await actions.updateModelConfig(form())).error);assert.equal(writes.length,0);
  Object.assign(process.env,{STOCKDEPTH_MODEL_KEY_ID:'fixture',STOCKDEPTH_MODEL_KEYRING:JSON.stringify({fixture:crypto.randomBytes(32).toString('base64url')})});
- assert((await actions.createModelConfig(form())).success);assert.equal(probes,1);assert.equal(keys.decryptModelKey(writes[0].apiKey),'synthetic-admin-secret');
- assert((await actions.updateModelConfig(form())).success);assert.equal(keys.decryptModelKey(writes.at(-1).apiKey),'synthetic-admin-secret');
+ assert((await actions.createModelConfig(form())).success);assert.equal(probes,1);assert(!('apiKey' in writes[0]),'identity table never stores execution secrets');assert.equal(keys.decryptModelKey(versions[0].apiKey),'synthetic-admin-secret');
+ assert((await actions.updateModelConfig(form())).success);assert(!('apiKey' in writes.at(-1)));assert.equal(keys.decryptModelKey(versions.at(-1).apiKey),'synthetic-admin-secret');
  assert((await actions.updateModelConfig(form(false))).success);assert(!('apiKey' in writes.at(-1)));
  assert.equal(versions.length,3,'create and both update paths preserve encrypted version snapshots');
  assert(!JSON.stringify(versions).includes('synthetic-admin-secret'));

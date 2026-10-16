@@ -14,9 +14,11 @@ const ids=new Set([...workers].map(c=>c.pid));let changed=true;while(changed){ch
 return rows.filter(r=>ids.has(r.pid)).reduce((a,r)=>a+r.rss,0);}
 (async()=>{let timer;try{fs.mkdirSync(output,{recursive:true});timer=setTimeout(()=>{for(const c of workers)try{process.kill(-c.pid,'SIGKILL');}catch{}},75000);
 await admin`create database ${admin(name)}`;created=true;source.pathname='/'+name;db=postgres(source.toString(),{max:2});await migrate(drizzle(db),{migrationsFolder:root+'/apps/web/lib/db/migrations'});
-const [user]=await db`insert into users(email,password_hash,analysis_credits) values('soak@test.invalid','unused',100) returning id`;
+const [user]=await db`insert into users(email,password_hash) values('soak@test.invalid','unused') returning id`;
+await db`update billing_accounts set analysis_credits=100,ledger_opening_balance=100`;
 await db`insert into analysis_worker_settings(key,system_concurrency,user_concurrency) values('analysis_worker',2,10) on conflict(key) do update set system_concurrency=2,user_concurrency=10`;
-const insert=async count=>db`insert into analysis_jobs ${db(Array.from({length:count},()=>({user_id:user.id,run_id:'soak-'+randomUUID(),ticker:'MOCK',trade_date:'2026-10-13',analysts:'[]',provider:'mock',base_url:'mock://isolated',status:'running'})))}`;
+const mockConfig=await require('./mock-job-config.cjs').mockJobConfig(db);
+const insert=async count=>db`insert into analysis_jobs ${db(Array.from({length:count},()=>({user_id:user.id,run_id:'soak-'+randomUUID(),ticker:'MOCK',trade_date:'2026-10-13',analysts:'[]',...mockConfig,status:'running'})))}`;
 await insert(8);launch(source.toString());launch(source.toString());const start=Date.now();let submitted=8,nextBatch=10000;
 while(Date.now()-start<60000){const elapsed=Date.now()-start;if(!killed&&active.size===2){await stop([...workers][0],'SIGKILL');launch(source.toString());killed=true;}
 if(elapsed>=nextBatch&&submitted<40){await insert(8);submitted+=8;nextBatch+=10000;}
@@ -24,6 +26,6 @@ const rss=memory();maxRss=Math.max(maxRss,rss);assert(rss<512*1024,'512MiB resou
 assert([...workers].every(c=>c.exitCode===null&&c.signalCode===null),'worker exited unexpectedly');
 const [counts]=await db`select count(*)::int total,count(*) filter(where status='complete')::int complete,count(*) filter(where status='failed')::int failed,count(worker_owner)::int owners from analysis_jobs`;
 assert.equal(counts.failed,0);snapshots.push({elapsed,rssKb:rss,active:active.size,...counts});await delay(250);}
-const last=snapshots.at(-1);assert(killed);assert.equal(last.complete,40);assert.equal(last.owners,0);const [credits]=await db`select analysis_credits from users where id=${user.id}`;assert.equal(credits.analysis_credits,100);const [ledger]=await db`select count(*)::int n from credit_transactions`;assert.equal(ledger.n,0);
+const last=snapshots.at(-1);assert(killed);assert.equal(last.complete,40);assert.equal(last.owners,0);const [credits]=await db`select analysis_credits from billing_accounts where user_id=${user.id}`;assert.equal(credits.analysis_credits,100);const [ledger]=await db`select count(*)::int n from credit_transactions`;assert.equal(ledger.n,0);
 const result={scope:'built-in Mock queue/report lifecycle, not real Python graph/model/transaction capacity',durationMs:Date.now()-start,hardLimitMs:75000,rssLimitKb:512*1024,maxRssKb:maxRss,submitted,complete:last.complete,peak,started,restartAfterSigkill:killed,credits:100,ledger:0,snapshots,events};fs.writeFileSync(output+'/soak.json',JSON.stringify(result,null,2));console.log(JSON.stringify({durationMs:result.durationMs,maxRssKb:maxRss,submitted,complete:last.complete,peak,started,restartAfterSigkill:killed}));
 }finally{clearTimeout(timer);for(const c of [...workers])await stop(c);if(db)await db.end();if(created)await admin`drop database ${admin(name)} with (force)`;await admin.end();}})().catch(e=>{console.error(e.name,e.message);process.exitCode=1;});

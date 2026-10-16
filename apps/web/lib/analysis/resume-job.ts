@@ -1,7 +1,7 @@
-import {pinModelVersions,ModelSelectionError} from './model-versions';
+import {pinModelVersions,readModelVersion,ModelSelectionError} from './model-versions';
 import {and,eq,isNull,desc,asc,sql} from 'drizzle-orm';
 import {db} from '../db/drizzle';
-import {analysisJobs,analysisJobResumptions,llmModelConfigs} from '../db/schema';
+import {analysisJobs,analysisJobLegacyConfigs,analysisJobResumptions,llmModelConfigs} from '../db/schema';
 import {encryptedHistoricalSnapshot} from './model-snapshot';
 import {unavailableJobModels} from './model-availability';
 export type ReplacementModels={quickModelConfigId:number;deepModelConfigId:number};
@@ -9,6 +9,10 @@ export async function resumeAnalysisJob(userId:number,jobId:number,replacement?:
   return db.transaction(async tx=>{
     const [existing]=await tx.select().from(analysisJobs).where(and(eq(analysisJobs.id,jobId),eq(analysisJobs.userId,userId),isNull(analysisJobs.hiddenAt))).for('update');
     if(!existing||(autoOwner ? existing.status!=='running'||existing.workerOwner!==autoOwner||!existing.workerLeaseUntil||existing.workerLeaseUntil<=new Date() : existing.status!=='failed'))return {error:'Only failed analysis jobs can be continued',status:409} as const;
+    const quickVersion=existing.quickModelVersionId ? await readModelVersion(tx,existing.quickModelVersionId) : null;
+    const deepVersion=existing.deepModelVersionId ? await readModelVersion(tx,existing.deepModelVersionId) : null;
+    const [legacy]=(!quickVersion || !deepVersion) ? await tx.select().from(analysisJobLegacyConfigs).where(eq(analysisJobLegacyConfigs.jobId,jobId)) : [];
+    const historical=legacy?.evidence || {};
     let changed:Partial<typeof analysisJobs.$inferInsert>={};
     if(autoOwner) {
       const blocked=await unavailableJobModels(existing,tx);
@@ -23,8 +27,8 @@ export async function resumeAnalysisJob(userId:number,jobId:number,replacement?:
         await tx.update(llmModelConfigs).set({isDefault:false}).where(eq(llmModelConfigs.isDefault,true));
         if(next){await tx.update(llmModelConfigs).set({isDefault:true}).where(eq(llmModelConfigs.id,next.id));available.sort((a,b)=>Number(b.id===next.id)-Number(a.id===next.id));}
       }
-      const quick=available.find(c=>c.id===existing.quickModelConfigId&&c.quickEnabled)??available.find(c=>c.quickEnabled);
-      const deep=available.find(c=>c.id===existing.deepModelConfigId&&c.deepEnabled)??available.find(c=>c.deepEnabled);
+      const quick=available.find(c=>c.id===quickVersion?.id&&c.quickEnabled)??available.find(c=>c.quickEnabled);
+      const deep=available.find(c=>c.id===deepVersion?.id&&c.deepEnabled)??available.find(c=>c.deepEnabled);
       if(!quick||!deep)return {error:'没有可用的 Quick / Deep 替代模型，任务已停止。',status:503} as const;
       replacement={quickModelConfigId:quick.id,deepModelConfigId:deep.id};
     }
@@ -34,11 +38,19 @@ export async function resumeAnalysisJob(userId:number,jobId:number,replacement?:
       let pinned;
       try { pinned=await pinModelVersions(tx,{id:selection.quickModelConfigId},{id:selection.deepModelConfigId}); }
       catch(error) { if(error instanceof ModelSelectionError)return {error:error.message,status:400} as const; throw error; }
-      const {quickConfigSnapshot,deepConfigSnapshot}=pinned;
-      const quick=JSON.parse(quickConfigSnapshot),deep=JSON.parse(deepConfigSnapshot);
-      await tx.insert(analysisJobResumptions).values({jobId,userId,previousQuickVersionId:existing.quickModelVersionId,previousDeepVersionId:existing.deepModelVersionId,nextQuickVersionId:pinned.quickModelVersionId,nextDeepVersionId:pinned.deepModelVersionId,configurationState:'versioned',initiator:autoOwner?'automatic':'user',previousQuickModel:existing.quickModel,previousDeepModel:existing.deepModel,nextQuickModel:quick.modelName,nextDeepModel:deep.modelName,
-        previousQuickConfigSnapshot:encryptedHistoricalSnapshot(existing.quickConfigSnapshot),previousDeepConfigSnapshot:encryptedHistoricalSnapshot(existing.deepConfigSnapshot),nextQuickConfigSnapshot:quickConfigSnapshot,nextDeepConfigSnapshot:deepConfigSnapshot});
-      changed={...pinned,provider:quick.provider,baseUrl:quick.baseUrl,quickModel:quick.modelName,deepModel:deep.modelName,modelConfigId:quick.id,quickModelConfigId:quick.id,deepModelConfigId:deep.id,quickConfigSnapshot,deepConfigSnapshot};
+      await tx.insert(analysisJobResumptions).values({jobId,userId,
+        previousQuickVersionId:existing.quickModelVersionId,previousDeepVersionId:existing.deepModelVersionId,
+        nextQuickVersionId:pinned.quickModelVersionId,nextDeepVersionId:pinned.deepModelVersionId,
+        configurationState:'versioned',initiator:autoOwner?'automatic':'user',
+        legacyEvidence: !quickVersion || !deepVersion ? {
+          ...(!quickVersion ? {previousQuickModel:historical.quickModel ?? null,
+            previousQuickConfigSnapshot:encryptedHistoricalSnapshot((historical.quickConfigSnapshot as string|null) ?? null)} : {}),
+          ...(!deepVersion ? {previousDeepModel:historical.deepModel ?? null,
+            previousDeepConfigSnapshot:encryptedHistoricalSnapshot((historical.deepConfigSnapshot as string|null) ?? null)} : {})
+        } : null});
+      changed=pinned;
+    }else if(!quickVersion || !deepVersion) {
+      return {error:'旧任务缺少可靠模型版本，请选择模型后继续。',status:409} as const;
     }else if((await unavailableJobModels(existing,tx)).length) {
       return {error:'模型不可用，请使用“更换模型并继续”或联系管理员恢复模型。',status:409} as const;
     }

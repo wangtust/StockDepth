@@ -4,7 +4,7 @@ require(modules+'/dotenv').config({path:path.resolve(__dirname,'../../.env'),qui
 (async()=>{
  const sql=require(modules+'/postgres')(process.env.POSTGRES_URL,{max:1});let browser;
  try {
-  const [user]=await sql`select id,analysis_credits from users u where status='active' and deleted_at is null and exists(select 1 from analysis_jobs j where j.user_id=u.id and j.status='failed' and j.hidden_at is null) order by id limit 1`;
+  const [user]=await sql`select id,(select b.analysis_credits from billing_accounts b where b.user_id=u.id) as analysis_credits from users u where status='active' and deleted_at is null and exists(select 1 from analysis_jobs j where j.user_id=u.id and j.status='failed' and j.hidden_at is null) order by id limit 1`;
   assert(user,'needs an account with a failed job');
   const {SignJWT}=await import(modules+'/jose/dist/webapi/index.js');const token=await new SignJWT({user:{id:user.id},expires:new Date(Date.now()+120000).toISOString()}).setProtectedHeader({alg:'HS256'}).setIssuedAt().setExpirationTime('2m').sign(new TextEncoder().encode(process.env.AUTH_SECRET));
   const base='http://127.0.0.1:3000',headers={cookie:`session=${token}`};
@@ -25,7 +25,7 @@ require(modules+'/dotenv').config({path:path.resolve(__dirname,'../../.env'),qui
   const selection={quickModelConfigId:Number(await quick.inputValue()),deepModelConfigId:Number(await deep.inputValue())};
   await page.getByRole('button',{name:'确认更换并继续',exact:true}).click();await page.waitForFunction(() => !Array.from(document.querySelectorAll('details')).find(el => el.querySelector('summary')?.textContent === '更换模型并继续')?.open);assert.deepEqual(posted,selection);assert.equal(await page.getByText('已更换模型并请求继续，历史报告和用量记录已保留。',{exact:true}).count(),0);
   await page.getByText('模型更换记录 (1)',{exact:true}).click();await page.getByText(/Quick: old-quick → new-quick/).waitFor();assert.deepEqual(errors,[]);
-  assert.equal((await sql`select status from analysis_jobs where id=${job.id}`)[0].status,'failed');assert.equal((await sql`select count(*)::int as count from analysis_job_resumptions where job_id=${job.id}`)[0].count,before.count);assert.equal((await sql`select analysis_credits from users where id=${user.id}`)[0].analysis_credits,user.analysis_credits);
+  assert.equal((await sql`select status from analysis_jobs where id=${job.id}`)[0].status,'failed');assert.equal((await sql`select count(*)::int as count from analysis_job_resumptions where job_id=${job.id}`)[0].count,before.count);assert.equal((await sql`select analysis_credits from billing_accounts where user_id=${user.id}`)[0].analysis_credits,user.analysis_credits);
   console.log('PASS: live failed-job UI, available role selectors, replacement payload, confirmation, history rendering, server rejects invalid models. Real continuation intercepted; no model calls or account charges.');
  }finally{if(browser)await browser.close();await sql.end();}
 })().catch(error=>{console.error(error.message);process.exitCode=1;});

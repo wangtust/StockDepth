@@ -164,7 +164,6 @@ export const signUp = validatedAction(signUpSchema, async (data, formData) => {
     email,
     passwordHash,
     inviteCode,
-    analysisCredits: 0,
     referredByUserId: referrer?.id ?? null,
     role: 'member'
   };

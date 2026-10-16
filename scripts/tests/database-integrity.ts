@@ -26,12 +26,12 @@ async function main() {
   for(let i=0;i<2;i++) {const result=spawnSync(process.execPath,[root+'/scripts/initialize-database.cjs'],{cwd:root,env:{...process.env,POSTGRES_URL:fresh.url.toString(),STOCKDEPTH_ADMIN_EMAIL:'',STOCKDEPTH_ADMIN_PASSWORD:''},encoding:'utf8'});assert.equal(result.status,0,'real initializer must create/upgrade safely');}
   await validated(fresh.sql);
   for(const table of ['users','analysis_jobs','analysis_reports','analysis_model_calls','credit_transactions','paper_trades'])assert.equal(Number((await fresh.sql.unsafe(`select count(*) from "${table}"`))[0].count),0,'business table is empty: '+table);
-  const tableCount=Number((await fresh.sql`select count(*) from pg_tables where schemaname='public'`)[0].count);assert.equal(tableCount,30);
+  const tableCount=Number((await fresh.sql`select count(*) from pg_tables where schemaname='public'`)[0].count);assert.equal(tableCount,31);
   const columns=await fresh.sql`select is_nullable from information_schema.columns where table_name='credit_transactions' and column_name='user_id'`;assert.equal(columns[0].is_nullable,'NO');
   await initializeAdmin(fresh.sql,{STOCKDEPTH_ADMIN_EMAIL:'fixture-admin@example.test',STOCKDEPTH_ADMIN_PASSWORD:'FixturePassword123!'});
   await initializeAdmin(fresh.sql,{STOCKDEPTH_ADMIN_EMAIL:'fixture-admin@example.test',STOCKDEPTH_ADMIN_PASSWORD:'FixturePassword123!'});
   assert.equal(Number((await fresh.sql`select count(*) from users`)[0].count),1);assert.equal(Number((await fresh.sql`select count(*) from credit_transactions where reason='initial_admin_grant' and amount=10`)[0].count),1);
-  const [user]=await fresh.sql`insert into users(email,password_hash,analysis_credits) values('fixture@example.test','unused',5) returning id`;
+  const [user]=await fresh.sql`insert into users(email,password_hash) values('fixture@example.test','unused') returning id`;
   const [other]=await fresh.sql`insert into users(email,password_hash) values('other@example.test','unused') returning id`;
   const [job]=await fresh.sql`insert into analysis_jobs(user_id,run_id,ticker,trade_date,analysts) values(${user.id},${randomUUID()},'MOCK','2026-10-15','[]') returning id`;
   await fresh.sql`insert into analysis_reports(job_id,user_id,report_key,title,content) values(${job.id},${user.id},'market','fixture','preserved')`;
@@ -42,7 +42,7 @@ async function main() {
   await fresh.sql`insert into credit_transactions(user_id,amount,reason) values(${user.id},1,'jobless-valid')`;
   await mustReject(fresh.sql,`update analysis_jobs set trade_date='2026-02-30' where id=${job.id}`);
   await mustReject(fresh.sql,`update analysis_jobs set trade_date='2026-99-99' where id=${job.id}`);
-  await mustReject(fresh.sql,`update users set analysis_credits=-1 where id=${user.id}`,'23514');
+  await mustReject(fresh.sql,`update billing_accounts set analysis_credits=-1 where user_id=${user.id}`,'23514');
   process.env.POSTGRES_URL=fresh.url.toString();const databaseModule=await import('../../apps/web/lib/db/drizzle');client=databaseModule.client;const {db}=databaseModule;
   const {adjustCreditBalance}=await import('../../apps/web/lib/credits/admin-adjustment');
   const {recordInitialCreditGrant}=await import('../../apps/web/lib/credits/initial-grant');
@@ -52,10 +52,10 @@ async function main() {
   await db.transaction(tx=>mutateCredits(tx,{userId:user.id,amount:5,reason:'fixture_funding',operationKey:'fixture-funding:'+user.id}));
   const [actor]=await fresh.sql`select id from users where role='super_admin'`;
   const before=Number((await fresh.sql`select count(*) from credit_transactions`)[0].count);
-  assert((await adjustCreditBalance(actor.id,user.id,-10)).error);assert.equal((await fresh.sql`select analysis_credits from users where id=${user.id}`)[0].analysis_credits,5);assert.equal(Number((await fresh.sql`select count(*) from credit_transactions`)[0].count),before);
-  const deductions=await Promise.all([adjustCreditBalance(actor.id,user.id,-4),adjustCreditBalance(actor.id,user.id,-4)]);assert.equal(deductions.filter(r=>r.success).length,1);assert.equal((await fresh.sql`select analysis_credits from users where id=${user.id}`)[0].analysis_credits,1);
+  assert((await adjustCreditBalance(actor.id,user.id,-10)).error);assert.equal((await fresh.sql`select analysis_credits from billing_accounts where user_id=${user.id}`)[0].analysis_credits,5);assert.equal(Number((await fresh.sql`select count(*) from credit_transactions`)[0].count),before);
+  const deductions=await Promise.all([adjustCreditBalance(actor.id,user.id,-4),adjustCreditBalance(actor.id,user.id,-4)]);assert.equal(deductions.filter(r=>r.success).length,1);assert.equal((await fresh.sql`select analysis_credits from billing_accounts where user_id=${user.id}`)[0].analysis_credits,1);
   const [audit]=await fresh.sql`select metadata::jsonb as m from admin_audit_logs where action='user.credits.adjust'`;assert.equal(audit.m.actualAmount,-4);assert.equal(audit.m.previousCredits,5);assert.equal(audit.m.resultingCredits,1);
-  const countAfter=Number((await fresh.sql`select count(*) from credit_transactions`)[0].count);await assert.rejects(adjustCreditBalance(2147483647,user.id,10));assert.equal((await fresh.sql`select analysis_credits from users where id=${user.id}`)[0].analysis_credits,1);assert.equal(Number((await fresh.sql`select count(*) from credit_transactions`)[0].count),countAfter,'audit failure rolls balance and ledger back');
+  const countAfter=Number((await fresh.sql`select count(*) from credit_transactions`)[0].count);await assert.rejects(adjustCreditBalance(2147483647,user.id,10));assert.equal((await fresh.sql`select analysis_credits from billing_accounts where user_id=${user.id}`)[0].analysis_credits,1);assert.equal(Number((await fresh.sql`select count(*) from credit_transactions`)[0].count),countAfter,'audit failure rolls balance and ledger back');
   assert((await adjustCreditBalance(actor.id,user.id,0)).error);
   const registered=await db.transaction(async tx=>{const [newUser]=await tx.insert(users).values({email:'new-signup@example.test',passwordHash:'fixture'}).returning();await recordInitialCreditGrant(tx,newUser,'signup_grant');return newUser;});assert.equal((await fresh.sql`select amount from credit_transactions where user_id=${registered.id}`)[0].amount,10);
   const {analysisDateSchema}=await import('../../apps/web/lib/analysis/date-validation');for(const value of ['2026-02-30','2026-99-99','0000-01-01','2026/10/15'])assert(!analysisDateSchema.safeParse(value).success);for(const value of ['2024-02-29','2026-10-17'])assert(analysisDateSchema.safeParse(value).success);
@@ -67,8 +67,8 @@ async function main() {
   await assert.rejects(migrate(drizzle(upgrade.sql),{migrationsFolder:folder}));assert.equal((await upgrade.sql`select content from analysis_reports where id=${report.id}`)[0].content,'DO NOT DELETE');
   await upgrade.sql`update analysis_reports set user_id=${owner.id} where id=${report.id}`;
   await migrate(drizzle(upgrade.sql),{migrationsFolder:folder});await migrate(drizzle(upgrade.sql),{migrationsFolder:folder});await validated(upgrade.sql);
-  assert.equal((await upgrade.sql`select content from analysis_reports where id=${report.id}`)[0].content,'DO NOT DELETE');assert.equal((await upgrade.sql`select analysis_credits from users where id=${owner.id}`)[0].analysis_credits,17);assert.equal(Number((await upgrade.sql`select count(*) from credit_transactions`)[0].count),0,'historical opening balances are not invented');
-  console.log('PASS: real empty-DB initialization twice, 30 tables, all constraints validated, report ownership/uniqueness, ledger ownership/non-null, calendar dates, atomic concurrent credits/audit rollback, initial grants, historical preservation, unsafe migration rejection and upgrade idempotency. No providers or email.');
+  assert.equal((await upgrade.sql`select content from analysis_reports where id=${report.id}`)[0].content,'DO NOT DELETE');assert.equal((await upgrade.sql`select analysis_credits from billing_accounts where user_id=${owner.id}`)[0].analysis_credits,17);assert.equal(Number((await upgrade.sql`select count(*) from credit_transactions`)[0].count),0,'historical opening balances are not invented');
+  console.log('PASS: real empty-DB initialization twice, 31 tables, all constraints validated, report ownership/uniqueness, ledger ownership/non-null, calendar dates, atomic concurrent credits/audit rollback, initial grants, historical preservation, unsafe migration rejection and upgrade idempotency. No providers or email.');
  }finally{if(client)await client.end();for(const sql of connections)await sql.end();for(const name of created)await admin.unsafe(`drop database if exists "${name}" with (force)`);await admin.end();await rm(temp,{recursive:true,force:true});}
 }
 main().catch(e=>{console.error('FAIL database-integrity: '+(e?.name || 'Error')+' '+(e?.code || '')+' '+String(e?.stack || '').split('\n').filter(line=>line.includes('scripts/tests/database-integrity.ts')).join(' ').trim());process.exitCode=1;});

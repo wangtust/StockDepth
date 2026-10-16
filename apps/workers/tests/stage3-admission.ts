@@ -1,3 +1,7 @@
+import { createModelFixture } from '../../../scripts/tests/model-fixture';
+import { pinModelVersions } from '@/lib/analysis/model-versions';
+import { billingAccounts } from '@/lib/db/schema';
+import { mutateCredits } from '@/lib/credits/ledger';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { performance } from 'node:perf_hooks';
@@ -8,10 +12,18 @@ import { claimAnalysis, renewAnalysis, LostOwnershipError } from '../src/analysi
 async function main() {
  const [database] = await db.execute(sql`select current_database() as name`);
  assert(String(database.name).startsWith('stockdepth_stage3_worker_'));
- const [user] = await db.insert(users).values({email:'stage3@test.invalid',passwordHash:'unused',analysisCredits:100}).returning();
+ const [user] = await db.insert(users).values({email:'stage3@test.invalid',passwordHash:'unused'}).returning();
+ await db.transaction(tx => mutateCredits(tx, {userId:user.id, amount:100, reason:'fixture_funding', operationKey:'fixture-funding:'+user.id}));
  const settings = {systemConcurrency:10,userConcurrency:10};
- const snapshot = (provider:string, capacity:number, trailing=false) => JSON.stringify({provider,baseUrl:'http://127.0.0.1:1/'+provider+(trailing?'/':''),apiKey:'fixture-unused',modelOptions:{request_concurrency:capacity}});
- const add = async (q:string,d:string,cap:number,status='queued',trailing=false) => (await db.insert(analysisJobs).values({userId:user.id,runId:crypto.randomUUID(),ticker:'MOCK',tradeDate:'2026-10-13',analysts:'[]',provider:q,status,quickConfigSnapshot:snapshot(q,cap,trailing),deepConfigSnapshot:snapshot(d,cap,trailing)}).returning())[0];
+ const add = async (q:string,d:string,cap:number,status='queued',trailing=false) => {
+   const model = (provider:string) => createModelFixture(db, {name:'Admission '+crypto.randomUUID(),provider,
+     baseUrl:'http://127.0.0.1:1/'+provider+(trailing?'/':''),apiKey:'fixture-unused',modelOptions:{request_concurrency:cap}});
+   const quick=await model(q),deep=await model(d);
+   return db.transaction(async tx => {
+     const pins=await pinModelVersions(tx,quick,deep);
+     return (await tx.insert(analysisJobs).values({userId:user.id,runId:crypto.randomUUID(),ticker:'MOCK',tradeDate:'2026-10-13',analysts:'[]',status,...pins}).returning())[0];
+   });
+ };
  const clear = () => db.update(analysisJobs).set({status:'complete',workerOwner:null,workerLeaseUntil:null,externalStatus:null,externalPid:null});
  // Shared endpoints and model request limits must not override administrator job limits.
  await add('a','b',1); const first = await claimAnalysis(settings); assert(first);
@@ -49,7 +61,7 @@ async function main() {
    console.log(JSON.stringify({scenario:'synthetic-composition-no-Python-graph',branches,admittedJobs:jobs.length,endpointRequestPeak:peak,requests,elapsedMs:performance.now()-started}));
   }
  } finally {server.closeAllConnections();await new Promise<void>(resolve=>server.close(()=>resolve()));}
- const [credits]=await db.select().from(users);assert.equal(credits.analysisCredits,100);
+ const [credits]=await db.select().from(billingAccounts);assert.equal(credits.analysisCredits,100);
  console.log('PASS administrator-only admission across shared endpoints, atomic competing claimers, external monitoring, expired lease fencing, unchanged credits');
 }
 main().catch(e=>{console.error(e);process.exitCode=1;}).finally(()=>client.end());

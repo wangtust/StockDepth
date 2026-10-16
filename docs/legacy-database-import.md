@@ -1,5 +1,7 @@
 # stockdepth → stockdepth_dev 数据迁移
 
+当前结构已进入 0044 字段收敛阶段：删除 23 个重复字段，新增旧任务证据表。以下兼容阶段内容为历史记录；当前字段与升级要求以[字段收敛说明](database-normalization.md)为准。
+
 2026-10-16已完成。原stockdepth保持只读、未改结构或数据；stockdepth_dev保留原有管理员和模型配置，合并旧业务记录。工具：[migrate-legacy-database.ts](../scripts/migrate-legacy-database.ts)。
 
 ## 迁移结果

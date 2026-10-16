@@ -14,7 +14,7 @@ test('creates an administrator with a verified password hash', async () => {
   assert.match(calls[2].query, /insert into users.*super_admin/);
   assert.equal(calls[2].values[0], config.STOCKDEPTH_ADMIN_EMAIL);
   assert.equal(await compare(config.STOCKDEPTH_ADMIN_PASSWORD, calls[2].values[1]), true);
-  assert.match(calls[2].query, /super_admin', 0/,'new account starts at zero before real grant');
+  assert.doesNotMatch(calls[2].query, /analysis_credits/,'billing fields are absent from users');
   assert.match(calls[3].query, /billing_accounts.*for update/);
   assert.deepEqual(calls[3].values, [123]);
   assert.match(calls[4].query, /insert into credit_transactions.*ledger_sequence,balance_after,operation_key/);
@@ -22,9 +22,7 @@ test('creates an administrator with a verified password hash', async () => {
   assert.deepEqual(calls[4].values, [123, 'initial-grant:123']);
   assert.match(calls[5].query, /update billing_accounts set analysis_credits=10,ledger_sequence=1/);
   assert.deepEqual(calls[5].values, [123]);
-  assert.match(calls[6].query, /update users set analysis_credits=10/);
-  assert.deepEqual(calls[6].values, [123]);
-  assert.equal(calls.length,7);
+  assert.equal(calls.length,6);
 });
 
 test('existing administrator skips configuration validation and all writes', async () => {

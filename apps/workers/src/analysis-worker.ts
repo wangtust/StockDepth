@@ -169,36 +169,10 @@ async function startStockDepth(job: ClaimedJob) {
   async function configFor(role: 'quick' | 'deep') {
     const versionId = role === 'quick' ? job.quickModelVersionId : job.deepModelVersionId;
     if (versionId) return readModelVersion(db,versionId);
-    if (job.configurationState === 'versioned') throw new Error('Versioned job is missing a pinned model version');
-    const snapshot = role === 'quick' ? job.quickConfigSnapshot : job.deepConfigSnapshot;
-    if (snapshot) return JSON.parse(snapshot) as typeof llmModelConfigs.$inferSelect;
-    const configId = role === 'quick' ? (job.quickModelConfigId || job.modelConfigId) : (job.deepModelConfigId || job.modelConfigId);
-    return configId
-    ? (
-        await db
-          .select()
-          .from(llmModelConfigs)
-          .where(eq(llmModelConfigs.id, configId))
-          .limit(1)
-      )[0]
-    : null;
+    throw new Error('旧任务没有可靠模型版本，请选择模型后继续。');
   }
   const [quickConfig, deepConfig] = await Promise.all([configFor('quick'), configFor('deep')]);
 
-  if (!quickConfig || !deepConfig) {
-    throw new Error('任务缺少模型配置快照，无法安全恢复；请重新提交分析。');
-  }
-  if ((!job.quickModelVersionId && !job.quickConfigSnapshot) || (!job.deepModelVersionId && !job.deepConfigSnapshot)) {
-    const changedLegacyConfig = ([['quick',quickConfig],['deep',deepConfig]] as const).some(([role,config]) =>
-      !(role === 'quick' ? job.quickModelVersionId || job.quickConfigSnapshot : job.deepModelVersionId || job.deepConfigSnapshot) && (
-      ('isActive' in config && !config.isActive) || ('retiredAt' in config && !!config.retiredAt) || config.updatedAt > job.createdAt ||
-      config.provider !== job.provider || config.baseUrl !== job.baseUrl ||
-      (role === 'quick' && job.quickModel && config.modelName !== job.quickModel) ||
-      (role === 'deep' && job.deepModel && config.modelName !== job.deepModel)));
-    if (changedLegacyConfig) {
-      throw new Error('旧任务的模型配置在排队后已变更或停用，系统为避免切换供应商而停止恢复；请重新提交分析。');
-    }
-  }
   function payloadConfig(config: typeof quickConfig, role: 'quick' | 'deep') {
     if (!config) throw new Error(`${role} model config unavailable`);
     return { id: config.id, model_version_id: role === 'quick' ? job.quickModelVersionId : job.deepModelVersionId, provider: config.provider, base_url: config.baseUrl || undefined,
@@ -303,6 +277,8 @@ export async function syncUsage(job: ClaimedJob, run: StockDepthRun, previousCal
       await tx.insert(analysisModelCalls).values(values).onConflictDoUpdate({
         target: [analysisModelCalls.jobId, analysisModelCalls.callId], set: {...values,
           modelVersionId:sql`coalesce(${analysisModelCalls.modelVersionId}, ${values.modelVersionId})`},
+        // Terminal usage is a billing fact. Late/replayed runner payloads must not rewrite it.
+        setWhere: eq(analysisModelCalls.status, 'running'),
       });
     }
     const [totals] = await tx.select({

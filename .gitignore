@@ -2,6 +2,7 @@ node_modules/
 .next/
 .next-dev/
 .next-v2/
+.next-normalized/
 __pycache__/
 *.pyc
 *.tsbuildinfo

@@ -5,7 +5,7 @@ require(root + '/apps/web/node_modules/dotenv').config({ path: root + '/.env' })
 const sql = require(root + '/apps/web/node_modules/postgres')(process.env.POSTGRES_URL, { max: 1 });
 (async () => {
   try {
-    const [user] = await sql`select u.id, u.analysis_credits from users u where u.status='active' and u.deleted_at is null
+    const [user] = await sql`select u.id, (select b.analysis_credits from billing_accounts b where b.user_id=u.id) as analysis_credits from users u where u.status='active' and u.deleted_at is null
       and exists(select 1 from analysis_jobs j where j.user_id=u.id and j.hidden_at is null and j.status='complete')
       order by (u.role='member') desc, u.id limit 1`;
     assert(user);

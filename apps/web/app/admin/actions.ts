@@ -1,5 +1,5 @@
 'use server';
-import { ensureModelVersion } from '@/lib/analysis/model-versions';
+import { saveModelVersion, readCurrentModelConfig } from '@/lib/analysis/model-versions';
 
 import { adjustCreditBalance } from '@/lib/credits/admin-adjustment';
 import { modelConfigWrite, encryptModelKey } from '@/lib/security/model-key';
@@ -120,8 +120,11 @@ export async function createModelConfig(formData: FormData) {
   if (!probe.success) return { error: probe.error || '模型测试失败，配置未保存。' };
   try {
     await db.transaction(async (tx) => {
-      const [created] = await tx.insert(llmModelConfigs).values(storedData).returning();
-      await ensureModelVersion(tx, created);
+      const {provider,baseUrl,apiKey,modelName,modelOptions,inputPrice,cachePrice,outputPrice,...identity}=storedData;
+      const [row] = await tx.insert(llmModelConfigs).values(identity).returning();
+      const execution={provider,baseUrl,apiKey,modelName,modelOptions,inputPrice,cachePrice,outputPrice};
+      await saveModelVersion(tx,row.id,execution);
+      const created={...row,...execution};
       if (data.isDefault) {
         await tx.update(llmModelConfigs).set({ isDefault: false, updatedAt: new Date() })
           .where(sql`${llmModelConfigs.id} <> ${created.id}`);
@@ -189,9 +192,13 @@ export async function updateModelConfig(formData: FormData) {
   const updated = await db.transaction(async tx => {
     const [current] = await tx.select().from(llmModelConfigs).where(and(eq(llmModelConfigs.id,configId),isNull(llmModelConfigs.retiredAt))).for('update');
     if (!current) return null;
-    const [saved] = await tx.update(llmModelConfigs).set(updateValues).where(eq(llmModelConfigs.id,configId)).returning();
-    await ensureModelVersion(tx,saved);
-    return saved;
+    const previous=await readCurrentModelConfig(tx,configId);
+    if(!previous)throw new Error('Model version not found');
+    const {provider,baseUrl,modelName,modelOptions,inputPrice,cachePrice,outputPrice,apiKey,...identity}=updateValues;
+    const [saved] = await tx.update(llmModelConfigs).set(identity).where(eq(llmModelConfigs.id,configId)).returning();
+    const execution={provider,baseUrl,modelName,modelOptions,inputPrice,cachePrice,outputPrice,apiKey:apiKey??previous.apiKey};
+    await saveModelVersion(tx,saved.id,execution);
+    return {...saved,...execution};
   });
 
   if (!updated) {
@@ -235,7 +242,7 @@ export async function deleteModelConfig(formData: FormData) {
       .from(llmModelConfigs).where(eq(llmModelConfigs.id, configId)).for('update');
     if (!model) return { error: '模型已不存在，请刷新页面。' };
     const [activeJob] = await tx.select({ id: analysisJobs.id }).from(analysisJobs)
-      .where(and(or(eq(analysisJobs.modelConfigId, configId), eq(analysisJobs.quickModelConfigId, configId), eq(analysisJobs.deepModelConfigId, configId)), inArray(analysisJobs.status, ['queued', 'running'])))
+      .where(and(sql`exists (select 1 from llm_model_config_versions v where v.config_id=${configId} and v.id in (${analysisJobs.quickModelVersionId},${analysisJobs.deepModelVersionId}))`, inArray(analysisJobs.status, ['queued', 'running'])))
       .limit(1);
     if (activeJob) return { error: '该模型仍有排队或运行中的任务，请任务结束后再删除。' };
     await tx.update(llmModelConfigs)
@@ -515,13 +522,13 @@ export async function cancelAnalysisJob(formData: FormData) {
 export async function restoreModelAvailability(formData: FormData) {
   const admin = await requirePlatformAdmin();
   const configId = userIdSchema.parse(formData.get('configId'));
-  const [config] = await db.select().from(llmModelConfigs).where(and(eq(llmModelConfigs.id, configId), isNull(llmModelConfigs.retiredAt))).limit(1);
-  if (!config) return {error:'Model config not found.'};
+  const config = await readCurrentModelConfig(db,configId);
+  if (!config || config.retiredAt) return {error:'Model config not found.'};
   const probe = await testModelConnection(config);
   if (!probe.success) return {error:probe.error || '模型测试失败，仍保持不可用。'};
   const restored = await db.transaction(async tx => {
     const [current] = await tx.select().from(llmModelConfigs).where(eq(llmModelConfigs.id,configId)).for('update');
-    if (!current || current.retiredAt || current.updatedAt.getTime()!==config.updatedAt.getTime() || current.unavailableAt?.getTime()!==config.unavailableAt?.getTime()) return false;
+    if (!current || current.retiredAt || current.currentVersionId!==config.currentVersionId || current.updatedAt.getTime()!==config.updatedAt.getTime() || current.unavailableAt?.getTime()!==config.unavailableAt?.getTime()) return false;
     await tx.update(llmModelConfigs).set({unavailableReason:null,unavailableAt:null,availabilityCheckedAt:new Date()}).where(eq(llmModelConfigs.id,configId));
     return true;
   });

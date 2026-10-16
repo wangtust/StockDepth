@@ -8,6 +8,7 @@ const postgres = require(path.join(modules, 'postgres'));
 const { drizzle } = require(path.join(modules, 'drizzle-orm/postgres-js'));
 const { migrate } = require(path.join(modules, 'drizzle-orm/postgres-js/migrator'));
 const { initializeAdmin } = require('./initialize-admin.cjs');
+const { prepareModelNormalization } = require('./prepare-model-normalization.cjs');
 
 async function initialize() {
   if (!process.env.POSTGRES_URL) throw new Error('请在根目录 .env 配置 POSTGRES_URL');
@@ -19,6 +20,7 @@ async function initialize() {
     locked = true;
     const before = await sql`select tablename from pg_tables where schemaname = 'public'`;
     console.log(before.length ? '数据库：检查并补齐项目结构更新…' : '数据库为空：正在创建项目表格…');
+    await prepareModelNormalization(sql);
     await migrate(drizzle(sql), { migrationsFolder: path.join(root, 'apps/web/lib/db/migrations') });
     const schema = fs.readFileSync(path.join(root, 'apps/web/lib/db/schema.ts'), 'utf8');
     const expected = [...schema.matchAll(/pgTable\(\s*['"]([^'"]+)['"]/g)].map(match => match[1]);

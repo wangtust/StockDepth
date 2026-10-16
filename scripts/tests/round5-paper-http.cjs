@@ -8,7 +8,7 @@ const db = require(root+'/apps/web/node_modules/postgres')(process.env.POSTGRES_
 (async()=>{
  try{
   const {SignJWT}=await import(root+'/apps/web/node_modules/jose/dist/webapi/index.js');
-  const users=await db`select id,analysis_credits from users where role='member' and status='active' and deleted_at is null order by id limit 2`;
+  const users=await db`select id,(select b.analysis_credits from billing_accounts b where b.user_id=users.id) as analysis_credits from users where role='member' and status='active' and deleted_at is null order by id limit 2`;
   assert.equal(users.length,2);
   assert.equal((await fetch('http://127.0.0.1:3000/api/paper')).status,401);
   for(const user of users){

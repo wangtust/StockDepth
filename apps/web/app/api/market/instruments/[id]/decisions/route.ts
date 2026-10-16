@@ -1,3 +1,4 @@
+import { jobModelFields } from '@/lib/analysis/job-models';
 import { NextResponse } from 'next/server';
 import { and, asc, desc, eq, gte, isNull, lte, sql } from 'drizzle-orm';
 import { getUser } from '@/lib/db/queries';
@@ -28,7 +29,7 @@ export async function GET(request: Request, { params }: { params: Promise<{id: s
     sourceRow ? db.select({date:dailyPrices.tradingDate,close:dailyPrices.close}).from(dailyPrices)
       .where(and(eq(dailyPrices.instrumentId,instrument.id),eq(dailyPrices.source,sourceRow.source),eq(dailyPrices.adjusted,false),gte(dailyPrices.tradingDate,from),lte(dailyPrices.tradingDate,to)))
       .orderBy(asc(dailyPrices.tradingDate)) : Promise.resolve([]),
-    db.select({jobId:analysisJobs.id,date:decisionDate,analysisDate:analysisJobs.tradeDate,completedAt:analysisJobs.completedAt,model:analysisJobs.deepModel,action:analysisDecisions.action,summary:analysisDecisions.summary,extractionStatus:analysisDecisions.extractionStatus})
+    db.select({jobId:analysisJobs.id,date:decisionDate,analysisDate:analysisJobs.tradeDate,completedAt:analysisJobs.completedAt,model:jobModelFields.deepModel,action:analysisDecisions.action,summary:analysisDecisions.summary,extractionStatus:analysisDecisions.extractionStatus})
       .from(analysisJobs).leftJoin(analysisDecisions,eq(analysisDecisions.jobId,analysisJobs.id))
       .where(and(eq(analysisJobs.userId,user.id),eq(analysisJobs.instrumentId,instrument.id),eq(analysisJobs.status,'complete'),isNull(analysisJobs.hiddenAt),gte(decisionDate,from),lte(decisionDate,to)))
       .orderBy(asc(decisionDate),asc(analysisJobs.id))

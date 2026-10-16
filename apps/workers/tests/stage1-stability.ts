@@ -1,3 +1,7 @@
+import { createModelFixture, updateModelFixture } from '../../../scripts/tests/model-fixture';
+import { pinModelVersions } from '@/lib/analysis/model-versions';
+import { billingAccounts } from '@/lib/db/schema';
+import { mutateCredits } from '@/lib/credits/ledger';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { randomUUID } from 'node:crypto';
@@ -66,15 +70,24 @@ async function main() {
   await new Promise<void>(resolve => http.listen(0, '127.0.0.1', resolve));
   const port = (http.address() as { port: number }).port;
   const endpoint = `http://127.0.0.1:${port}`;
-  const [user] = await db.insert(users).values({ email: `stage1-${randomUUID()}@test.invalid`, passwordHash: 'unused', analysisCredits: 100 }).returning();
-  const [config] = await db.insert(llmModelConfigs).values({ name: 'Mock only', provider: 'openai-compatible', modelName: 'same-name', baseUrl: endpoint,
-    apiKey: encryptModelKey('fixture-account-a'), inputPrice: '2', cachePrice: '1', outputPrice: '4' }).returning();
+  const [user] = await db.insert(users).values({ email: `stage1-${randomUUID()}@test.invalid`, passwordHash: 'unused' }).returning();
+ await db.transaction(tx => mutateCredits(tx, {userId:user.id, amount:100, reason:'fixture_funding', operationKey:'fixture-funding:'+user.id}));
+  const config = await createModelFixture(db, { name: 'Mock only', provider: 'openai-compatible', modelName: 'same-name', baseUrl: endpoint,
+    apiKey: encryptModelKey('fixture-account-a'), inputPrice: '2', cachePrice: '1', outputPrice: '4' });
   const model = readModelConfig(config);
-  const fixtureJob = async (status = 'queued', snapshots?: { quick: object; deep: object }) => {
-    const [job] = await db.insert(analysisJobs).values({ userId: user.id, runId: `stage1-${randomUUID()}`, ticker: 'MOCK', tradeDate: '2026-10-13', analysts: '[]',
-      provider: config.provider, baseUrl: endpoint, modelConfigId: config.id, status,
-      ...(snapshots ? { quickConfigSnapshot: JSON.stringify(snapshots.quick), deepConfigSnapshot: JSON.stringify(snapshots.deep) } : {}) }).returning();
-    return job;
+  const fixtureJob = async (status = 'queued', snapshots?: { quick: any; deep: any }) => {
+    const fromSnapshot = async (snapshot: any) => createModelFixture(db, {
+      name: `Snapshot ${randomUUID()}`, provider: snapshot.provider, baseUrl: snapshot.baseUrl,
+      modelName: snapshot.modelName, modelOptions: snapshot.modelOptions, apiKey: snapshot.apiKey,
+      inputPrice: snapshot.inputPrice, cachePrice: snapshot.cachePrice, outputPrice: snapshot.outputPrice,
+    });
+    const quick = snapshots ? await fromSnapshot(snapshots.quick) : config;
+    const deep = snapshots ? await fromSnapshot(snapshots.deep) : config;
+    return db.transaction(async tx => {
+      const pins = await pinModelVersions(tx, quick, deep);
+      const [job] = await tx.insert(analysisJobs).values({ userId: user.id, runId: `stage1-${randomUUID()}`, ticker: 'MOCK', tradeDate: '2026-10-13', analysts: '[]', status, ...pins }).returning();
+      return job;
+    });
   };
   for (let index = 0; index < 5; index++) await fixtureJob();
   const settings = { systemConcurrency: 2, userConcurrency: 10 };
@@ -93,7 +106,7 @@ async function main() {
     cached_input_tokens: 2, usage_available: true, is_retry: false, request_kind: 'standard', pricing_snapshot: { input: '2', cache: '1', output: '4', currency: 'CNY' }, estimated_cost: '0.000026000000', cost_complete: true }] } };
   await assert.rejects(syncUsage(old, usage, new Map()), LostOwnershipError);
   await syncUsage(recovered, usage, new Map());
-  await db.update(llmModelConfigs).set({ inputPrice: '999' }).where(eq(llmModelConfigs.id, config.id));
+  await updateModelFixture(db, config.id, { inputPrice: '999' });
   await syncUsage(recovered, usage, new Map());
   const rows = await db.select().from(analysisModelCalls).where(eq(analysisModelCalls.jobId, recovered.id));
   assert.equal(rows.length, 1); assert.equal(rows[0].role, 'quick'); assert.equal(rows[0].provider, 'qwen'); assert.equal(rows[0].modelConfigId, config.id);
@@ -119,7 +132,7 @@ async function main() {
   check('existing-runner-monitoring-does-not-admit-extra-starts');
   await db.update(analysisJobs).set({ status: 'complete', workerOwner: null, workerLeaseUntil: null });
   // Paper pins authoritative configuration rows, not the caller's stale adapter.
-  await db.update(llmModelConfigs).set({ inputPrice: '2' }).where(eq(llmModelConfigs.id,config.id));
+  await updateModelFixture(db, config.id, { inputPrice: '2' });
   const [portfolio] = await db.insert(paperPortfolios).values({ userId: user.id, initialCashCents: 10000, cashCents: 10000, autoTradeEnabled: false }).returning();
   const paperFixture = async () => {
     const job = await fixtureJob('complete');
@@ -137,6 +150,7 @@ async function main() {
   assert.equal((await db.select().from(paperTrades)).length, 0);
   const [paperCall] = await db.select().from(paperModelCalls).where(eq(paperModelCalls.paperRunId, paperClaims[0].id));
   assert.equal(paperCall.estimatedCost, '0.000026000000'); assert(paperCall.endedAt);
+  await assert.rejects(db.update(paperModelCalls).set({ estimatedCost:'999' }).where(eq(paperModelCalls.id,paperCall.id)), 'completed paper usage is immutable');
   check('paper-claim-once-one-mock-request-no-trade');
   const preSubmit = await paperFixture();
   const firstOwner = await claimPaperRun(); assert(firstOwner && firstOwner.id === preSubmit.id);
@@ -152,7 +166,7 @@ async function main() {
   const recovery = await paperFixture();
   await db.update(paperAnalysisRuns).set({traderModelVersionId:pinnedRun.traderModelVersionId}).where(eq(paperAnalysisRuns.id,recovery.id));
   const recoveryOwner = await claimPaperRun(); assert(recoveryOwner && recoveryOwner.id===recovery.id);
-  await db.update(llmModelConfigs).set({modelName:'changed-after-pin',inputPrice:'999'}).where(eq(llmModelConfigs.id,config.id));
+  await updateModelFixture(db, config.id, {modelName:'changed-after-pin',inputPrice:'999'});
   await processRun(recoveryOwner,model);
   const [recoveryCall] = await db.select().from(paperModelCalls).where(eq(paperModelCalls.paperRunId,recovery.id));
   assert.equal(recoveryCall.modelVersionId,pinnedRun.traderModelVersionId);
@@ -161,12 +175,12 @@ async function main() {
   const blocked = await paperFixture();
   await db.update(paperAnalysisRuns).set({traderModelVersionId:pinnedRun.traderModelVersionId}).where(eq(paperAnalysisRuns.id,blocked.id));
   const blockedOwner=await claimPaperRun(); assert(blockedOwner && blockedOwner.id===blocked.id);
-  await db.update(llmModelConfigs).set({isActive:false,retiredAt:new Date(),unavailableReason:'quota_exhausted'}).where(eq(llmModelConfigs.id,config.id));
+  await updateModelFixture(db, config.id, {isActive:false,retiredAt:new Date(),unavailableReason:'quota_exhausted'});
   const beforeBlocked=requestCount;
   await assert.rejects(processRun(blockedOwner,model),/Pinned trading model is unavailable/);
   assert.equal(requestCount,beforeBlocked,'disabled identity rejects pinned execution before sending requests');
   assert.equal((await db.select().from(paperModelCalls).where(eq(paperModelCalls.paperRunId,blocked.id))).length,0);
-  await db.update(llmModelConfigs).set({isActive:true,retiredAt:null,unavailableReason:null,modelName:config.modelName,inputPrice:'2'}).where(eq(llmModelConfigs.id,config.id));
+  await updateModelFixture(db, config.id, {isActive:true,retiredAt:null,unavailableReason:null,modelName:config.modelName,inputPrice:'2'});
   check('paper-pinned-recovery-preserves-version-and-enforces-identity-availability');
   const uncertain = await paperFixture();
   const uncertainClaim = await claimPaperRun(); assert(uncertainClaim && uncertainClaim.id === uncertain.id);
@@ -182,9 +196,9 @@ async function main() {
   assert.equal(unknownDecision.status, 'failed'); assert(unknownDecision.errorMessage?.includes('结果未知'));
   check('submitted-crash-is-unknown-not-auto-rebilled');
   mode = 'no-usage'; await paperFixture(); const missing = await claimPaperRun(); assert(missing);
-  await db.update(llmModelConfigs).set({inputPrice:null,cachePrice:null,outputPrice:null}).where(eq(llmModelConfigs.id,config.id));
+  await updateModelFixture(db, config.id, {inputPrice:null,cachePrice:null,outputPrice:null});
   await processRun(missing, { ...model, inputPrice: null, cachePrice: null, outputPrice: null });
-  await db.update(llmModelConfigs).set({inputPrice:'2',cachePrice:'1',outputPrice:'4'}).where(eq(llmModelConfigs.id,config.id));
+  await updateModelFixture(db, config.id, {inputPrice:'2',cachePrice:'1',outputPrice:'4'});
   const [missingCall] = await db.select().from(paperModelCalls).where(eq(paperModelCalls.paperRunId, missing.id));
   assert.equal(missingCall.estimatedCost, null); assert.equal(missingCall.costComplete, false);
   check('paper-missing-usage-and-price-are-unknown');
@@ -203,7 +217,7 @@ async function main() {
   check('paper-header-body-timeout-and-error-redaction');
   mode = 'normal';
   await db.update(llmModelConfigs).set({ isActive: false, isDefault: false });
-  await db.update(llmModelConfigs).set({ isActive: true, isDefault: true, inputPrice: '2' }).where(eq(llmModelConfigs.id, config.id));
+  await updateModelFixture(db, config.id, { isActive: true, isDefault: true, inputPrice: '2' });
   const competing = await paperFixture();
   const beforeCompetition = requestCount;
   const children = Array.from({ length: 2 }, () => spawn(process.env.STOCKDEPTH_RUNTIME_BIN+'/tsx', ['src/paper-trader-worker.ts'], {
@@ -250,7 +264,7 @@ async function main() {
   const metrics = { samples: 10, beforeMs: oldTimes, afterMs: newTimes, beforeScans: 10, afterScans: monitor.scans,
     totalBeforeMs: total(oldTimes), totalAfterMs: total(newTimes), coldAfterMs: newTimes[0] };
   check('resource-discovery-cached-low-memory-sampling-retained');
-  const [credits] = await db.select({ credits: users.analysisCredits }).from(users).where(eq(users.id, user.id));
+  const [credits] = await db.select({ credits: billingAccounts.analysisCredits }).from(billingAccounts).where(eq(billingAccounts.userId, user.id));
   assert.equal(credits.credits, 100); assert.equal((await db.select().from(paperTrades)).length, 0);
   check('fixture-credits-preserved-no-trades');
   await writeFile(process.env.STAGE1_TEST_OUTPUT!, JSON.stringify({ tests: results, resources: metrics }, null, 2));

@@ -10,6 +10,12 @@ async function main() {
   await admin`create schema ${admin(schema)}`;
   for(const table of ['analysis_jobs','analysis_job_resumptions','llm_model_configs','analysis_model_calls','analysis_reports','analysis_decisions','users'])await admin`create table ${admin(schema)}.${admin(table)} (like public.${admin(table)} including all)`;
   await admin.unsafe(`create sequence ${schema}.resume_ids; alter table ${schema}.analysis_job_resumptions alter column id set default nextval('${schema}.resume_ids')`);
+  // LIKE copies serial defaults referencing public sequences. Keep both IDs
+  // and sequence writes local to the disposable schema, even on a fresh DB.
+  for(const table of ['analysis_reports','analysis_model_calls']) {
+    const sequence=`${table}_fixture_ids`;
+    await admin.unsafe(`create sequence ${schema}.${sequence}; alter sequence ${schema}.${sequence} owned by ${schema}.${table}.id; alter table ${schema}.${table} alter column id set default nextval('${schema}.${sequence}')`);
+  }
   const url=new URL(process.env.POSTGRES_URL!);url.searchParams.set('search_path',schema);process.env.POSTGRES_URL=url.toString();
   process.env.STOCKDEPTH_MODEL_KEY_ID='fixture';process.env.STOCKDEPTH_MODEL_KEYRING=JSON.stringify({fixture:randomBytes(32).toString('base64url')});
   const {db,client:connection}=await import('../../apps/web/lib/db/drizzle');client=connection;
@@ -26,8 +32,8 @@ async function main() {
   let id=10;
   const addJob=async(status='failed',hidden=false)=> (await db.insert(jobs).values({id:id++,userId:1,runId:randomUUID(),ticker:'MOCK',tradeDate:'2026-10-15',analysts:'[]',status,hiddenAt:hidden?new Date():null,quickModel:old.modelName,deepModel:old.modelName,quickConfigSnapshot:immutableModelSnapshot(old),deepConfigSnapshot:immutableModelSnapshot(old),startedAt:new Date('2026-10-14T00:00:00Z'),totalTokens:123,inputTokens:100,outputTokens:23}).returning())[0];
   const job=await addJob();
-  await db.insert(calls).values({id:1,jobId:job.id,callId:randomUUID(),agent:'Market',model:old.modelName,modelConfigId:1,startedAt:new Date(),status:'complete',totalTokens:123,estimatedCost:'0.5'});
-  await db.insert(reports).values({id:1,jobId:job.id,userId:1,reportKey:'market',title:'Completed market report',content:'KEEP THIS REPORT'});
+  await db.insert(calls).values({jobId:job.id,callId:randomUUID(),agent:'Market',model:old.modelName,modelConfigId:1,startedAt:new Date(),status:'complete',totalTokens:123,estimatedCost:'0.5'});
+  await db.insert(reports).values({jobId:job.id,userId:1,reportKey:'market',title:'Completed market report',content:'KEEP THIS REPORT'});
   assert.equal((await resumeAnalysisJob(1,job.id)).status,409,'original quota-blocked models cannot retry');
   assert.equal((await resumeAnalysisJob(2,job.id,{quickModelConfigId:2,deepModelConfigId:3})).status,409,'ownership enforced');
   for(const candidate of [old,disabled,wrongRole,retired])assert.equal((await resumeAnalysisJob(1,job.id,{quickModelConfigId:2,deepModelConfigId:candidate.id})).status,400);

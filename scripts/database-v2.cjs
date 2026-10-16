@@ -10,7 +10,7 @@ async function main() {
     throw new Error('Usage: node scripts/database-v2.cjs prepare | run <command> [args]');
   }
   if (!process.env.POSTGRES_URL) throw new Error('POSTGRES_URL is required.');
-  const target = process.env.STOCKDEPTH_V2_DATABASE_NAME || 'stockdepth_v2';
+  const target = process.env.STOCKDEPTH_V2_DATABASE_NAME || 'stockdepth_dev';
   if (!/^[a-z][a-z0-9_]{0,62}$/.test(target) || ['postgres','template0','template1'].includes(target)) {
     throw new Error('Invalid V2 database name.');
   }
@@ -22,9 +22,12 @@ async function main() {
   const env = { ...process.env, POSTGRES_URL: candidate.toString(), STOCKDEPTH_NEXT_DIST_DIR: '.next-v2' };
   if (action === 'prepare') {
     const postgres = require(root + '/apps/web/node_modules/postgres');
-    const admin = postgres(original.toString(), { max: 1, onnotice: () => {} });
+    // The selected development database may not exist on first setup.
+    const maintenance = new URL(original);
+    maintenance.pathname = '/postgres';
+    const admin = postgres(maintenance.toString(), { max: 1, onnotice: () => {} });
     try {
-      // Serialize repeated prepare invocations on this same source database.
+      // Serialize repeated prepare invocations on the maintenance database.
       await admin`select pg_advisory_lock(739421, 40)`;
       const exists = await admin`select 1 from pg_database where datname = ${target}`;
       if (!exists.length) await admin.unsafe('CREATE DATABASE "' + target + '"');

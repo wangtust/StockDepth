@@ -1,6 +1,6 @@
 # 数据库 V2：独立库验证与兼容阶段
 
-2026-10-16。按用户指令，当前运行服务及根 `.env` 已切换到 `stockdepth_v2`，使用 `.next-v2` 生产构建。原 `stockdepth` 保留，旧用户、报告、模型配置和交易数据尚未导入。启动使用现有环境配置初始化管理员及真实10积分赠送，不复制旧账户。完整目标设计见 [database-v2.md](design/database-v2.md)。
+2026-10-16。按用户最终指定名称，V2数据库已原地重命名为 `stockdepth_dev`，运行服务及根 `.env` 均使用 `stockdepth_dev`，保留 `.next-v2` 生产构建目录。本地Git分支为 `dev`，作为后续开发基线。原 `stockdepth` 保留，旧业务数据尚未导入；重命名保留V2已有管理员、积分和模型配置。完整目标设计见 [database-v2.md](design/database-v2.md)。
 
 ## 已实施
 
@@ -39,7 +39,7 @@ node scripts/database-v2.cjs run node apps/web/node_modules/next/dist/bin/next b
 node scripts/database-v2.cjs run node apps/web/node_modules/next/dist/bin/next start apps/web --hostname 127.0.0.1 --port 3100
 ```
 
-默认库名stockdepth_v2，必要时通过STOCKDEPTH_V2_DATABASE_NAME指定其他名称。脚本不修改.env、不删除数据库，切库后可对当前V2重复prepare/run。prepare检查元数据/持有准备锁，并在选定V2库执行DDL。V2 run使用独立.next-v2构建目录。
+默认开发库名stockdepth_dev，必要时通过STOCKDEPTH_V2_DATABASE_NAME指定其他名称。脚本不修改.env、不删除数据库，可对当前V2开发库重复prepare/run。prepare通过postgres维护库创建/检查目标库，并在选定开发库执行DDL。V2 run使用独立.next-v2构建目录。
 
 不要把 `./bin/stockdepth` 或 `scripts/manage.py` 作为run的子命令：现有管理器会重新加载.env并覆盖传入连接，脚本会拒绝这种直接用法。完整服务切换需单独设置运行配置和进程状态。
 
@@ -73,5 +73,5 @@ node scripts/tests/isolated-regressions.cjs
 - V2真实数据库集成测试通过；原数据库完整性/升级回归通过。
 - Web生产构建、Web/Worker TypeScript检查通过；Python计费/用量/双角色模型测试27项通过。
 - 管理员初始化单元测试4项通过；隔离库换模、报告/用量同步、并发准入、Worker稳定性和模型可用性回归通过。稳定性覆盖两个Worker竞争只发送一次请求、租约失效、固定版本恢复和不可用身份发送前拦截。
-- stockdepth_v2实查30张业务表、72个已验证外键；原stockdepth仍28张表、54个外键，未执行新迁移。
+- 当前stockdepth_dev库为V2兼容结构：30张业务表、72个已验证外键；原stockdepth仍28张表、54个外键，未执行新迁移。
 - 独立V2预览检查：登录页200，未登录任务接口401，签名但不存在的用户访问任务接口401。正式切换另验证管理员鉴权和10积分账户一致；没有发送邮件或外部模型请求。

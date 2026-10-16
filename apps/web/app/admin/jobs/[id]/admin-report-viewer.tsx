@@ -33,12 +33,13 @@ type AdminReportViewerProps = {
 
 export function AdminReportViewer({
   jobId, version,
-  reports,
+  reports: allReports,
   initialReportKey,
   title,
   subtitle,
   facts
 }: AdminReportViewerProps) {
+  const reports = useMemo(() => allReports.filter(report => report.reportKey !== 'execution'), [allReports]);
   const [selection, setSelection] = useState({ jobId, key: initialReportKey || reports[0]?.reportKey || '' });
   const selectedReportKey = selection.jobId === jobId ? selection.key : initialReportKey || reports[0]?.reportKey || '';
   const [isFullscreen, setIsFullscreen] = useState(false);

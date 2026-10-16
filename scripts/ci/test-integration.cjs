@@ -30,6 +30,7 @@ const env = {...environment(), STOCKDEPTH_RUNTIME_BIN: runtime,
   STOCKDEPTH_MODEL_KEY_ID: 'ci', STOCKDEPTH_MODEL_KEYRING: JSON.stringify({ci: randomBytes(32).toString('base64url')}),
   PAPER_TRADER_AUTO_EXECUTE: 'false', PAPER_TRADER_MODEL_TIMEOUT_MS: '500', STAGE1_TEST_OUTPUT: path.join(temp, 'stability.json')};
 const suites = [
+  ['database-v2', 'scripts/tests/database-v2.ts', 'stockdepth_ci_v2_', false],
   ['database-integrity', 'scripts/tests/database-integrity.ts', 'stockdepth_ci_integrity_', false],
   ['worker-stability', 'apps/workers/tests/stage1-stability.ts', 'stockdepth_stage1_', true],
   ['worker-report-sync', 'apps/workers/tests/stage2-sync.ts', 'stockdepth_stage2_worker_', true],
@@ -37,7 +38,7 @@ const suites = [
   ['worker-admission', 'apps/workers/tests/stage3-admission.ts', 'stockdepth_stage3_worker_', true],
   ['admin-concurrency', 'scripts/tests/admin-concurrency.ts', 'stockdepth_ci_admission_', true],
   ['model-availability', 'scripts/tests/model-availability.ts', 'stockdepth_ci_availability_', true],
-  ['resume-with-models', 'scripts/tests/resume-with-models.ts', 'stockdepth_ci_resume_', true],
+  ['resume-with-models', 'scripts/tests/resume-with-models.ts', 'stockdepth_regression_', true],
 ];
 const results = [];
 async function main() {
@@ -65,10 +66,10 @@ async function main() {
     await run(tsx, [path.join(root, 'scripts/tests/round5-security-db.ts')], {cwd: workers,
       env: {...env, SECURITY_TEST_ADMIN_URL: url.toString(), TSX_TSCONFIG_PATH: path.join(workers, 'tsconfig.json')}});
     results.push({name: 'key-migration-and-retention', status: 'passed'});
-    assert.equal(results.length, 9);
+    assert.equal(results.length, suites.length + 1);
     console.log(JSON.stringify({suite: 'integration', count: results.length, status: 'passed'}));
   } finally {
-    report('integration', {suites: results, expected: 9});
+    report('integration', {suites: results, expected: suites.length + 1});
   }
 }
 main().catch(error => { console.error(error.message); process.exitCode = 1; }).finally(async () => {

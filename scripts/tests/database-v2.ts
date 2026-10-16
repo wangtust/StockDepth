@@ -127,7 +127,7 @@ async function exerciseApplication(db:any,sql:ReturnType<typeof postgres>){
  const [beforeRotation]=await sql`select encrypted_api_key from llm_model_config_versions where id=${rotated.quickModelVersionId}`;
  const keyring=JSON.parse(process.env.STOCKDEPTH_MODEL_KEYRING!);keyring.rotated=randomBytes(32).toString('base64url');
  const rotationEnvironment={...process.env,STOCKDEPTH_MODEL_READERS_READY:'true',STOCKDEPTH_MODEL_KEY_ID:'rotated',STOCKDEPTH_MODEL_KEYRING:JSON.stringify(keyring)};
- const rotateKeys=(args:string[])=>{const result=spawnSync(process.execPath,[root+'/apps/web/node_modules/tsx/dist/cli.mjs',root+'/scripts/model-key-migrate.ts',...args],{cwd:root,env:rotationEnvironment,encoding:'utf8'});assert.equal(result.status,0,'version-only key rotation succeeds');return JSON.parse(result.stdout.trim());};
+ const rotateKeys=(args:string[])=>{const result=spawnSync(process.execPath,[root+'/apps/workers/node_modules/tsx/dist/cli.mjs',root+'/scripts/model-key-migrate.ts',...args],{cwd:root,env:rotationEnvironment,encoding:'utf8'});assert.equal(result.status,0,'version-only key rotation succeeds');return JSON.parse(result.stdout.trim());};
  assert(rotateKeys(['--rotate']).candidates>=2,'dry-run identifies old current envelopes');
  assert(rotateKeys(['--rotate','--apply']).candidates>=2,'rotation appends current key versions');
  assert.equal(rotateKeys(['--rotate','--apply']).candidates,0,'repeated rotation is idempotent');

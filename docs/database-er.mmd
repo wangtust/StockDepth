@@ -1,0 +1,422 @@
+%% Generated database structure snapshot 2026-10-15; no business data.
+erDiagram
+    direction LR
+    activity_logs {
+        int id PK
+        int user_id FK "nullable"
+        text action
+        timestamp timestamp
+        varchar ip_address "nullable"
+    }
+    admin_audit_logs {
+        int id PK
+        int admin_user_id FK
+        varchar action
+        varchar target_type
+        int target_id "nullable"
+        text metadata "nullable"
+        timestamp created_at
+    }
+    analysis_decisions {
+        int id PK
+        int job_id FK,UK
+        varchar action "nullable"
+        text summary "nullable"
+        varchar extraction_status
+        int extraction_version
+        timestamptz extracted_at
+        timestamptz updated_at
+    }
+    analysis_job_resumptions {
+        int id PK
+        int job_id FK
+        int user_id FK
+        varchar previous_quick_model "nullable"
+        varchar previous_deep_model "nullable"
+        varchar next_quick_model
+        varchar next_deep_model
+        text previous_quick_config_snapshot "nullable"
+        text previous_deep_config_snapshot "nullable"
+        text next_quick_config_snapshot
+        text next_deep_config_snapshot
+        timestamptz created_at
+    }
+    analysis_jobs {
+        int id PK
+        int user_id FK
+        varchar ticker
+        varchar trade_date
+        varchar language
+        int depth
+        text analysts
+        varchar provider "nullable"
+        text base_url "nullable"
+        varchar quick_model "nullable"
+        varchar deep_model "nullable"
+        varchar status
+        varchar external_status "nullable"
+        int external_pid "nullable"
+        text error_message "nullable"
+        timestamp started_at "nullable"
+        timestamp completed_at "nullable"
+        timestamp created_at
+        timestamp updated_at
+        varchar run_id UK
+        int model_config_id FK "nullable"
+        boolean realtime_data
+        timestamp hidden_at "nullable"
+        bigint input_tokens
+        bigint output_tokens
+        bigint total_tokens
+        boolean token_usage_complete
+        int instrument_id FK "nullable"
+        int quick_model_config_id FK "nullable"
+        int deep_model_config_id FK "nullable"
+        text quick_config_snapshot "nullable"
+        text deep_config_snapshot "nullable"
+        varchar worker_owner "nullable"
+        timestamptz worker_lease_until "nullable"
+    }
+    analysis_model_calls {
+        int id PK
+        int job_id FK
+        varchar call_id
+        varchar agent
+        text model
+        timestamptz started_at
+        timestamptz ended_at "nullable"
+        varchar status
+        bigint input_tokens "nullable"
+        bigint output_tokens "nullable"
+        bigint total_tokens "nullable"
+        boolean usage_available
+        boolean is_retry
+        varchar request_kind
+        bigint cached_input_tokens "nullable"
+        text raw_usage "nullable"
+        text pricing_snapshot "nullable"
+        numeric estimated_cost "nullable"
+        boolean cost_complete
+        varchar role
+        int model_config_id "nullable"
+        varchar provider "nullable"
+    }
+    analysis_pricing {
+        int depth PK
+        varchar label
+        int credit_cost
+        timestamp updated_at
+    }
+    analysis_reports {
+        int id PK
+        int job_id FK
+        int user_id FK
+        varchar report_key
+        varchar title
+        text relative_path "nullable"
+        text content
+        timestamp created_at
+        timestamp updated_at
+    }
+    analysis_worker_settings {
+        varchar key PK
+        int system_concurrency
+        int user_concurrency
+        timestamp updated_at
+    }
+    credit_transactions {
+        int id PK
+        int user_id FK
+        int job_id FK "nullable"
+        int amount
+        varchar reason
+        timestamp created_at
+        text stripe_checkout_session_id "nullable"
+    }
+    daily_prices {
+        int id PK
+        int instrument_id FK
+        date trading_date
+        numeric open
+        numeric high
+        numeric low
+        numeric close
+        bigint volume
+        varchar source
+        boolean adjusted
+        timestamptz fetched_at
+    }
+    instrument_sources {
+        int id PK
+        int instrument_id FK
+        varchar vendor
+        varchar vendor_symbol
+        varchar status
+        timestamptz verified_at "nullable"
+    }
+    instruments {
+        int id PK
+        varchar symbol
+        varchar exchange
+        varchar name "nullable"
+        varchar currency "nullable"
+        varchar timezone "nullable"
+        varchar status
+        timestamptz verified_at "nullable"
+        boolean sync_enabled
+    }
+    llm_model_configs {
+        int id PK
+        varchar name
+        varchar provider
+        text base_url
+        text api_key
+        boolean is_default
+        boolean is_active
+        timestamp created_at
+        timestamp updated_at
+        varchar model_name
+        numeric input_price "nullable"
+        numeric cache_price "nullable"
+        numeric output_price "nullable"
+        timestamp retired_at "nullable"
+        boolean quick_enabled
+        boolean deep_enabled
+        jsonb model_options
+        varchar unavailable_reason "nullable"
+        timestamptz unavailable_at "nullable"
+        timestamptz availability_checked_at "nullable"
+    }
+    market_sync_runs {
+        int id PK
+        uuid owner
+        timestamptz started_at
+        timestamptz ended_at "nullable"
+        int claimed
+        int succeeded
+        int failed
+        varchar error_summary "nullable"
+    }
+    market_sync_state {
+        int id PK
+        int instrument_id FK
+        varchar category
+        timestamptz last_success_at "nullable"
+        timestamptz next_run_at
+        int attempts
+        varchar error_summary "nullable"
+        timestamptz lease_until "nullable"
+        uuid owner "nullable"
+    }
+    paper_analysis_runs {
+        int id PK
+        int portfolio_id FK
+        int user_id FK
+        int watchlist_item_id FK "nullable"
+        int analysis_job_id FK
+        varchar ticker
+        text context "nullable"
+        timestamp created_at
+        varchar processing_state
+        varchar worker_owner "nullable"
+        timestamptz worker_lease_until "nullable"
+        timestamptz model_submitted_at "nullable"
+        varchar model_call_id "nullable"
+    }
+    paper_model_calls {
+        int id PK
+        int paper_run_id FK
+        varchar call_id
+        int model_config_id "nullable"
+        varchar provider
+        text model
+        varchar status
+        bigint input_tokens "nullable"
+        bigint output_tokens "nullable"
+        bigint cached_input_tokens "nullable"
+        text raw_usage "nullable"
+        text pricing_snapshot "nullable"
+        numeric estimated_cost "nullable"
+        boolean cost_complete
+        timestamptz created_at
+        timestamptz ended_at "nullable"
+    }
+    paper_portfolios {
+        int id PK
+        int user_id FK
+        varchar name
+        bigint initial_cash_cents
+        bigint cash_cents
+        varchar currency
+        varchar status
+        timestamp created_at
+        timestamp updated_at
+        boolean auto_trade_enabled
+    }
+    paper_positions {
+        int id PK
+        int portfolio_id FK
+        int user_id FK
+        varchar ticker
+        int quantity
+        bigint avg_cost_cents
+        bigint last_price_cents
+        bigint realized_pnl_cents
+        timestamp created_at
+        timestamp updated_at
+        int instrument_id FK "nullable"
+    }
+    paper_trade_decisions {
+        int id PK
+        int portfolio_id FK
+        int user_id FK
+        int paper_analysis_run_id FK
+        int analysis_job_id FK
+        varchar ticker
+        varchar action
+        int confidence_bps
+        int target_weight_bps
+        int quantity
+        bigint price_cents
+        text reason "nullable"
+        text risk_notes "nullable"
+        text raw_response "nullable"
+        varchar status
+        text error_message "nullable"
+        timestamp created_at
+        timestamp executed_at "nullable"
+    }
+    paper_trade_requests {
+        int id PK
+        int user_id FK
+        int portfolio_id FK
+        uuid key
+        text request
+        jsonb result
+        timestamp created_at
+    }
+    paper_trades {
+        int id PK
+        int portfolio_id FK
+        int user_id FK
+        int position_id FK "nullable"
+        varchar ticker
+        varchar side
+        int quantity
+        bigint price_cents
+        bigint gross_amount_cents
+        bigint fee_cents
+        bigint realized_pnl_cents
+        text note "nullable"
+        timestamp created_at
+        int decision_id FK "nullable"
+        int price_snapshot_id FK "nullable"
+        numeric execution_price "nullable"
+        int instrument_id FK "nullable"
+    }
+    price_snapshots {
+        int id PK
+        int instrument_id FK
+        numeric price
+        varchar currency
+        timestamptz quoted_at
+        timestamptz fetched_at
+        varchar source
+        varchar price_type
+        varchar session
+    }
+    signup_email_limits {
+        varchar scope PK
+        int count
+        timestamptz reset_at
+        timestamptz last_sent_at
+    }
+    signup_email_verifications {
+        varchar email PK
+        varchar code_hash
+        timestamptz expires_at
+        int attempts
+    }
+    users {
+        int id PK
+        varchar name "nullable"
+        varchar email UK
+        text password_hash
+        varchar role
+        timestamp created_at
+        timestamp updated_at
+        timestamp deleted_at "nullable"
+        varchar status
+        varchar invite_code UK "nullable"
+        int analysis_credits
+        text stripe_customer_id UK "nullable"
+        text stripe_subscription_id UK "nullable"
+        text stripe_product_id "nullable"
+        varchar plan_name "nullable"
+        varchar subscription_status "nullable"
+    }
+    watchlist_items {
+        int id PK
+        int user_id FK
+        varchar ticker
+        varchar market "nullable"
+        varchar name "nullable"
+        boolean is_active
+        timestamp created_at
+        timestamp updated_at
+        int instrument_id FK "nullable"
+    }
+    users ||--o{ activity_logs : "activity_logs_user_id_users_id_fk"
+    users ||--o{ admin_audit_logs : "admin_audit_logs_admin_user_id_users_id_fk"
+    analysis_jobs ||--o{ analysis_decisions : "analysis_decisions_job_id_analysis_jobs_id_fk"
+    users ||--o{ analysis_job_resumptions : "analysis_job_resumptions_user_id_users_id_fk"
+    analysis_jobs ||--o{ analysis_job_resumptions : "analysis_resumptions_job_owner_fk"
+    llm_model_configs ||--o{ analysis_jobs : "analysis_jobs_deep_model_config_id_llm_model_configs_id_fk"
+    instruments ||--o{ analysis_jobs : "analysis_jobs_instrument_id_instruments_id_fk"
+    llm_model_configs ||--o{ analysis_jobs : "analysis_jobs_model_config_id_llm_model_configs_id_fk"
+    llm_model_configs ||--o{ analysis_jobs : "analysis_jobs_quick_model_config_id_llm_model_configs_id_fk"
+    users ||--o{ analysis_jobs : "analysis_jobs_user_id_users_id_fk"
+    analysis_jobs ||--o{ analysis_model_calls : "analysis_model_calls_job_id_analysis_jobs_id_fk"
+    analysis_jobs ||--o{ analysis_reports : "analysis_reports_job_id_analysis_jobs_id_fk"
+    analysis_jobs ||--o{ analysis_reports : "analysis_reports_job_owner_fk"
+    users ||--o{ analysis_reports : "analysis_reports_user_id_users_id_fk"
+    analysis_jobs ||--o{ credit_transactions : "credit_transactions_job_id_analysis_jobs_id_fk"
+    analysis_jobs ||--o{ credit_transactions : "credit_transactions_job_owner_fk"
+    users ||--o{ credit_transactions : "credit_transactions_user_id_users_id_fk"
+    instruments ||--o{ daily_prices : "daily_prices_instrument_id_instruments_id_fk"
+    instruments ||--o{ instrument_sources : "instrument_sources_instrument_id_instruments_id_fk"
+    instruments ||--o{ market_sync_state : "market_sync_state_instrument_id_instruments_id_fk"
+    analysis_jobs ||--o{ paper_analysis_runs : "paper_analysis_runs_analysis_job_id_analysis_jobs_id_fk"
+    paper_portfolios ||--o{ paper_analysis_runs : "paper_analysis_runs_portfolio_id_paper_portfolios_id_fk"
+    users ||--o{ paper_analysis_runs : "paper_analysis_runs_user_id_users_id_fk"
+    watchlist_items ||--o{ paper_analysis_runs : "paper_analysis_runs_watchlist_item_id_watchlist_items_id_fk"
+    analysis_jobs ||--o{ paper_analysis_runs : "paper_runs_job_owner_fk"
+    paper_portfolios ||--o{ paper_analysis_runs : "paper_runs_portfolio_owner_fk"
+    watchlist_items ||--o{ paper_analysis_runs : "paper_runs_watchlist_owner_fk"
+    paper_analysis_runs ||--o{ paper_model_calls : "paper_model_calls_paper_run_id_paper_analysis_runs_id_fk"
+    users ||--o{ paper_portfolios : "paper_portfolios_user_id_users_id_fk"
+    instruments ||--o{ paper_positions : "paper_positions_instrument_id_instruments_id_fk"
+    paper_portfolios ||--o{ paper_positions : "paper_positions_portfolio_id_paper_portfolios_id_fk"
+    paper_portfolios ||--o{ paper_positions : "paper_positions_portfolio_owner_fk"
+    users ||--o{ paper_positions : "paper_positions_user_id_users_id_fk"
+    paper_portfolios ||--o{ paper_trade_decisions : "paper_decisions_portfolio_owner_fk"
+    paper_analysis_runs ||--o{ paper_trade_decisions : "paper_decisions_run_scope_job_fk"
+    analysis_jobs ||--o{ paper_trade_decisions : "paper_trade_decisions_analysis_job_id_analysis_jobs_id_fk"
+    paper_analysis_runs ||--o{ paper_trade_decisions : "paper_trade_decisions_paper_analysis_run_id_paper_analysis_runs"
+    paper_portfolios ||--o{ paper_trade_decisions : "paper_trade_decisions_portfolio_id_paper_portfolios_id_fk"
+    users ||--o{ paper_trade_decisions : "paper_trade_decisions_user_id_users_id_fk"
+    paper_portfolios ||--o{ paper_trade_requests : "paper_requests_portfolio_owner_fk"
+    paper_portfolios ||--o{ paper_trade_requests : "paper_trade_requests_portfolio_id_paper_portfolios_id_fk"
+    users ||--o{ paper_trade_requests : "paper_trade_requests_user_id_users_id_fk"
+    paper_trade_decisions ||--o{ paper_trades : "paper_trades_decision_id_paper_trade_decisions_id_fk"
+    paper_trade_decisions ||--o{ paper_trades : "paper_trades_decision_scope_fk"
+    instruments ||--o{ paper_trades : "paper_trades_instrument_id_instruments_id_fk"
+    paper_portfolios ||--o{ paper_trades : "paper_trades_portfolio_id_paper_portfolios_id_fk"
+    paper_portfolios ||--o{ paper_trades : "paper_trades_portfolio_owner_fk"
+    paper_positions ||--o{ paper_trades : "paper_trades_position_id_paper_positions_id_fk"
+    paper_positions ||--o{ paper_trades : "paper_trades_position_scope_fk"
+    price_snapshots ||--o{ paper_trades : "paper_trades_price_snapshot_id_price_snapshots_id_fk"
+    users ||--o{ paper_trades : "paper_trades_user_id_users_id_fk"
+    instruments ||--o{ price_snapshots : "price_snapshots_instrument_id_instruments_id_fk"
+    instruments ||--o{ watchlist_items : "watchlist_items_instrument_id_instruments_id_fk"
+    users ||--o{ watchlist_items : "watchlist_items_user_id_users_id_fk"

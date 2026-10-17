@@ -4,6 +4,26 @@ StockDepth is a stock analysis and paper trading platform with multi-agent analy
 
 The interface is in English. New analysis reports default to English; users can select Chinese when creating an analysis. Existing reports retain their original language.
 
+## Screenshots
+
+Captured from the running application. The analysis and portfolio screenshots show a signed-in account before creating jobs or a portfolio.
+
+### Research workspace
+
+![StockDepth landing page and research workflow](docs/screenshots/home.png)
+
+### Analysis queue
+
+Configure the ticker, date, report language, depth, and Quick / Deep models, then review saved reports alongside the job queue.
+
+![Analysis queue with English report language selected](docs/screenshots/analysis.png)
+
+### Paper portfolio
+
+Manage a paper portfolio, watchlist, positions, AI analysis runs, and simulated trades.
+
+![Paper portfolio setup, watchlist, positions, and trade log](docs/screenshots/portfolio.png)
+
 ## Architecture
 
 | Service | Directory | Responsibility |

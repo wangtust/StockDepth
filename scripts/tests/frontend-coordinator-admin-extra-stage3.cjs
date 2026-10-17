@@ -4,7 +4,7 @@ const root=path.resolve(__dirname,'../..'), mode=process.argv[2]||'after';
 const out=process.env.FRONTEND_TEST_OUTPUT || root+'/var/codex-frontend-team/stage3-coordinator-admin-extra-evidence';fs.mkdirSync(out,{recursive:true});
 const esbuild=require('./frontend-runtime.cjs').dependency('esbuild');
 const web=root+'/apps/web';const before=root+'/var/codex-frontend-team/stage3-admin-layout-before';
-const approvedLabels=['返回股票分析', '额度不足 · 不可用', '标记时间：', '额度不足，已从分析模型选项中排除。充值或开启后付费后，可发送一次模型测试请求并恢复。', '测试失败', '测试未完成，请稍后重试。', '测试中…', '测试并恢复'];
+const approvedLabels=[];
 if(mode==='after'){const walk=d=>fs.readdirSync(d,{withFileTypes:true}).flatMap(x=>x.isDirectory()?walk(d+'/'+x.name):[d+'/'+x.name]);for(const f of walk(web+'/app/admin').filter(f=>f.endsWith('.tsx')))assert(!/[\u3400-\u9fff]/.test(approvedLabels.reduce((text,label)=>text.replaceAll(label,''),fs.readFileSync(f,'utf8'))),f+' must have English static UI');}
 // Historical owner handoff receipt is not a runtime fixture; test tracked source directly.
 const secret='Traceback (most recent call last):\n File "/srv/private/mock.py", line 42\n api_key=sk-SYNTHETIC-SECRET\nValueError: unclassified synthetic failure';

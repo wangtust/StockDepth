@@ -192,7 +192,7 @@ async function writeEnvFile(envVars: Record<string, string>) {
   const envPath = path.resolve(process.cwd(), '../../.env');
   try {
     await fs.access(envPath);
-    throw new Error('根目录 .env 已存在，请直接编辑该文件，避免覆盖统一配置。');
+    throw new Error('The root .env already exists. Edit it directly to avoid overwriting the shared configuration.');
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
   }

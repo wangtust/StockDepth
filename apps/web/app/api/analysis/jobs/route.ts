@@ -22,7 +22,7 @@ const createJobSchema = z.object({
   ticker: z.string().trim().min(1).max(40),
   tradeDate: analysisDateSchema.optional(),
   realtimeData: z.coerce.boolean().default(false),
-  language: z.string().trim().min(1).max(40).default('Chinese'),
+  language: z.string().trim().min(1).max(40).default('English'),
   depth: z.coerce.number().int().refine((value) => [1, 3, 5].includes(value)),
   analysts: z.array(z.string()).min(1).default(['market', 'news', 'fundamentals']),
   modelConfigId: z.number().int().positive().optional(),
@@ -83,7 +83,7 @@ async function enqueueJob(request: NextRequest) {
   const creditCost = await getDepthCreditCostFromDb(data.depth);
   const quickId = data.quickModelConfigId ?? data.modelConfigId;
   const deepId = data.deepModelConfigId ?? data.modelConfigId;
-  if (!quickId || !deepId) return NextResponse.json({ error: '请选择 Quick 和 Deep 模型。' }, { status: 400 });
+  if (!quickId || !deepId) return NextResponse.json({ error: 'Select both Quick and Deep models.' }, { status: 400 });
   const [quickConfig] = await db.select().from(llmModelConfigs)
     .where(and(eq(llmModelConfigs.id, quickId), eq(llmModelConfigs.isActive, true), isNull(llmModelConfigs.retiredAt), isNull(llmModelConfigs.unavailableReason), eq(llmModelConfigs.quickEnabled, true))).limit(1);
   const [deepConfig] = await db.select().from(llmModelConfigs)
@@ -91,7 +91,7 @@ async function enqueueJob(request: NextRequest) {
 
   if (!quickConfig || !deepConfig) {
     return NextResponse.json(
-      { error: '所选模型不可用，请选择其他已启用模型。' },
+      { error: 'The selected model is unavailable. Select another active model.' },
       { status: 400 }
     );
   }

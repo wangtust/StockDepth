@@ -1,5 +1,7 @@
-# StockDepth 分析后端
+# StockDepth Analysis Backend
 
-统一架构和启动说明见 [根目录 README](../../README.md)。
+See the [root README](../../README.md) for the application architecture, configuration, and startup instructions.
 
-Python 入口：`python -m stockdepth.api.server`。
+Python entry point: `python -m stockdepth.api.server`.
+
+This backend is adapted from [Tauric Research / TradingAgents](https://github.com/TauricResearch/TradingAgents). Its [Apache-2.0 license](LICENSE) is preserved.

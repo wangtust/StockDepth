@@ -62,11 +62,11 @@ export default async function AdminModelsPage({ searchParams }: PageProps) {
                 </span>
                 <span className="flex gap-2">
                   {config.isDefault && <StatusBadge status="default" />}
-                  {config.unavailableReason === 'quota_exhausted' ? <span className="rounded-md bg-amber-100 px-2 py-1 text-xs font-medium text-amber-800">额度不足 · 不可用</span> : <StatusBadge status={config.isActive ? 'active' : 'disabled'} />}
+                  {config.unavailableReason === 'quota_exhausted' ? <span className="rounded-md bg-amber-100 px-2 py-1 text-xs font-medium text-amber-800">Insufficient quota · Unavailable</span> : <StatusBadge status={config.isActive ? 'active' : 'disabled'} />}
                 </span>
               </span>
             }>
-                {config.unavailableReason === 'quota_exhausted' && <div className="mb-4 rounded-md border border-amber-200 bg-amber-50 p-3"><ModelAvailabilityButton configId={config.id} />{config.unavailableAt && <p className="mt-2 text-xs text-amber-800">标记时间：{formatAdminDateTime(config.unavailableAt)}</p>}</div>}
+                {config.unavailableReason === 'quota_exhausted' && <div className="mb-4 rounded-md border border-amber-200 bg-amber-50 p-3"><ModelAvailabilityButton configId={config.id} />{config.unavailableAt && <p className="mt-2 text-xs text-amber-800">Marked unavailable: {formatAdminDateTime(config.unavailableAt)}</p>}</div>}
                 <ModelConfigForm
                   config={{
                     ...config,

@@ -15,7 +15,7 @@ def probe(config):
         os.environ[env_name] = key
     base_url = config.get('baseUrl', '').strip()
     if base_url.rstrip('/').endswith(('/chat/completions', '/responses')):
-        return {'error': 'Base URL 应填写接口根地址，例如 https://tokenhub.tencentmaas.com/v1，不要包含 /chat/completions 或 /responses。'}
+        return {'error': 'Base URL must be the API root, such as https://api.example.com/v1, without /chat/completions or /responses.'}
     if provider == 'azure' and base_url:
         os.environ['AZURE_OPENAI_ENDPOINT'] = base_url
     try:
@@ -28,25 +28,25 @@ def probe(config):
             llm.max_output_tokens = 256
         response = llm.invoke([('user', 'Reply with OK only.')])
         if not response.content:
-            return {'error': '接口未返回有效内容，请检查模型配置或输出限制。'}
+            return {'error': 'The service returned no content. Check the model configuration or output limits.'}
         return {'success': True}
     except Exception as exc:
         from stockdepth.api.usage import is_quota_exhausted
         if is_quota_exhausted(exc):
-            return {'error': '额度不足：请充值或开启后付费后重试。'}
+            return {'error': 'Insufficient quota. Add funds or enable paid usage, then try again.'}
         status = getattr(exc, 'status_code', None)
         messages = {
-            400: '请求被模型服务拒绝，请检查模型名称、Provider 和接口协议。',
-            401: '认证失败，请检查 API Key。',
-            403: '访问被拒绝，请检查模型权限、账户状态或额度。',
-            404: '接口或模型不存在，请检查 Base URL 和模型名称。',
-            429: '模型服务限流或额度不足，请检查账户额度后重试。',
+            400: 'The model service rejected the request. Check the model name, provider, and API protocol.',
+            401: 'Authentication failed. Check the API key.',
+            403: 'Access denied. Check model permissions, account status, and quota.',
+            404: 'The endpoint or model was not found. Check the base URL and model name.',
+            429: 'The model service is rate limited or has insufficient quota. Check the account quota and try again.',
         }
         if status in messages:
-            return {'error': f'HTTP {status}：{messages[status]}'}
+            return {'error': f'HTTP {status}: {messages[status]}'}
         if status:
-            return {'error': f'模型服务返回 HTTP {status}，请稍后重试。'}
-        return {'error': '模型测试失败：连接超时、网络不可达或配置不兼容，请检查接口配置。'}
+            return {'error': f'The model service returned HTTP {status}. Try again later.'}
+        return {'error': 'The model test failed due to a timeout, unreachable network, or incompatible configuration. Check the API settings.'}
 
 
 if __name__ == '__main__':

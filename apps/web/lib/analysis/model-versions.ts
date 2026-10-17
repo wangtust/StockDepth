@@ -32,16 +32,16 @@ export async function readCurrentModelConfig(reader:Reader,id:number) {
 }
 export async function ensureModelVersion(tx: Transaction, config: Pick<Identity,'id'>) {
   const [identity]=await tx.select().from(llmModelConfigs).where(eq(llmModelConfigs.id,config.id)).for('update');
-  if (!identity?.currentVersionId) throw new ModelSelectionError('模型尚未配置可执行版本。');
+  if (!identity?.currentVersionId) throw new ModelSelectionError('The model has no executable configuration version.');
   const [version]=await tx.select().from(llmModelConfigVersions).where(and(eq(llmModelConfigVersions.id,identity.currentVersionId),eq(llmModelConfigVersions.configId,identity.id)));
-  if (!version || !version.encryptedApiKey || !decryptModelKey(version.encryptedApiKey)) throw new ModelSelectionError('模型密钥未配置。');
+  if (!version || !version.encryptedApiKey || !decryptModelKey(version.encryptedApiKey)) throw new ModelSelectionError('Model credentials are not configured.');
   return version;
 }
 export async function saveModelVersion(tx:Transaction,configId:number,fields:ModelExecutionFields) {
   const [identity]=await tx.select().from(llmModelConfigs).where(eq(llmModelConfigs.id,configId)).for('update');
   if (!identity) throw new Error('Model configuration no longer exists');
   const plaintext=decryptModelKey(fields.apiKey);
-  if(!plaintext)throw new ModelSelectionError('模型密钥未配置。');
+  if(!plaintext)throw new ModelSelectionError('Model credentials are not configured.');
   const [current]=identity.currentVersionId?await tx.select().from(llmModelConfigVersions).where(and(eq(llmModelConfigVersions.id,identity.currentVersionId),eq(llmModelConfigVersions.configId,identity.id))):[];
   const {apiKey,...execution}=fields;
   const values={...execution,modelOptions:fields.modelOptions||{},priceCurrency:'CNY',priceUnitTokens:1000000};
@@ -56,11 +56,11 @@ export async function pinModelVersions(tx: Transaction, quickConfig: Pick<Identi
   const configs=new Map<number,Identity>();
   for(const id of [...new Set([quickConfig.id,deepConfig.id])].sort((a,b)=>a-b)) {
     const [config]=await tx.select().from(llmModelConfigs).where(and(eq(llmModelConfigs.id,id),eq(llmModelConfigs.isActive,true),isNull(llmModelConfigs.retiredAt),isNull(llmModelConfigs.unavailableReason))).for('update');
-    if(!config)throw new ModelSelectionError('所选模型不可用，请重新选择。');
+    if(!config)throw new ModelSelectionError('The selected model is unavailable. Select another model.');
     configs.set(id,config);
   }
   const quick=configs.get(quickConfig.id)!,deep=configs.get(deepConfig.id)!;
-  if(!quick.quickEnabled||!deep.deepEnabled)throw new ModelSelectionError('所选模型不支持对应的 Quick / Deep 角色。');
+  if(!quick.quickEnabled||!deep.deepEnabled)throw new ModelSelectionError('The selected model does not support the requested Quick / Deep role.');
   const quickVersion=await ensureModelVersion(tx,quick),deepVersion=await ensureModelVersion(tx,deep);
   return {quickModelVersionId:quickVersion.id,deepModelVersionId:deepVersion.id,configurationState:'versioned' as const};
 }

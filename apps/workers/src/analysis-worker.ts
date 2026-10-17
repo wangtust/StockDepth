@@ -169,7 +169,7 @@ async function startStockDepth(job: ClaimedJob) {
   async function configFor(role: 'quick' | 'deep') {
     const versionId = role === 'quick' ? job.quickModelVersionId : job.deepModelVersionId;
     if (versionId) return readModelVersion(db,versionId);
-    throw new Error('旧任务没有可靠模型版本，请选择模型后继续。');
+    throw new Error('This older job has no reliable model version. Select models to continue.');
   }
   const [quickConfig, deepConfig] = await Promise.all([configFor('quick'), configFor('deep')]);
 

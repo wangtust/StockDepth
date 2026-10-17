@@ -35,7 +35,7 @@ WEB_PASSWORD = os.environ.get("STOCKDEPTH_WEB_PASSWORD", "")
 
 
 REPORT_ORDER = [
-    ("progress", "分析过程", ["progress.md"]),
+    ("progress", "Analysis progress", ["progress.md"]),
     ("market", "Market Analyst", ["market_report.md", "1_analysts/market.md"]),
     ("sentiment", "Sentiment Analyst", ["sentiment_report.md", "1_analysts/sentiment.md"]),
     ("news", "News Analyst", ["news_report.md", "1_analysts/news.md"]),
@@ -364,25 +364,25 @@ class Handler(SimpleHTTPRequestHandler):
             from datetime import date as calendar_date
             if calendar_date.fromisoformat(date).isoformat() != date:
                 raise ValueError("Analysis date must use YYYY-MM-DD")
-            language = str(payload.get("language") or "Chinese")
+            language = str(payload.get("language") or "English")
             depth = int(payload.get("depth") or 1)
             realtime_data = bool(payload.get("realtime_data"))
             models = payload.get("models")
             if models:
                 if not isinstance(models, dict):
-                    raise ValueError("models 必须包含 quick 和 deep 两个配置")
+                    raise ValueError("models must include both quick and deep configurations")
                 for role in ("quick", "deep"):
                     config = models.get(role) or {}
                     if not all(config.get(key) for key in ("id", "provider", "model")):
-                        raise ValueError(f"{role} 模型配置不完整")
+                        raise ValueError(f"{role} model configuration is incomplete")
                     if get_api_key_env(str(config["provider"])) and not config.get("api_key"):
-                        raise ValueError(f"{role} 模型缺少 API Key")
+                        raise ValueError(f"{role} model is missing an API key")
             else:
                 provider = str(payload.get("provider") or "").strip()
                 quick_model = str(payload.get("quick_model") or "").strip()
                 deep_model = str(payload.get("deep_model") or "").strip()
                 if not provider or not quick_model or not deep_model:
-                    raise ValueError("分析需要数据库中的 Provider、Quick Model 和 Deep Model 配置")
+                    raise ValueError("Analysis requires provider, Quick model, and Deep model configurations from the database")
             analysts = payload.get("analysts") or ["market", "news", "fundamentals"]
             if not ticker:
                 raise ValueError("ticker is required")

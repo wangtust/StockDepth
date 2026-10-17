@@ -111,7 +111,7 @@ export default function AnalysisClient({ initialPayload }: { initialPayload: Job
     setTradeDate(formatAnalysisDate(new Date()));
   }, []);
   const [realtimeData, setRealtimeData] = useState(false);
-  const [language, setLanguage] = useState('Chinese');
+  const [language, setLanguage] = useState('English');
   const [depth, setDepth] = useState(1);
   const [submitting, setSubmitting] = useState(false);
   const [deletingJobId, setDeletingJobId] = useState<number | null>(null);
@@ -584,7 +584,7 @@ export default function AnalysisClient({ initialPayload }: { initialPayload: Job
             <CardHeader className="gap-4 border-b border-slate-200 bg-white px-5 py-4 sm:px-6">
               {selectedJob && <AnalysisUsage job={usageJob?.id === selectedJob.id ? usageJob : selectedJob} calls={usageJob?.id === selectedJob.id ? calls : []} />}
               {statusJob?.status === 'failed' && <ResumeWithModels key={statusJob.id} jobId={statusJob.id} models={models} quickId={statusJob.quickModelConfigId} deepId={statusJob.deepModelConfigId} disabled={retryingJobId !== null || submitting || deletingJobId !== null} onResume={handleRetryJob} />}
-              {detail?.job?.id === selectedJobId && !!detail?.resumptions?.length && <details className="mt-3 rounded-md border p-3 text-xs"><summary className="cursor-pointer">模型更换记录 ({detail.resumptions.length})</summary><ul className="mt-2 space-y-2">{detail.resumptions.map((entry: {id:number;previousQuickModel:string|null;previousDeepModel:string|null;nextQuickModel:string;nextDeepModel:string;createdAt:string})=><li key={entry.id}>{new Date(entry.createdAt).toLocaleString()} · Quick: {entry.previousQuickModel||'—'} → {entry.nextQuickModel} · Deep: {entry.previousDeepModel||'—'} → {entry.nextDeepModel}</li>)}</ul></details>}
+              {detail?.job?.id === selectedJobId && !!detail?.resumptions?.length && <details className="mt-3 rounded-md border p-3 text-xs"><summary className="cursor-pointer">Model replacement history ({detail.resumptions.length})</summary><ul className="mt-2 space-y-2">{detail.resumptions.map((entry: {id:number;previousQuickModel:string|null;previousDeepModel:string|null;nextQuickModel:string;nextDeepModel:string;createdAt:string})=><li key={entry.id}>{new Date(entry.createdAt).toLocaleString('en-US')} · Quick: {entry.previousQuickModel||'—'} → {entry.nextQuickModel} · Deep: {entry.previousDeepModel||'—'} → {entry.nextDeepModel}</li>)}</ul></details>}
 
               <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <div className="min-w-0">

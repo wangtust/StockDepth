@@ -22,9 +22,9 @@ require(modules+'/dotenv').config({path:path.resolve(__dirname,'../../.env'),qui
   const page=await browser.newPage();const errors=[];page.on('pageerror',error=>errors.push(error.message));
   await page.context().addCookies([{name:'session',value:token,url:base}]);
   await page.goto(base+'/admin/models');
-  await page.getByText('额度不足 · 不可用',{exact:true}).first().waitFor();
+  await page.getByText('Insufficient quota · Unavailable',{exact:true}).first().waitFor();
   await page.locator(`button[aria-controls="model-config-content-${model.id}"]`).click();
-  await page.locator(`#model-config-content-${model.id}`).getByRole('button',{name:'测试并恢复',exact:true}).waitFor();
+  await page.locator(`#model-config-content-${model.id}`).getByRole('button',{name:'Test and restore',exact:true}).waitFor();
   await page.goto(base+'/dashboard/analysis');await page.locator('#analysis-deep-model').waitFor();
   assert.equal(await page.locator(`#analysis-deep-model option[value="${model.id}"]`).count(),0);
   assert.equal(await page.locator(`#analysis-quick-model option[value="${model.id}"]`).count(),0);

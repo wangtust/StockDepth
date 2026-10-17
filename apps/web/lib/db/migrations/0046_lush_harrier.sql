@@ -1,0 +1,1 @@
+ALTER TABLE "analysis_jobs" ALTER COLUMN "language" SET DEFAULT 'English';

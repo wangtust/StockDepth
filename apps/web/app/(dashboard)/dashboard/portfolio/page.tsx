@@ -427,7 +427,7 @@ export default function PortfolioPage() {
         portfolioId: portfolio.id,
         watchlistItemIds: selectedWatchlistIds,
         realtimeData: analysisRealtimeData,
-        language: 'Chinese',
+        language: 'English',
         depth: analysisDepth,
         analysts: ['market', 'social', 'news', 'fundamentals']
       },

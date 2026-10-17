@@ -40,15 +40,15 @@ function revalidateAdmin() {
 }
 
 const modelPrice = z.preprocess(value => value === '' || value == null ? null : value,
-  z.string().trim().regex(/^\d{1,9}(\.\d{1,6})?$/, '价格须为非负数字，最多六位小数').nullable());
+  z.string().trim().regex(/^\d{1,9}(\.\d{1,6})?$/, 'Prices must be nonnegative numbers with up to six decimal places').nullable());
 const priceFields = ['inputPrice', 'cachePrice', 'outputPrice'] as const;
 function modelPrices(formData: FormData) {
   return Object.fromEntries(priceFields.map(field => [field, formData.get(field)]));
 }
 function validateModelPrices(data: Record<string, unknown>) {
   const values = priceFields.map(field => data[field]);
-  if (values.some(value => value != null) && !values.every(value => value != null)) throw new Error('输入、缓存命中、输出价格须全部填写，或全部留空。');
-  if (values.every(value => value != null) && Number(values[1]) > Number(values[0])) throw new Error('缓存命中价格不能高于普通输入价格。');
+  if (values.some(value => value != null) && !values.every(value => value != null)) throw new Error('Enter all input, cache hit, and output prices, or leave all three blank.');
+  if (values.every(value => value != null) && Number(values[1]) > Number(values[0])) throw new Error('The cache hit price cannot exceed the input price.');
 }
 
 const modelConfigSchema = z.object({
@@ -64,8 +64,8 @@ const modelConfigSchema = z.object({
     if (typeof value !== 'string' || !value.trim()) return {};
     try { return JSON.parse(value); } catch { return value; }
   }, z.record(z.union([z.string().max(100), z.number().finite(), z.boolean()]))
-    .refine(options => Object.keys(options).every(key => ['temperature','top_p','max_tokens','max_retries','timeout','reasoning_effort','thinking_level','effort','seed','requests_per_minute','request_concurrency'].includes(key)), '包含不支持的模型参数')
-    .refine(options => ['requests_per_minute','request_concurrency'].every(key => options[key] == null || (typeof options[key] === 'number' && options[key] > 0 && options[key] <= 10000)), '限流参数须为 1 到 10000 的数字')),
+    .refine(options => Object.keys(options).every(key => ['temperature','top_p','max_tokens','max_retries','timeout','reasoning_effort','thinking_level','effort','seed','requests_per_minute','request_concurrency'].includes(key)), 'Unsupported model parameters')
+    .refine(options => ['requests_per_minute','request_concurrency'].every(key => options[key] == null || (typeof options[key] === 'number' && options[key] > 0 && options[key] <= 10000)), 'Rate limit parameters must be numbers from 1 to 10000')),
   quickEnabled: z.coerce.boolean().optional(),
   deepEnabled: z.coerce.boolean().optional(),
   isDefault: z.coerce.boolean().optional(),
@@ -105,19 +105,19 @@ export async function createModelConfig(formData: FormData) {
 
   if (!parsed.success) {
     const issue = parsed.error.issues[0];
-    const labels: Record<string, string> = { name: '显示名称', provider: 'Provider', baseUrl: 'Base URL', apiKey: 'API Key', modelName: '模型名称', inputPrice: '输入价格', cachePrice: '缓存命中价格', outputPrice: '输出价格' };
-    const field = String(issue.path[0] || '表单');
-    const detail = field.endsWith('Price') ? '须为非负数字，最多六位小数；也可留空。' : field === 'provider' ? '请选择受支持的供应商。' : '请检查是否为空或超过长度限制。';
-    return { error: `${labels[field] || field}：${detail}` };
+    const labels: Record<string, string> = { name: 'Display name', provider: 'Provider', baseUrl: 'Base URL', apiKey: 'API Key', modelName: 'Model name', inputPrice: 'Input price', cachePrice: 'Cache hit price', outputPrice: 'Output price' };
+    const field = String(issue.path[0] || 'Form');
+    const detail = field.endsWith('Price') ? 'Must be a nonnegative number with up to six decimal places, or left blank.' : field === 'provider' ? 'Select a supported provider.' : 'Check for empty values or values exceeding the length limit.';
+    return { error: `${labels[field] || field}: ${detail}` };
   }
   const data = parsed.data;
   try { validateModelPrices(data); }
   catch (error) { return { error: (error as Error).message }; }
   let storedData: typeof data;
   try { storedData = modelConfigWrite(data); }
-  catch { return { error: '模型密钥加密配置不可用，配置未保存。' }; }
+  catch { return { error: 'Model key encryption is unavailable. The configuration was not saved.' }; }
   const probe = await testModelConnection(data);
-  if (!probe.success) return { error: probe.error || '模型测试失败，配置未保存。' };
+  if (!probe.success) return { error: probe.error || 'The model test failed. The configuration was not saved.' };
   try {
     await db.transaction(async (tx) => {
       const {provider,baseUrl,apiKey,modelName,modelOptions,inputPrice,cachePrice,outputPrice,...identity}=storedData;
@@ -144,7 +144,7 @@ export async function createModelConfig(formData: FormData) {
   } catch (error) {
     const code = (error as { code?: string }).code || 'unknown';
     console.error('Model config persistence failed; database error code:', code);
-    return { error: '模型测试通过，但数据库保存失败，请稍后重试或联系管理员检查数据库。' };
+    return { error: 'The model test passed, but the configuration could not be saved. Try again later or ask an administrator to check the database.' };
   }
   revalidateAdmin();
   return { success: 'Model config created.' };
@@ -170,7 +170,7 @@ export async function updateModelConfig(formData: FormData) {
   validateModelPrices(data);
   let storedApiKey: string | undefined;
   try { storedApiKey = data.apiKey ? encryptModelKey(data.apiKey) : undefined; }
-  catch { return { error: '模型密钥加密配置不可用，配置未保存。' }; }
+  catch { return { error: 'Model key encryption is unavailable. The configuration was not saved.' }; }
   const updateValues = {
     inputPrice: data.inputPrice,
     cachePrice: data.cachePrice,
@@ -240,15 +240,15 @@ export async function deleteModelConfig(formData: FormData) {
   const result = await db.transaction(async (tx) => {
     const [model] = await tx.select({ id: llmModelConfigs.id })
       .from(llmModelConfigs).where(eq(llmModelConfigs.id, configId)).for('update');
-    if (!model) return { error: '模型已不存在，请刷新页面。' };
+    if (!model) return { error: 'The model no longer exists. Refresh the page.' };
     const [activeJob] = await tx.select({ id: analysisJobs.id }).from(analysisJobs)
       .where(and(sql`exists (select 1 from llm_model_config_versions v where v.config_id=${configId} and v.id in (${analysisJobs.quickModelVersionId},${analysisJobs.deepModelVersionId}))`, inArray(analysisJobs.status, ['queued', 'running'])))
       .limit(1);
-    if (activeJob) return { error: '该模型仍有排队或运行中的任务，请任务结束后再删除。' };
+    if (activeJob) return { error: 'This model has queued or running jobs. Wait for them to finish before deleting it.' };
     await tx.update(llmModelConfigs)
       .set({ retiredAt: new Date(), isActive: false, isDefault: false, updatedAt: new Date() })
       .where(eq(llmModelConfigs.id, configId));
-    return { success: '模型已弃用，配置保留在数据库中。' };
+    return { success: 'The model was retired. Its configuration remains in the database.' };
   });
   if (result.error) return result;
   await writeAdminAuditLog({
@@ -428,7 +428,7 @@ export async function adjustUserCredits(formData: FormData) {
     if (result.error) return result;
     revalidateAdmin();
     return result;
-  } catch { return {error:'额度调整失败，余额和流水未变更，请稍后重试。'}; }
+  } catch { return {error:'Credit adjustment failed. The balance and ledger are unchanged. Try again later.'}; }
 }
 
 export async function retryAnalysisJob(formData: FormData) {
@@ -525,15 +525,15 @@ export async function restoreModelAvailability(formData: FormData) {
   const config = await readCurrentModelConfig(db,configId);
   if (!config || config.retiredAt) return {error:'Model config not found.'};
   const probe = await testModelConnection(config);
-  if (!probe.success) return {error:probe.error || '模型测试失败，仍保持不可用。'};
+  if (!probe.success) return {error:probe.error || 'The model test failed. The model remains unavailable.'};
   const restored = await db.transaction(async tx => {
     const [current] = await tx.select().from(llmModelConfigs).where(eq(llmModelConfigs.id,configId)).for('update');
     if (!current || current.retiredAt || current.currentVersionId!==config.currentVersionId || current.updatedAt.getTime()!==config.updatedAt.getTime() || current.unavailableAt?.getTime()!==config.unavailableAt?.getTime()) return false;
     await tx.update(llmModelConfigs).set({unavailableReason:null,unavailableAt:null,availabilityCheckedAt:new Date()}).where(eq(llmModelConfigs.id,configId));
     return true;
   });
-  if (!restored) return {error:'模型配置或状态已变化，请刷新后重新测试。'};
+  if (!restored) return {error:'The model configuration or status has changed. Refresh and test again.'};
   await writeAdminAuditLog({adminUserId:admin.id,action:'llm_model_config.restore_availability',targetType:'llm_model_config',targetId:configId,metadata:{modelName:config.modelName}});
   revalidatePath('/admin/models');revalidatePath('/dashboard/analysis');
-  return {success:'模型测试通过，已恢复可用。'};
+  return {success:'The model test passed. Availability has been restored.'};
 }

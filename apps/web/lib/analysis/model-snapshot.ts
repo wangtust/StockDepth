@@ -6,7 +6,7 @@ export function immutableModelSnapshot(config:Pick<LlmModelConfig,'id'|'provider
     const options=config.modelOptions||{};
     if(options.request_concurrency!=null&&(!Number.isInteger(Number(options.request_concurrency))||Number(options.request_concurrency)<1))throw new Error();
     return JSON.stringify({...config,modelOptions:options,apiKey});
-  }catch{throw new Error('模型密钥加密配置不可用，无法安全创建任务快照。');}
+  }catch{throw new Error('Model key encryption is unavailable. A secure job snapshot could not be created.');}
 }
 export function encryptedHistoricalSnapshot(value:string|null) {
   if(!value)return null;

@@ -178,7 +178,7 @@ function renderActiveReport() {
   const report = state.reports.find((item) => item.key === state.activeKey) || state.reports.at(-1);
   if (!report) {
     content.className = "markdown empty";
-    content.innerHTML = "<h2>等待报告生成</h2><p>分析已经开始后，报告会自动出现在这里。</p>";
+    content.innerHTML = "<h2>Waiting for reports</h2><p>Reports will appear here automatically after analysis starts.</p>";
     state.renderedReportId = null;
     state.renderedReportVersion = null;
     return;

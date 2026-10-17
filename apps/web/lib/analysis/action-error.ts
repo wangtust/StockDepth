@@ -17,7 +17,8 @@ export function presentActionError(error: unknown, action: 'queue' | 'delete' | 
   else if (status === 400 && /模型|model|Quick|Deep/i.test(evidence)) { description = 'The selected Quick or Deep model is unavailable or does not support this role.'; nextStep = 'Refresh the model list and choose available Quick and Deep models.'; }
   else if (status === 400 && /日期|date/i.test(evidence)) { description = 'The analysis date is invalid.'; nextStep = 'Choose a valid analysis date.'; }
   else if (status === 409 && /Only failed analysis jobs/.test(evidence)) { description = 'This job is no longer in a failed state.'; nextStep = 'Refresh the job list; only failed jobs can be continued.'; }
-  else if (status === 409 && /模型额度|model.*(?:quota|unavailable)/i.test(evidence)) { description = 'The selected model has insufficient quota.'; nextStep = 'Use “Change models and continue” to choose another model, or contact an administrator.'; }
+  else if (status === 409 && /模型额度|model.*quota/i.test(evidence)) { description = 'The selected model has insufficient quota.'; nextStep = 'Use “Change models and continue” to choose another model, or contact an administrator.'; }
+  else if (status === 409 && /模型不可用|model.*unavailable/i.test(evidence)) { description = 'The selected model is unavailable.'; nextStep = 'Use “Change models and continue” to choose another model, or contact an administrator.'; }
   else if (status === 404) { description = 'This job is no longer available.'; }
   else if (status === 429) { description = 'Too many requests were submitted.'; nextStep = 'Wait briefly before trying again.'; }
   else if (status === 503 && /密钥|credentials|encryption/i.test(evidence)) { description = 'The model configuration could not be used to continue this job.'; nextStep = 'Check the model credentials or choose another model.'; }

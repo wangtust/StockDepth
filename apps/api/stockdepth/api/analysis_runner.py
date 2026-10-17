@@ -190,7 +190,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run StockDepth and save live markdown reports.")
     parser.add_argument("--ticker", required=True)
     parser.add_argument("--date", required=True)
-    parser.add_argument("--language", default="Chinese")
+    parser.add_argument("--language", default="English")
     parser.add_argument("--depth", type=int, default=1, choices=(1, 3, 5))
     parser.add_argument("--analysts", default="market,news,fundamentals")
     parser.add_argument("--asset-type", default="stock")
@@ -246,7 +246,7 @@ def main() -> None:
     model_configs = json.loads(os.environ.get("STOCKDEPTH_MODEL_CONFIGS", "{}"))
     if model_configs:
         if not all(isinstance(model_configs.get(role), dict) for role in ("quick", "deep")):
-            raise ValueError("Quick 和 Deep 模型配置必须同时存在")
+            raise ValueError("Both Quick and Deep model configurations are required")
         config["model_configs"] = model_configs
         config["llm_provider"] = model_configs["quick"]["provider"]
         config["backend_url"] = model_configs["quick"].get("base_url")
@@ -254,7 +254,7 @@ def main() -> None:
         config["deep_think_llm"] = model_configs["deep"]["model"]
     else:
         if not args.provider or not args.quick_model or not args.deep_model:
-            raise ValueError("分析模型必须由数据库配置传入")
+            raise ValueError("Analysis models must be supplied from the database configuration")
         config["llm_provider"] = args.provider
         config["backend_url"] = args.base_url or None
         config["quick_think_llm"] = args.quick_model

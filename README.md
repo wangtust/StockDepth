@@ -136,7 +136,7 @@ Database integration tests use `node scripts/ci/test-integration.cjs` and requir
 Original StockDepth code is licensed under the [Apache License 2.0](LICENSE). The overall application architecture, business workflows, and database design were created by the StockDepth author. Third-party code retains its original copyright and license notices:
 
 - The analysis backend is adapted from [Tauric Research / TradingAgents](https://github.com/TauricResearch/TradingAgents), with its [Apache-2.0 license](apps/api/LICENSE) preserved. StockDepth adds service integration, task execution, model configuration, and report persistence adaptations.
-- The frontend is adapted from a Vercel open source template, with its [MIT license and Vercel copyright notice](apps/web/LICENSE) preserved. The exact upstream template repository has not yet been confirmed.
+- The frontend is adapted from [Next.js SaaS Starter](https://github.com/nextjs/saas-starter), with its [MIT license and Vercel copyright notice](apps/web/LICENSE) preserved.
 
 Original copyrights remain with their respective holders. The root license does not override third-party licenses. Other dependencies remain subject to their own licenses.
 

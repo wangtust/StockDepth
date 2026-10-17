@@ -27,7 +27,7 @@ class ModelProbeTests(unittest.TestCase):
     @patch('stockdepth.api.model_probe.create_llm_client')
     def test_empty_output_rejected(self, factory):
         factory.return_value.get_llm.return_value.invoke.return_value = SimpleNamespace(content='')
-        self.assertIn('有效内容', probe(self.config)['error'])
+        self.assertIn('no content', probe(self.config)['error'])
 
     @patch('stockdepth.api.model_probe.create_llm_client')
     def test_errors_never_expose_secret(self, factory):

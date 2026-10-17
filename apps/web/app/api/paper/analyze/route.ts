@@ -27,7 +27,7 @@ const analyzeSchema = z.object({
   watchlistItemIds: z.array(z.coerce.number().int().positive()).min(1).max(20),
   tradeDate: analysisDateSchema.optional(),
   realtimeData: z.coerce.boolean().default(true),
-  language: z.string().trim().min(1).max(40).default('Chinese'),
+  language: z.string().trim().min(1).max(40).default('English'),
   depth: z.coerce.number().int().refine((value) => [1, 3, 5].includes(value)),
   analysts: z.array(z.string()).min(1).default(['market', 'social', 'news', 'fundamentals'])
 });

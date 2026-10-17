@@ -160,7 +160,7 @@ export const analysisJobs = pgTable(
     ticker: varchar('ticker', { length: 40 }).notNull(),
     tradeDate: varchar('trade_date', { length: 20 }).notNull(),
     realtimeData: boolean('realtime_data').notNull().default(false),
-    language: varchar('language', { length: 40 }).notNull().default('Chinese'),
+    language: varchar('language', { length: 40 }).notNull().default('English'),
     depth: integer('depth').notNull().default(1),
     analysts: text('analysts').notNull(),
     quickModelVersionId: integer('quick_model_version_id').references(() => llmModelConfigVersions.id),

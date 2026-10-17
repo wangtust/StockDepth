@@ -43,7 +43,7 @@ export function StockDecisionHistory({id}:{id:string}) {
   const groups=new Map<string,typeof mapped>();
   for(const d of mapped) if(d.price&&d.action) groups.set(d.price.date,[...(groups.get(d.price.date)||[]),d]);
   return <section className="space-y-4 rounded-xl border bg-white p-4">
-    <div className="flex flex-wrap items-center justify-between gap-3"><h2 className="text-lg font-semibold">Historical decisions / 历史决策</h2><button className="underline" onClick={()=>mutate()}>Refresh</button></div>
+    <div className="flex flex-wrap items-center justify-between gap-3"><h2 className="text-lg font-semibold">Historical decisions</h2><button className="underline" onClick={()=>mutate()}>Refresh</button></div>
     <div className="flex flex-wrap gap-3">
       <label>From <input aria-label="From date" className="rounded border p-1" type="date" value={from} onChange={e=>setFrom(e.target.value)}/></label>
       <label>To <input aria-label="To date" className="rounded border p-1" type="date" value={to} onChange={e=>setTo(e.target.value)}/></label>
@@ -68,7 +68,7 @@ export function StockDecisionHistory({id}:{id:string}) {
       </svg></div>}
       <p>{data.decisions.length} reports · {data.decisions.filter(d=>!d.action).length} unrecognized / pending</p>
       {!mapped.length?<p>No matching completed analysis records.</p>:<div className="max-h-96 overflow-auto"><table className="w-full text-left text-xs [&_th]:p-2 [&_td]:p-2 [&_tr]:border-b"><thead><tr>{['Date','Decision','Reference close','Generated','Model','Report'].map(h=><th key={h}>{h}</th>)}</tr></thead><tbody>{mapped.map(d=><tr key={d.jobId}>
-        <td>{d.date}{basis==='generated'&&<div>Analysis: {d.analysisDate}</div>}</td><td style={{color:colors[d.action||'']}}>{d.action?.toUpperCase()||(d.extractionStatus==='unrecognized'?'Unrecognized':'Pending')}<div className="max-w-xs text-slate-600">{d.summary}</div></td><td>{d.price?`${d.price.close} (${d.price.date})`:'Price unavailable'}</td><td>{d.completedAt?new Date(d.completedAt).toLocaleString():'—'}</td><td>{d.model||'—'}</td><td><button className="underline" onClick={()=>setSelected(d.jobId)}>View #{d.jobId}</button></td>
+        <td>{d.date}{basis==='generated'&&<div>Analysis: {d.analysisDate}</div>}</td><td style={{color:colors[d.action||'']}}>{d.action?.toUpperCase()||(d.extractionStatus==='unrecognized'?'Unrecognized':'Pending')}<div className="max-w-xs text-slate-600">{d.summary}</div></td><td>{d.price?`${d.price.close} (${d.price.date})`:'Price unavailable'}</td><td>{d.completedAt?new Date(d.completedAt).toLocaleString('en-US'):'—'}</td><td>{d.model||'—'}</td><td><button className="underline" onClick={()=>setSelected(d.jobId)}>View #{d.jobId}</button></td>
       </tr>)}</tbody></table></div>}
     </>}
     {selected&&<div role="dialog" aria-modal="true" aria-label={`Decision report ${selected}`} className="fixed inset-0 z-50 overflow-auto bg-black/40 p-4" onClick={()=>setSelected(null)}><div className="mx-auto max-w-4xl space-y-4 rounded-xl bg-white p-6" onClick={e=>e.stopPropagation()}><button autoFocus className="rounded border px-3 py-1" onClick={()=>setSelected(null)} onKeyDown={e=>{if(e.key==='Escape')setSelected(null);}}>Close report #{selected}</button>{reportLoading&&<p>Loading report…</p>}{reportError&&<p role="alert">Report unavailable.</p>}{report&&<><h3>{report.report.title}</h3><MarkdownRenderer content={report.report.content}/></>}</div></div>}

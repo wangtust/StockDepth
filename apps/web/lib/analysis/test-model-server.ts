@@ -8,7 +8,7 @@ export async function testModelConnection(config: {
 }): Promise<{ success?: boolean; error?: string }> {
   let apiKey: string;
   try { apiKey = decryptModelKey(config.apiKey); }
-  catch { return { error: '模型密钥不可用，请联系管理员检查加密配置。' }; }
+  catch { return { error: 'Model credentials are unavailable. Ask an administrator to check the encryption configuration.' }; }
   const childEnv = { ...process.env };
   delete childEnv.STOCKDEPTH_MODEL_KEYRING;
   delete childEnv.STOCKDEPTH_MODEL_KEY_ID;
@@ -23,12 +23,12 @@ export async function testModelConnection(config: {
     let output = '';
     const timeout = setTimeout(() => {
       child.kill('SIGKILL');
-      resolve({ error: '模型测试超时，请检查网络和服务地址后重试。' });
+      resolve({ error: 'The model test timed out. Check the network and service URL, then try again.' });
     }, 35000);
     child.stdout.on('data', (chunk) => { output = (output + chunk.toString()).slice(-16000); });
     child.on('error', () => {
       clearTimeout(timeout);
-      resolve({ error: '无法启动模型测试，请检查服务器 Python 环境。' });
+      resolve({ error: 'Could not start the model test. Check the server Python environment.' });
     });
     child.stdin.on('error', () => {});
     child.on('close', () => {
@@ -37,7 +37,7 @@ export async function testModelConnection(config: {
         const line = output.split('\n').find((item) => item.startsWith('STOCKDEPTH_PROBE_RESULT='));
         resolve(JSON.parse(line!.slice('STOCKDEPTH_PROBE_RESULT='.length)));
       } catch {
-        resolve({ error: '模型测试无法完成，请检查 Provider 和服务器环境。' });
+        resolve({ error: 'Could not complete the model test. Check the provider and server environment.' });
       }
     });
     child.stdin.end(JSON.stringify({ ...config, apiKey }));

@@ -19,7 +19,7 @@ export async function resumeAnalysisJob(userId:number,jobId:number,replacement?:
       if(!blocked.length)return {error:'No unavailable model to replace',status:409} as const;
       const prior=await tx.select({id:analysisJobResumptions.id}).from(analysisJobResumptions).where(eq(analysisJobResumptions.jobId,jobId));
       // Existing manual replacements also consume this conservative per-job budget.
-      if(prior.length>=3)return {error:'自动换模重试已达上限（最多三次换模），请手动选择模型后继续。',status:422} as const;
+      if(prior.length>=3)return {error:'The automatic model replacement limit of three has been reached. Select models manually to continue.',status:422} as const;
       await tx.execute(sql`select pg_advisory_xact_lock(739421, 3)`);
       const available=await tx.select().from(llmModelConfigs).where(and(eq(llmModelConfigs.isActive,true),isNull(llmModelConfigs.retiredAt),isNull(llmModelConfigs.unavailableReason))).orderBy(desc(llmModelConfigs.isDefault),asc(llmModelConfigs.id));
       if(!available.some(c=>c.isDefault)) {
@@ -29,7 +29,7 @@ export async function resumeAnalysisJob(userId:number,jobId:number,replacement?:
       }
       const quick=available.find(c=>c.id===quickVersion?.id&&c.quickEnabled)??available.find(c=>c.quickEnabled);
       const deep=available.find(c=>c.id===deepVersion?.id&&c.deepEnabled)??available.find(c=>c.deepEnabled);
-      if(!quick||!deep)return {error:'没有可用的 Quick / Deep 替代模型，任务已停止。',status:503} as const;
+      if(!quick||!deep)return {error:'No replacement Quick / Deep models are available. The job has stopped.',status:503} as const;
       replacement={quickModelConfigId:quick.id,deepModelConfigId:deep.id};
     }
 
@@ -50,9 +50,9 @@ export async function resumeAnalysisJob(userId:number,jobId:number,replacement?:
         } : null});
       changed=pinned;
     }else if(!quickVersion || !deepVersion) {
-      return {error:'旧任务缺少可靠模型版本，请选择模型后继续。',status:409} as const;
+      return {error:'This older job has no reliable model version. Select models to continue.',status:409} as const;
     }else if((await unavailableJobModels(existing,tx)).length) {
-      return {error:'模型不可用，请使用“更换模型并继续”或联系管理员恢复模型。',status:409} as const;
+      return {error:'The model is unavailable. Use "Change models and continue" or ask an administrator to restore it.',status:409} as const;
     }
     const [job]=await tx.update(analysisJobs).set({...changed,status:'queued',workerOwner:null,workerLeaseUntil:null,externalStatus:'resume-queued',externalPid:null,errorMessage:null,completedAt:null,updatedAt:new Date()})
       .where(eq(analysisJobs.id,existing.id)).returning();

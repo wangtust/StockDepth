@@ -10,14 +10,14 @@ export function ResumeWithModels({jobId,models,quickId,deepId,disabled,onResume}
   const selectedQuick=quickModels.some(m=>m.id===candidateQuick)?candidateQuick:quickModels[0]?.id;
   const selectedDeep=deepModels.some(m=>m.id===candidateDeep)?candidateDeep:deepModels[0]?.id;
   return <details className="rounded-md border border-amber-200 bg-amber-50 p-3" open={open} onToggle={e=>setOpen(e.currentTarget.open)}>
-    <summary className="cursor-pointer text-sm font-medium text-amber-900">更换模型并继续</summary>
-    <p className="mt-2 text-sm text-slate-600">保留已完成报告和历史用量，从检查点的未完成阶段继续；没有检查点时从头运行。无需再次扣分析额度，后续模型调用按新模型计价。</p>
+    <summary className="cursor-pointer text-sm font-medium text-amber-900">Change models and continue</summary>
+    <p className="mt-2 text-sm text-slate-600">Completed reports and usage history are preserved. Continue unfinished stages from the checkpoint, or restart if no checkpoint exists. No additional analysis credits are deducted; subsequent model calls use the new model prices.</p>
     <form className="mt-3 space-y-3" onSubmit={async e=>{e.preventDefault();if(disabled||!selectedQuick||!selectedDeep)return;if(await onResume(jobId,{quickModelConfigId:selectedQuick,deepModelConfigId:selectedDeep}))setOpen(false);}}>
       <div className="grid gap-3 sm:grid-cols-2">
-        <label className="space-y-1 text-sm"><span>继续任务的 Quick 模型</span><select aria-label="继续任务的 Quick 模型" className="block w-full rounded-md border bg-white p-2" value={selectedQuick??''} disabled={disabled} required onChange={e=>setQuick(Number(e.target.value))}>{!quickModels.length&&<option value="">暂无可用模型</option>}{quickModels.map(m=><option key={m.id} value={m.id}>{m.name} · {m.modelName}</option>)}</select></label>
-        <label className="space-y-1 text-sm"><span>继续任务的 Deep 模型</span><select aria-label="继续任务的 Deep 模型" className="block w-full rounded-md border bg-white p-2" value={selectedDeep??''} disabled={disabled} required onChange={e=>setDeep(Number(e.target.value))}>{!deepModels.length&&<option value="">暂无可用模型</option>}{deepModels.map(m=><option key={m.id} value={m.id}>{m.name} · {m.modelName}</option>)}</select></label>
+        <label className="space-y-1 text-sm"><span>Quick model for continuation</span><select aria-label="Quick model for continuation" className="block w-full rounded-md border bg-white p-2" value={selectedQuick??''} disabled={disabled} required onChange={e=>setQuick(Number(e.target.value))}>{!quickModels.length&&<option value="">No models available</option>}{quickModels.map(m=><option key={m.id} value={m.id}>{m.name} · {m.modelName}</option>)}</select></label>
+        <label className="space-y-1 text-sm"><span>Deep model for continuation</span><select aria-label="Deep model for continuation" className="block w-full rounded-md border bg-white p-2" value={selectedDeep??''} disabled={disabled} required onChange={e=>setDeep(Number(e.target.value))}>{!deepModels.length&&<option value="">No models available</option>}{deepModels.map(m=><option key={m.id} value={m.id}>{m.name} · {m.modelName}</option>)}</select></label>
       </div>
-      <Button type="submit" size="sm" disabled={disabled||!selectedQuick||!selectedDeep}>{disabled?'处理中…':'确认更换并继续'}</Button>
+      <Button type="submit" size="sm" disabled={disabled||!selectedQuick||!selectedDeep}>{disabled?'Processing…':'Confirm and continue'}</Button>
     </form>
   </details>;
 }

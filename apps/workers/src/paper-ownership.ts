@@ -33,7 +33,7 @@ export async function expireSubmittedRuns() {
       await tx.insert(paperTradeDecisions).values({ portfolioId: run.portfolioId, userId: run.userId,
         paperAnalysisRunId: run.id, analysisJobId: run.analysisJobId, ticker: run.ticker,
         action: 'hold', status: 'failed',
-        errorMessage: '模型请求已提交，但 Worker 中断导致结果未知；为避免重复计费，系统未自动重试。',
+        errorMessage: 'The model request was submitted, but the worker was interrupted and its outcome is unknown. Automatic retry was skipped to avoid duplicate charges.',
       }).onConflictDoNothing();
     }
     return expired.length;

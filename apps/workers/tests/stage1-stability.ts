@@ -193,7 +193,7 @@ async function main() {
   const [interrupted] = await db.select().from(paperModelCalls).where(eq(paperModelCalls.paperRunId, uncertain.id)); assert.equal(interrupted.status, 'interrupted');
   assert.equal(interrupted.estimatedCost, null);
   const [unknownDecision] = await db.select().from(paperTradeDecisions).where(eq(paperTradeDecisions.paperAnalysisRunId, uncertain.id));
-  assert.equal(unknownDecision.status, 'failed'); assert(unknownDecision.errorMessage?.includes('结果未知'));
+  assert.equal(unknownDecision.status, 'failed'); assert(unknownDecision.errorMessage?.includes('outcome is unknown'));
   check('submitted-crash-is-unknown-not-auto-rebilled');
   mode = 'no-usage'; await paperFixture(); const missing = await claimPaperRun(); assert(missing);
   await updateModelFixture(db, config.id, {inputPrice:null,cachePrice:null,outputPrice:null});

@@ -286,6 +286,10 @@ class StockDepthGraph:
         """
         try:
             start = datetime.strptime(trade_date, "%Y-%m-%d")
+            # A same-day decision has no subsequent daily return yet.
+            # Leave it pending rather than querying a future price window.
+            if start.date() >= datetime.now().date():
+                return None, None, None
             end = start + timedelta(days=holding_days + 7)  # buffer for weekends/holidays
             end_str = end.strftime("%Y-%m-%d")
 

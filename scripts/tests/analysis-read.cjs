@@ -1,6 +1,7 @@
 const assert = require('node:assert/strict');
 const path = require('node:path');
 const root = path.resolve(__dirname, '../..');
+const baseUrl = process.env.STOCKDEPTH_TEST_BASE_URL || 'http://127.0.0.1:3000';
 require(root + '/apps/web/node_modules/dotenv').config({ path: root + '/.env' });
 const sql = require(root + '/apps/web/node_modules/postgres')(process.env.POSTGRES_URL, { max: 1 });
 (async () => {
@@ -13,7 +14,7 @@ const sql = require(root + '/apps/web/node_modules/postgres')(process.env.POSTGR
     const token = await new SignJWT({ user: { id: user.id }, expires: new Date(Date.now() + 600000).toISOString() })
       .setProtectedHeader({ alg: 'HS256' }).setExpirationTime('10m').sign(new TextEncoder().encode(process.env.AUTH_SECRET));
     async function read(route) {
-      const response = await fetch('http://127.0.0.1:3000' + route, { headers: { Cookie: 'session=' + token } });
+      const response = await fetch(baseUrl + route, { headers: { Cookie: 'session=' + token } });
       assert.equal(response.status, 200); return response.json();
     }
     const seen = new Set(); let before, latest;
@@ -50,6 +51,19 @@ const sql = require(root + '/apps/web/node_modules/postgres')(process.env.POSTGR
     if (reports.length) {
       const body = await read(`/api/analysis/jobs/${latest.id}?report=${encodeURIComponent(reports[0].report_key)}`);
       assert.equal(body.report.content, reports[0].content);
+      const url = baseUrl + `/api/analysis/jobs/${latest.id}?report=${encodeURIComponent(reports[0].report_key)}`;
+      const response = await fetch(url, { headers: { Cookie: 'session=' + token } });
+      const etag = response.headers.get('etag');
+      assert(etag);
+      const unchanged = await fetch(url, { headers: { Cookie: 'session=' + token, 'If-None-Match': etag } });
+      assert.equal(unchanged.status, 304);
+      assert.equal(await unchanged.text(), '');
+      const anonymous = await fetch(url, { headers: { 'If-None-Match': etag } });
+      assert.equal(anonymous.status, 401, 'conditional requests still require authentication');
+      const missing = await fetch(baseUrl + '/api/analysis/jobs/2147483647?report=complete', {
+        headers: { Cookie: 'session=' + token, 'If-None-Match': etag }
+      });
+      assert.equal(missing.status, 404, 'validators cannot bypass report visibility checks');
     }
     console.log('PASS: cursor pagination, credits, historical token/call totals, report catalog/body consistency, public cost isolation');
   } finally { await sql.end(); }

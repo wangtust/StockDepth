@@ -6,6 +6,7 @@ import json
 import hashlib
 import logging
 import os
+import re
 import atexit
 import time
 from pathlib import Path
@@ -38,6 +39,12 @@ def write_text(path: Path, content: str, persistence: ReportPersistence | None =
     (persistence or ReportPersistence()).write(path, content)
 
 
+def debate_report(title: str, history: str, speakers: tuple[str, ...]) -> str:
+    labels = "|".join(re.escape(speaker) for speaker in speakers)
+    history = re.sub(r"\n(?=(?:" + labels + r"): )", "\n\n", history.strip())
+    return f"# {title}\n\n{history}\n"
+
+
 def save_report_parts(state: dict, report_dir: Path, persistence: ReportPersistence | None = None) -> None:
     for key, (filename, _) in REPORT_MAP.items():
         content = state.get(key)
@@ -45,6 +52,8 @@ def save_report_parts(state: dict, report_dir: Path, persistence: ReportPersiste
             write_text(report_dir / filename, content, persistence)
 
     debate = state.get("investment_debate_state") or {}
+    if debate.get("history"):
+        write_text(report_dir / "research_debate.md", debate_report("Research Debate", debate["history"], ("Bull Analyst", "Bear Analyst")), persistence)
     if debate.get("bull_history"):
         write_text(report_dir / "bull_history.md", debate["bull_history"], persistence)
     if debate.get("bear_history"):
@@ -53,6 +62,8 @@ def save_report_parts(state: dict, report_dir: Path, persistence: ReportPersiste
         write_text(report_dir / "investment_plan.md", debate["judge_decision"], persistence)
 
     risk = state.get("risk_debate_state") or {}
+    if risk.get("history"):
+        write_text(report_dir / "risk_debate.md", debate_report("Risk Debate", risk["history"], ("Aggressive Analyst", "Conservative Analyst", "Neutral Analyst")), persistence)
     if risk.get("aggressive_history"):
         write_text(report_dir / "aggressive_history.md", risk["aggressive_history"], persistence)
     if risk.get("conservative_history"):

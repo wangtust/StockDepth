@@ -7,7 +7,7 @@ export async function POST(request: NextRequest) {
   if (!currentUser) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   try {
     const parsed = manualTradeSchema.safeParse(await request.json());
-    if (!parsed.success) return NextResponse.json({ error: parsed.error.errors[0]?.message || 'Invalid request' }, { status: 400 });
+    if (!parsed.success) return NextResponse.json({ error: parsed.error.issues[0]?.message || 'Invalid request' }, { status: 400 });
     const key = parseIdempotencyKey(request.headers.get('Idempotency-Key'));
     const result = await executeManualTrade(currentUser.id, parsed.data, key);
     return NextResponse.json(result, { status: 201 });

@@ -63,7 +63,7 @@ const modelConfigSchema = z.object({
   modelOptions: z.preprocess(value => {
     if (typeof value !== 'string' || !value.trim()) return {};
     try { return JSON.parse(value); } catch { return value; }
-  }, z.record(z.union([z.string().max(100), z.number().finite(), z.boolean()]))
+  }, z.record(z.string(), z.union([z.string().max(100), z.number().finite(), z.boolean()]))
     .refine(options => Object.keys(options).every(key => ['temperature','top_p','max_tokens','max_retries','timeout','reasoning_effort','thinking_level','effort','seed','requests_per_minute','request_concurrency'].includes(key)), 'Unsupported model parameters')
     .refine(options => ['requests_per_minute','request_concurrency'].every(key => options[key] == null || (typeof options[key] === 'number' && options[key] > 0 && options[key] <= 10000)), 'Rate limit parameters must be numbers from 1 to 10000')),
   quickEnabled: z.coerce.boolean().optional(),

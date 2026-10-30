@@ -56,7 +56,7 @@ jobs:
       fail-fast: false
       matrix:
         group: [admin, experience, coordinator]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -64,7 +64,7 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       - uses: ./.github/actions/setup-ci
-      - run: node scripts/ci/test-frontend.cjs --install-browser --with-deps
+      - run: node scripts/ci/test-frontend.cjs --install-browser
       - run: node scripts/ci/test-frontend.cjs --group=${{ matrix.group }}
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         if: always()

@@ -6,6 +6,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getUser } from '@/lib/db/queries';
 import { db } from '@/lib/db/drizzle';
 import { analysisJobs, analysisReports } from '@/lib/db/schema';
+import { createHash } from 'node:crypto';
 
 export async function GET(
   request: NextRequest,
@@ -32,8 +33,16 @@ export async function GET(
       .where(and(eq(analysisJobs.id, id), eq(analysisJobs.userId, currentUser.id),
         isNull(analysisJobs.hiddenAt), eq(analysisReports.userId, currentUser.id),
         eq(analysisReports.reportKey, reportKey))).limit(1));
-    return report ? NextResponse.json({ report }, { headers: timing.headers() })
-      : NextResponse.json({ error: 'Not found' }, { status: 404 });
+    if (!report) return NextResponse.json({ error: 'Not found' }, { status: 404 });
+    // Authorize every read, including conditional reads. Hash the complete public
+    // representation so title/content changes cannot reuse an old response.
+    const body = JSON.stringify({ report });
+    const etag = `"${createHash('sha256').update(body).digest('base64url')}"`;
+    const headers = { ...timing.headers(), ETag: etag };
+    if (request.headers.get('if-none-match') === etag) {
+      return new NextResponse(null, { status: 304, headers });
+    }
+    return new NextResponse(body, { headers: { ...headers, 'Content-Type': 'application/json' } });
   }
 
   const [job] = await timing.measure('job', () => db

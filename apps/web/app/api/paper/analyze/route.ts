@@ -64,7 +64,7 @@ async function enqueueAnalysis(request: NextRequest) {
   const parsed = analyzeSchema.safeParse(await request.json());
   if (!parsed.success) {
     return NextResponse.json(
-      { error: parsed.error.errors[0]?.message || 'Invalid request' },
+      { error: parsed.error.issues[0]?.message || 'Invalid request' },
       { status: 400 }
     );
   }

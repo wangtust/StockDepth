@@ -36,7 +36,7 @@ def _fetch_subreddit(
     sub: str,
     limit: int,
     timeout: float,
-) -> list[dict]:
+) -> list[dict] | None:
     qs = urlencode({
         "q": ticker,
         "restrict_sr": "on",
@@ -51,7 +51,7 @@ def _fetch_subreddit(
             payload = json.loads(resp.read())
     except (HTTPError, URLError, json.JSONDecodeError, TimeoutError) as exc:
         logger.warning("Reddit fetch failed for r/%s · %s: %s", sub, ticker, exc)
-        return []
+        return None
     children = (payload.get("data") or {}).get("children") or []
     return [c.get("data", {}) for c in children if isinstance(c, dict)]
 
@@ -71,10 +71,16 @@ def fetch_reddit_posts(
     """
     blocks = []
     total_posts = 0
+    unavailable = []
+    subreddits = tuple(subreddits)
     for i, sub in enumerate(subreddits):
         if i > 0:
             time.sleep(inter_request_delay)
         posts = _fetch_subreddit(ticker, sub, limit_per_sub, timeout)
+        if posts is None:
+            unavailable.append(sub)
+            blocks.append(f"r/{sub}: [DATA UNAVAILABLE] Reddit request failed; discussion volume and sentiment cannot be determined.")
+            continue
         total_posts += len(posts)
         if not posts:
             blocks.append(f"r/{sub}: <no posts found mentioning {ticker.upper()} in the past 7 days>")
@@ -98,7 +104,7 @@ def fetch_reddit_posts(
             )
         blocks.append("\n".join(lines))
 
-    if total_posts == 0:
+    if total_posts == 0 and not unavailable:
         return (
             f"<no Reddit posts found mentioning {ticker.upper()} across "
             f"{', '.join(f'r/{s}' for s in subreddits)} in the past 7 days>"

@@ -7,7 +7,7 @@ const timestamp=z.string().datetime({offset:true});
 const identity=z.object({symbol:z.string().min(1).max(40),exchange:z.string(),currency:z.string(),timezone:z.string(),name:z.string().max(160),vendorSymbol:z.string().max(40),status:z.literal('verified')});
 const quote=z.object({price,currency:z.string(),quotedAt:timestamp,priceType:z.literal('regular_unadjusted'),session:z.literal('regular')});
 const daily=z.object({tradingDate:z.string().regex(/^\d{4}-\d{2}-\d{2}$/),open:price,high:price,low:price,close:price,volume:z.string().regex(/^\d{1,18}$/),adjusted:z.literal(false)});
-export const providerSchema=z.object({identity,fetchedAt:timestamp,source:z.literal('yahoo'),quote:quote.optional(),daily:z.array(daily).max(370).optional(),errors:z.record(z.enum(['identity','quote','daily']),z.string().max(80)).default({})});
+export const providerSchema=z.object({identity,fetchedAt:timestamp,source:z.literal('yahoo'),quote:quote.optional(),daily:z.array(daily).max(370).optional(),errors:z.partialRecord(z.enum(['identity','quote','daily']),z.string().max(80)).default({})});
 export type ProviderResult=z.infer<typeof providerSchema>;
 export type MarketProvider=(symbol:string,categories:string[],start?:string)=>Promise<ProviderResult>;
 export function validateProvider(raw:unknown,symbol:string,now=new Date()) {

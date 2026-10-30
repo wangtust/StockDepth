@@ -11,16 +11,15 @@ import {
   CardHeader,
   CardTitle
 } from '@/components/ui/card';
-import dynamic from 'next/dynamic';
-import useSWR from 'swr';
+import useSWR, { preload } from 'swr';
 import { analysisFetcher, canRetainAnalysisData, shouldRetryAnalysisRead } from '@/lib/http/analysis-fetcher';
 import { pollingDefaults } from '@/lib/http/polling';
 import { AnalysisActionError, presentActionError } from '@/lib/analysis/action-error';
 import type { PresentedError } from '@/lib/analysis/error-presentation';
 import { ErrorPresentation } from '@/components/error-presentation';
 import { analysisStatusMessage } from '@/lib/analysis/client-status-message';
-const AnalysisProgress = dynamic(() => import('@/components/analysis-progress').then(m => m.AnalysisProgress));
-const MarkdownRenderer = dynamic(() => import('@/components/markdown-renderer').then(m => m.MarkdownRenderer));
+import { AnalysisProgress } from '@/components/analysis-progress';
+import { MarkdownRenderer } from '@/components/markdown-renderer';
 import { cn } from '@/lib/utils';
 import { Loader2, Maximize2, Minimize2, MoreHorizontal, Play, RefreshCcw, Trash2 } from 'lucide-react';
 import {
@@ -71,6 +70,11 @@ export type JobsPayload = {
 const JOBS_POLL_INTERVAL_MS = 7000;
 const REPORT_POLL_INTERVAL_MS = 5000;
 const LIVE_JOB_STATUSES = new Set(['queued', 'running']);
+
+function warmAnalysisRead(url: string) {
+  // Fetch only on user intent; SWR shares the promise with the subsequent click.
+  void preload(url, analysisFetcher).catch(() => {});
+}
 
 function formatAnalysisDate(date: Date) {
   const parts = new Intl.DateTimeFormat('en-US', {
@@ -505,6 +509,13 @@ export default function AnalysisClient({ initialPayload }: { initialPayload: Job
                           : 'border-slate-200 bg-white/70 hover:border-slate-300 hover:bg-white'
                       }`}
                       aria-pressed={selectedJobId === job.id}
+                      onPointerEnter={() => {
+                        if (selectedJobId === job.id) return;
+                        warmAnalysisRead(`/api/analysis/jobs/${job.id}`);
+                        if (job.defaultReportKey && job.defaultReportKey !== 'execution') {
+                          warmAnalysisRead(`/api/analysis/jobs/${job.id}?report=${encodeURIComponent(job.defaultReportKey)}`);
+                        }
+                      }}
                       onClick={() => { setSelectedReportKey(''); setSelectedJobId(job.id); }}
                       type="button"
                     >
@@ -659,6 +670,12 @@ export default function AnalysisClient({ initialPayload }: { initialPayload: Job
                         effectiveReportKey === report.reportKey ? 'default' : 'outline'
                       }
                       className="max-w-[240px] shrink-0 overflow-hidden text-ellipsis rounded-md"
+                      onPointerEnter={() => {
+                        if (effectiveReportKey !== report.reportKey) warmAnalysisRead(`/api/analysis/jobs/${selectedJobId}?report=${encodeURIComponent(report.reportKey)}`);
+                      }}
+                      onFocus={() => {
+                        if (effectiveReportKey !== report.reportKey) warmAnalysisRead(`/api/analysis/jobs/${selectedJobId}?report=${encodeURIComponent(report.reportKey)}`);
+                      }}
                       onClick={() => setSelectedReportKey(report.reportKey)}
                     >
                       {report.reportKey === 'progress' ? 'Interactions' : report.title}

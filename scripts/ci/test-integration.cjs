@@ -39,6 +39,7 @@ const suites = [
   ['admin-concurrency', 'scripts/tests/admin-concurrency.ts', 'stockdepth_ci_admission_', true],
   ['model-availability', 'scripts/tests/model-availability.ts', 'stockdepth_ci_availability_', true],
   ['resume-with-models', 'scripts/tests/resume-with-models.ts', 'stockdepth_regression_', true],
+  ['scheduled-analysis-retry', 'scripts/tests/analysis-retry.ts', 'stockdepth_regression_', true],
 ];
 const results = [];
 async function main() {

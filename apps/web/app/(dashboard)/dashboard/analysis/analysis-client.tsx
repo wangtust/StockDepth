@@ -600,6 +600,10 @@ export default function AnalysisClient({ initialPayload }: { initialPayload: Job
                             <a href={`/public/jobs/${job.publicId}`} target="_blank" rel="noreferrer">View public page</a>
                           </DropdownMenuItem>
                           <DropdownMenuItem onSelect={() => {
+                            if (!navigator.clipboard?.writeText) {
+                              setNotice('Clipboard unavailable. Use View public page to open and copy the sharing URL.');
+                              return;
+                            }
                             navigator.clipboard.writeText(`${location.origin}/public/jobs/${job.publicId}`)
                               .then(() => setNotice('Link copied.'))
                               .catch(() => setNotice('Unable to copy link. Use View public page to open the sharing URL.'));

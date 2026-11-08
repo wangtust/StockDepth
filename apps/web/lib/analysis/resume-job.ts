@@ -13,15 +13,24 @@ type Transaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
 export async function resumeAnalysisJobInTransaction(tx:Transaction,userId:number,jobId:number,replacement?:ReplacementModels,autoOwner?:string,scheduled=false) {
   const [existing]=await tx.select().from(analysisJobs).where(and(eq(analysisJobs.id,jobId),eq(analysisJobs.userId,userId),isNull(analysisJobs.hiddenAt))).for('update');
   if(!existing||(autoOwner ? existing.status!=='running'||existing.workerOwner!==autoOwner||!existing.workerLeaseUntil||existing.workerLeaseUntil<=new Date() : existing.status!=='failed'))return {error:'Only failed analysis jobs can be continued',status:409} as const;
-  const quickVersion=existing.quickModelVersionId ? await readModelVersion(tx,existing.quickModelVersionId) : null;
-  const deepVersion=existing.deepModelVersionId ? await readModelVersion(tx,existing.deepModelVersionId) : null;
+  let quickVersion:Awaited<ReturnType<typeof readModelVersion>>|null;
+  let deepVersion:Awaited<ReturnType<typeof readModelVersion>>|null;
+  try {
+    quickVersion=existing.quickModelVersionId ? await readModelVersion(tx,existing.quickModelVersionId) : null;
+    deepVersion=existing.deepModelVersionId ? await readModelVersion(tx,existing.deepModelVersionId) : null;
+  } catch(error) {
+    if(scheduled && error instanceof Error && ['Pinned model version unavailable','Model key unavailable or invalid'].includes(error.message))
+      return {error:'Pinned model credentials unavailable',status:409} as const;
+    throw error;
+  }
   const [legacy]=(!quickVersion || !deepVersion) ? await tx.select().from(analysisJobLegacyConfigs).where(eq(analysisJobLegacyConfigs.jobId,jobId)) : [];
   const historical=legacy?.evidence || {};
   let changed:Partial<typeof analysisJobs.$inferInsert>={};
   if(autoOwner) {
     const blocked=await unavailableJobModels(existing,tx);
     if(!blocked.length)return {error:'No unavailable model to replace',status:409} as const;
-    const prior=await tx.select({id:analysisJobResumptions.id}).from(analysisJobResumptions).where(eq(analysisJobResumptions.jobId,jobId));
+    const prior=await tx.select({id:analysisJobResumptions.id}).from(analysisJobResumptions).where(and(eq(analysisJobResumptions.jobId,jobId),sql`(${analysisJobResumptions.previousQuickVersionId} is distinct from ${analysisJobResumptions.nextQuickVersionId} or ${analysisJobResumptions.previousDeepVersionId} is distinct from ${analysisJobResumptions.nextDeepVersionId})`));
+    // Only actual version replacements consume the budget; scheduled continuations do not.
     // Existing manual replacements also consume this conservative per-job budget.
     if(prior.length>=3)return {error:'The automatic model replacement limit of three has been reached. Select models manually to continue.',status:422} as const;
     await tx.execute(sql`select pg_advisory_xact_lock(739421, 3)`);

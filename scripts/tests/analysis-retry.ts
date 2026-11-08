@@ -1,6 +1,6 @@
 // Disposable database only. Requeues synthetic jobs; never starts a runner.
 import assert from 'node:assert/strict';
-import {randomUUID} from 'node:crypto';
+import {randomUUID,randomBytes} from 'node:crypto';
 import {db,client} from '../../apps/web/lib/db/drizzle';
 import {analysisJobs,users,billingAccounts,analysisJobResumptions,analysisReports,analysisModelCalls} from '../../apps/web/lib/db/schema';
 import {createModelFixture} from './model-fixture';
@@ -18,6 +18,10 @@ async function main() {
   const model=await createModelFixture(db,{name:'Retry fixture',provider:'fixture',modelName:'mock',apiKey:'synthetic-key',baseUrl:'http://127.0.0.1:1'});
   const unavailable=await createModelFixture(db,{name:'Blocked fixture',provider:'fixture',modelName:'blocked',apiKey:'synthetic-key',baseUrl:'http://127.0.0.1:1',unavailableReason:'quota_exhausted'});
   const add=async(options:Partial<typeof analysisJobs.$inferInsert>={})=>(await db.insert(analysisJobs).values({userId:owner.id,runId:randomUUID(),ticker:'MOCK',tradeDate:'2026-11-08',analysts:'[]',status:'failed',configurationState:'versioned',quickModelVersionId:model.currentVersionId,deepModelVersionId:model.currentVersionId,completedAt:new Date(Date.now()-3600000),...options}).returning())[0];
+  const savedKeyring=process.env.STOCKDEPTH_MODEL_KEYRING!,savedKeyId=process.env.STOCKDEPTH_MODEL_KEY_ID!;
+  process.env.STOCKDEPTH_MODEL_KEY_ID='archived';process.env.STOCKDEPTH_MODEL_KEYRING=JSON.stringify({...JSON.parse(savedKeyring),archived:randomBytes(32).toString('base64url')});
+  const archived=await createModelFixture(db,{name:'Archived fixture',provider:'fixture',modelName:'archived',apiKey:'synthetic-key'});
+  process.env.STOCKDEPTH_MODEL_KEY_ID=savedKeyId;process.env.STOCKDEPTH_MODEL_KEYRING=savedKeyring;
   const recent=await add({createdAt:new Date(Date.now()-7*86400000),totalTokens:123});
   const edge=await add({completedAt:new Date(Date.now()-86400000+60000)});
   const fallback=await add({completedAt:null,updatedAt:new Date(Date.now()-3600000)});
@@ -25,7 +29,7 @@ async function main() {
     add({completedAt:new Date(Date.now()-86400000-60000)}),add({hiddenAt:new Date()}),
     add({status:'running'}),add({status:'queued'}),add({status:'complete'}),
     add({userId:inactive.id}),add({userId:deleted.id}),add({completedAt:new Date(Date.now()+3600000)}),
-    add({quickModelVersionId:null,deepModelVersionId:null,configurationState:'legacy_unknown'}),add({deepModelVersionId:unavailable.currentVersionId})]);
+    add({quickModelVersionId:null,deepModelVersionId:null,configurationState:'legacy_unknown'}),add({deepModelVersionId:unavailable.currentVersionId}),add({deepModelVersionId:archived.currentVersionId})]);
   await db.insert(analysisReports).values({jobId:recent.id,userId:owner.id,reportKey:'market',title:'Saved',content:'preserve'});
   await db.insert(analysisModelCalls).values({jobId:recent.id,callId:'saved',agent:'market',model:'mock',status:'complete',startedAt:new Date(),totalTokens:123});
   assert.equal(await retryRecentFailedAnalysisJobs(),null,'first start waits for next boundary');
@@ -33,7 +37,7 @@ async function main() {
   await forceDue();
   const results=await Promise.all([retryRecentFailedAnalysisJobs(),retryRecentFailedAnalysisJobs()]);
   assert.equal(results.filter(Boolean).length,1,'one sweep across competing workers');
-  assert.equal(results.find(Boolean)!.queued,3);assert.equal(results.find(Boolean)!.skipped,2);
+  assert.equal(results.find(Boolean)!.queued,3);assert.equal(results.find(Boolean)!.skipped,3);
   for(const job of [recent,edge,fallback]) {
     const [saved]=await db.select().from(analysisJobs).where(eq(analysisJobs.id,job.id));
     assert.equal(saved.status,'queued');assert.equal(saved.runId,job.runId);assert.equal(saved.completedAt,null);

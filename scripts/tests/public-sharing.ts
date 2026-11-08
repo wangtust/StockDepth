@@ -78,6 +78,9 @@ async function main(){
    assert.equal(dialogs,0,'visibility changes never ask for confirmation');
    await page.getByRole('button',{name:'MOCK job actions',exact:true}).nth(1).click();
    await page.getByRole('menuitem',{name:'View public page',exact:true}).waitFor();
+   await page.evaluate(()=>Object.defineProperty(navigator,'clipboard',{configurable:true,value:undefined}));
+   await page.getByRole('menuitem',{name:'Copy link',exact:true}).click();
+   await page.getByText('Clipboard unavailable. Use View public page to open and copy the sharing URL.',{exact:true}).waitFor();
    await page.reload();await page.locator('button[aria-pressed]').nth(1).getByText('Public',{exact:true}).waitFor();
 
    }finally{await browser.close();}

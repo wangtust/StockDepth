@@ -75,6 +75,10 @@ async function main() {
   const legacyHistory=await historyFor(1,legacy.id);
   assert.equal(legacyHistory[0].previousQuickModel,'unknown-old-quick');assert.equal(legacyHistory[0].previousDeepModel,'unknown-old-deep');
   assert.equal(legacyHistory[0].nextQuickModel,quick.modelName);
+  const scheduled=await addJob('running');
+  await db.update(jobs).set({workerOwner:'scheduled-owner',workerLeaseUntil:new Date(Date.now()+60000)}).where(eq(jobs.id,scheduled.id));
+  for(let i=0;i<3;i++)await db.insert(history).values({jobId:scheduled.id,userId:1,previousQuickVersionId:old.currentVersionId,previousDeepVersionId:old.currentVersionId,nextQuickVersionId:old.currentVersionId,nextDeepVersionId:old.currentVersionId,configurationState:'versioned',initiator:'automatic'});
+  assert.equal((await resumeAnalysisJob(1,scheduled.id,undefined,'scheduled-owner')).status,200,'same-model scheduled histories do not consume replacement budget');
   const automatic=await addJob('running');
   await db.update(jobs).set({workerOwner:'automatic-owner',workerLeaseUntil:new Date(Date.now()+60000)}).where(eq(jobs.id,automatic.id));
   assert.equal((await resumeAnalysisJob(1,automatic.id,undefined,'wrong-owner')).status,409);

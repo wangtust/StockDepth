@@ -26,7 +26,10 @@ async function main() {
   for(let i=0;i<2;i++) {const result=spawnSync(process.execPath,[root+'/scripts/initialize-database.cjs'],{cwd:root,env:{...process.env,POSTGRES_URL:fresh.url.toString(),STOCKDEPTH_ADMIN_EMAIL:'',STOCKDEPTH_ADMIN_PASSWORD:''},encoding:'utf8'});assert.equal(result.status,0,'real initializer must create/upgrade safely');}
   await validated(fresh.sql);
   for(const table of ['users','analysis_jobs','analysis_reports','analysis_model_calls','credit_transactions','paper_trades'])assert.equal(Number((await fresh.sql.unsafe(`select count(*) from "${table}"`))[0].count),0,'business table is empty: '+table);
-  const tableCount=Number((await fresh.sql`select count(*) from pg_tables where schemaname='public'`)[0].count);assert.equal(tableCount,31);
+  const schemaSource=await readFile(root+'/apps/web/lib/db/schema.ts','utf8');
+  const expectedTables=[...schemaSource.matchAll(/pgTable\(\s*['"]([^'"]+)['"]/g)].map(match=>match[1]).sort();
+  const actualTables=(await fresh.sql`select tablename from pg_tables where schemaname='public'`).map(row=>row.tablename).sort();
+  assert.deepEqual(actualTables,expectedTables,'fresh initialization includes every declared application table');
   const columns=await fresh.sql`select is_nullable from information_schema.columns where table_name='credit_transactions' and column_name='user_id'`;assert.equal(columns[0].is_nullable,'NO');
   await initializeAdmin(fresh.sql,{STOCKDEPTH_ADMIN_EMAIL:'fixture-admin@example.test',STOCKDEPTH_ADMIN_PASSWORD:'FixturePassword123!'});
   await initializeAdmin(fresh.sql,{STOCKDEPTH_ADMIN_EMAIL:'fixture-admin@example.test',STOCKDEPTH_ADMIN_PASSWORD:'FixturePassword123!'});
@@ -68,7 +71,7 @@ async function main() {
   await upgrade.sql`update analysis_reports set user_id=${owner.id} where id=${report.id}`;
   await migrate(drizzle(upgrade.sql),{migrationsFolder:folder});await migrate(drizzle(upgrade.sql),{migrationsFolder:folder});await validated(upgrade.sql);
   assert.equal((await upgrade.sql`select content from analysis_reports where id=${report.id}`)[0].content,'DO NOT DELETE');assert.equal((await upgrade.sql`select analysis_credits from billing_accounts where user_id=${owner.id}`)[0].analysis_credits,17);assert.equal(Number((await upgrade.sql`select count(*) from credit_transactions`)[0].count),0,'historical opening balances are not invented');
-  console.log('PASS: real empty-DB initialization twice, 31 tables, all constraints validated, report ownership/uniqueness, ledger ownership/non-null, calendar dates, atomic concurrent credits/audit rollback, initial grants, historical preservation, unsafe migration rejection and upgrade idempotency. No providers or email.');
+  console.log('PASS: real empty-DB initialization twice, all declared tables, all constraints validated, report ownership/uniqueness, ledger ownership/non-null, calendar dates, atomic concurrent credits/audit rollback, initial grants, historical preservation, unsafe migration rejection and upgrade idempotency. No providers or email.');
  }finally{if(client)await client.end();for(const sql of connections)await sql.end();for(const name of created)await admin.unsafe(`drop database if exists "${name}" with (force)`);await admin.end();await rm(temp,{recursive:true,force:true});}
 }
 main().catch(e=>{console.error('FAIL database-integrity: '+(e?.name || 'Error')+' '+(e?.code || '')+' '+String(e?.stack || '').split('\n').filter(line=>line.includes('scripts/tests/database-integrity.ts')).join(' ').trim());process.exitCode=1;});

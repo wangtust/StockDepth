@@ -1,5 +1,6 @@
 import { readModelVersion } from '@/lib/analysis/model-versions';
 import '../env';
+import { retryRecentFailedAnalysisJobs } from './analysis-retry';
 import { extractDecision } from '@/lib/analysis/decision-extraction';
 import { resumeAnalysisJob } from '@/lib/analysis/resume-job';
 import { recordQuotaFailures, unavailableJobModels } from '@/lib/analysis/model-availability';
@@ -533,6 +534,7 @@ async function main() {
   );
   const activeJobs = new Set<Promise<void>>();
   let lastMetricsAt = 0;
+  let nextRetryCheckAt = 0;
 
   function trackJob(job: ClaimedJob, options: { startRun?: boolean } = {}) {
     if (job.externalPid) void resourceMonitor.track(job.externalPid);
@@ -543,6 +545,15 @@ async function main() {
   }
 
   while (true) {
+    if (Date.now() >= nextRetryCheckAt) {
+      try {
+        const result = await retryRecentFailedAnalysisJobs();
+        if (result) console.log(JSON.stringify(result));
+      } catch (error) {
+        console.error('Scheduled analysis retry failed:', error instanceof Error ? error.name : 'Error');
+      }
+      nextRetryCheckAt = Date.now() + 60000;
+    }
     const currentConfig = await loadWorkerRuntimeConfig();
     const memory = await memorySnapshot();
     if (Date.now() - lastMetricsAt >= 30000) {

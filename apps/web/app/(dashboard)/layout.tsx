@@ -107,7 +107,7 @@ function Header() {
         </Link>
         <div className="flex items-center gap-2 sm:gap-4">
           <Suspense fallback={<div className="h-9" />}>
-            <UserMenu />
+            <Link href="/public/jobs" className="text-sm font-medium">Public analyses</Link><UserMenu />
           </Suspense>
         </div>
       </div>

@@ -79,7 +79,10 @@ async function main(){
   assert.equal((await merged.sql`select analysis_credits from billing_accounts where user_id=${mergeUser.id}`)[0].analysis_credits,37,'merged account upgrades through normalization');
   const fresh=await database('fresh');
   for(let i=0;i<2;i++){const result=spawnSync(process.execPath,[root+'/scripts/initialize-database.cjs'],{cwd:root,env:{...process.env,POSTGRES_URL:fresh.url.toString(),STOCKDEPTH_ADMIN_EMAIL:'',STOCKDEPTH_ADMIN_PASSWORD:''},encoding:'utf8'});assert.equal(result.status,0,'initializer succeeds on fresh DB and repeat');}
-  assert.equal(Number((await fresh.sql`select count(*) from pg_tables where schemaname='public'`)[0].count),31);
+  const schemaSource=await readFile(root+'/apps/web/lib/db/schema.ts','utf8');
+  const expectedTables=[...schemaSource.matchAll(/pgTable\(\s*['"]([^'"]+)['"]/g)].map(match=>match[1]).sort();
+  const actualTables=(await fresh.sql`select tablename from pg_tables where schemaname='public'`).map(row=>row.tablename).sort();
+  assert.deepEqual(actualTables,expectedTables,'fresh initialization includes every declared application table');
   assert.equal(Number((await fresh.sql`select count(*) from pg_constraint c join pg_namespace n on n.oid=c.connamespace where n.nspname='public' and not c.convalidated`)[0].count),0);
   for(const name of ['analysis_jobs_user_visible_id_idx','analysis_jobs_status_created_at_idx','analysis_jobs_worker_lease_idx'])assert.equal((await fresh.sql`select indexname from pg_indexes where schemaname='public' and indexname=${name}`).length,1,'existing access index '+name);
   process.env.POSTGRES_URL=fresh.url.toString();process.env.STOCKDEPTH_MODEL_KEY_ID='fixture';process.env.STOCKDEPTH_MODEL_KEYRING=JSON.stringify({fixture:randomBytes(32).toString('base64url')});

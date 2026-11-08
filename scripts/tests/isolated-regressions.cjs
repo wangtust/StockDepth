@@ -11,6 +11,8 @@ const postgres = require(modules + '/postgres');
 const { drizzle } = require(modules + '/drizzle-orm/postgres-js');
 const { migrate } = require(modules + '/drizzle-orm/postgres-js/migrator');
 const suites = {
+  sharing: ['stockdepth_regression_', 'scripts/tests/public-sharing.ts', 'apps/web/tsconfig.json'],
+  retry: ['stockdepth_regression_', 'scripts/tests/analysis-retry.ts', 'apps/workers/tsconfig.json'],
   stability: ['stockdepth_stage1_', 'apps/workers/tests/stage1-stability.ts', 'apps/workers/tsconfig.json'],
   resume: ['stockdepth_regression_', 'scripts/tests/resume-with-models.ts', 'apps/web/tsconfig.json'],
   sync: ['stockdepth_stage2_worker_', 'apps/workers/tests/stage2-sync.ts', 'apps/workers/tsconfig.json'],

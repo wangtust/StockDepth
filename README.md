@@ -161,3 +161,23 @@ Original StockDepth code is licensed under the [Apache License 2.0](LICENSE). Th
 Original copyrights remain with their respective holders. The root license does not override third-party licenses. Other dependencies remain subject to their own licenses.
 
 StockDepth is intended for research and paper trading. Analysis results are not investment advice. Market data, news, and model services remain subject to their providers' usage and redistribution terms.
+
+### Scheduled failed-analysis retries
+
+The analysis worker automatically requeues visible failed analysis jobs every eight hours (00:00, 08:00 and 16:00 Asia/Shanghai), within one minute of the scheduled time. Eligibility uses the failure completion time within the previous 24 hours (`updated_at` for older rows without `completed_at`). Jobs resume the same checkpoint with their pinned model versions, saved reports and usage; no additional analysis credit is deducted. Existing queue concurrency limits still apply.
+
+Hidden jobs, inactive/deleted users, unavailable models, and legacy jobs without reliable model versions are skipped. The latter two can use the existing model selection and Continue flow. Automatic continuations appear in resumption history. The schedule is persisted in PostgreSQL and the entire sweep commits atomically, so multiple workers and restarts do not duplicate it. First startup schedules the next eight-hour boundary; after downtime, one overdue sweep runs against the current 24-hour window.
+
+### Public analyses
+
+Completed jobs are private by default, including all existing jobs. Each job card displays **Private** or **Public**. Use its three-dot menu to choose **Make public** or **Make private**, open the public page, or copy its link. Publishing takes effect immediately without a confirmation dialog. **Make private** immediately withdraws the job. Deleting a job also makes it private; restoring it does not republish it.
+
+The **Public analyses** header link opens `/public/jobs`, accessible without signing in. Authors are anonymous. Only final report types and an explicit metadata allowlist are exposed; account details, execution/progress traces, model credentials, calls and costs are excluded. Reports are user-published content and may have been saved by readers before withdrawal. Inactive/deleted owners are excluded. Detail pages ask search engines not to index them.
+
+- `PATCH /api/analysis/jobs/:id/visibility`: authenticated owner, JSON `{"visibility":"public"}` or `{"visibility":"private"}`; only completed jobs can become public.
+- `GET /api/public/jobs`: optional `ticker`, `date` (YYYY-MM-DD), `language`, `limit` (1–50, default 20), `before` (opaque `nextCursor` from the preceding page).
+- `GET /api/public/jobs/:publicId`: public metadata and final reports, or 404 after withdrawal.
+
+Public APIs return `Cache-Control: no-store` and apply bounded per-process limits of 60 requests per client per minute and 600 globally. For multiple instances, enforce shared limits at the reverse proxy; only trust forwarded client IPs from that proxy. Visibility changes are audited atomically.
+
+Validate with `node scripts/tests/isolated-regressions.cjs sharing` (disposable database, isolated Next server on 3108, headless browser; no model calls).

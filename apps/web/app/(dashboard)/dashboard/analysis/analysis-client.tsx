@@ -39,6 +39,8 @@ type Job = UsageJob & {
   language: string;
   depth: number;
   status: string;
+  visibility?: 'public' | 'private';
+  publicId?: string;
   externalStatus?: string | null;
   errorMessage?: string | null;
   createdAt: string;
@@ -119,6 +121,7 @@ export default function AnalysisClient({ initialPayload }: { initialPayload: Job
   const [depth, setDepth] = useState(1);
   const [submitting, setSubmitting] = useState(false);
   const [deletingJobId, setDeletingJobId] = useState<number | null>(null);
+  const [changingVisibilityJobId, setChangingVisibilityJobId] = useState<number | null>(null);
   const [retryingJobId, setRetryingJobId] = useState<number | null>(null);
   const [error, setError] = useState<PresentedError | null>(null);
   const [invalidField, setInvalidField] = useState('');
@@ -273,6 +276,33 @@ export default function AnalysisClient({ initialPayload }: { initialPayload: Job
     } finally {
       actionLock.current = false;
       setSubmitting(false);
+    }
+  }
+
+  async function handleVisibility(job: Job) {
+    if (actionLock.current) return;
+    actionLock.current = true;
+    setChangingVisibilityJobId(job.id);
+    setError(null);
+    setNotice('');
+    const visibility = job.visibility === 'public' ? 'private' : 'public';
+    try {
+      const response = await fetch(`/api/analysis/jobs/${job.id}/visibility`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ visibility })
+      });
+      const data = await readJson(response);
+      if (!response.ok) throw new AnalysisActionError(response.status, data.error || 'Failed to update visibility');
+      await loadJobs(current => current ? {
+        ...current, jobs: current.jobs.map(item => item.id === job.id
+          ? { ...item, visibility: data.visibility, publicId: data.publicId } : item)
+      } : current, { revalidate: false });
+      setNotice(`Job is now ${visibility}.`);
+    } catch (err) {
+      setError(presentActionError(err, 'visibility'));
+    } finally {
+      actionLock.current = false;
+      setChangingVisibilityJobId(null);
     }
   }
 
@@ -523,7 +553,12 @@ export default function AnalysisClient({ initialPayload }: { initialPayload: Job
                         <span className="truncate font-medium text-slate-950">
                           {job.ticker}
                         </span>
-                        <StatusLabel status={job.status} />
+                        <div className="flex shrink-0 items-center gap-2">
+                          <span className={cn('rounded-full border px-2 py-0.5 text-xs', job.visibility === 'public' ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-slate-200 bg-slate-50 text-slate-600')}>
+                            {job.visibility === 'public' ? 'Public' : 'Private'}
+                          </span>
+                          <StatusLabel status={job.status} />
+                        </div>
                       </div>
                       <div className="mt-1 truncate text-sm text-muted-foreground">
                         {job.realtimeData ? 'Realtime' : job.tradeDate} · {getDepthLabel(job.depth)} · {job.reportCount || 0} reports
@@ -548,15 +583,31 @@ export default function AnalysisClient({ initialPayload }: { initialPayload: Job
                           size="icon"
                           className="absolute right-1.5 top-1.5 h-8 w-8"
                           aria-label={`${job.ticker} job actions`}
-                          disabled={deletingJobId !== null || submitting || retryingJobId !== null}
+                          disabled={deletingJobId !== null || submitting || retryingJobId !== null || changingVisibilityJobId !== null}
                         >
                           <MoreHorizontal className="h-4 w-4" />
                         </Button>
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end" id={`job-menu-content-${job.id}`} aria-labelledby={`job-menu-trigger-${job.id}`}>
                         <DropdownMenuItem
+                          disabled={job.status !== 'complete' || changingVisibilityJobId !== null}
+                          onSelect={() => handleVisibility(job)}
+                        >
+                          {job.visibility === 'public' ? 'Make private' : 'Make public'}
+                        </DropdownMenuItem>
+                        {job.visibility === 'public' && job.publicId && <>
+                          <DropdownMenuItem asChild>
+                            <a href={`/public/jobs/${job.publicId}`} target="_blank" rel="noreferrer">View public page</a>
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onSelect={() => {
+                            navigator.clipboard.writeText(`${location.origin}/public/jobs/${job.publicId}`)
+                              .then(() => setNotice('Link copied.'))
+                              .catch(() => setNotice('Unable to copy link. Use View public page to open the sharing URL.'));
+                          }}>Copy link</DropdownMenuItem>
+                        </>}
+                        <DropdownMenuItem
                           className="text-red-600 focus:bg-red-50 focus:text-red-600"
-                          disabled={deletingJobId !== null || submitting || retryingJobId !== null}
+                          disabled={deletingJobId !== null || submitting || retryingJobId !== null || changingVisibilityJobId !== null}
                           onSelect={() => handleDeleteJob(job.id)}
                         >
                           <Trash2 className="h-4 w-4" />

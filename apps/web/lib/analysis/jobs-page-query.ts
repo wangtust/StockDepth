@@ -16,6 +16,7 @@ export function jobsPageQuery(userId: number, before?: number) {
         'id', j.id, 'ticker', j.ticker, 'tradeDate', j.trade_date,
         'realtimeData', j.realtime_data, 'language', j.language, 'depth', j.depth,
         'quickModel', coalesce(qv.model_name,l.evidence->>'quickModel'), 'deepModel', coalesce(dv.model_name,l.evidence->>'deepModel'),
+        'visibility', j.visibility, 'publicId', j.public_id,
         'status', j.status, 'inputTokens', j.input_tokens, 'outputTokens', j.output_tokens,
         'totalTokens', j.total_tokens, 'tokenUsageComplete', j.token_usage_complete,
         'startedAt', j.started_at at time zone 'UTC', 'completedAt', j.completed_at at time zone 'UTC',

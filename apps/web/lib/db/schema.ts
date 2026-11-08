@@ -179,14 +179,20 @@ export const analysisJobs = pgTable(
     errorMessage: text('error_message'),
     startedAt: timestamp('started_at'),
     completedAt: timestamp('completed_at'),
+    visibility: text('visibility').notNull().default('private'),
+    publicId: uuid('public_id').notNull().defaultRandom().unique(),
+    publishedAt: timestamp('published_at', {withTimezone:true}),
     hiddenAt: timestamp('hidden_at'),
     createdAt: timestamp('created_at').notNull().defaultNow(),
     updatedAt: timestamp('updated_at').notNull().defaultNow(),
   },
   (table) => [
+    check('analysis_jobs_visibility_valid', sql`${table.visibility} in ('private','public')`),
+    index('analysis_jobs_public_page_idx').on(table.publishedAt, table.publicId).where(sql`${table.visibility} = 'public' and ${table.status} = 'complete' and ${table.hiddenAt} is null`),
     uniqueIndex('analysis_jobs_id_owner_idx').on(table.id,table.userId),
     check('analysis_jobs_configuration_state', sql`(${table.configurationState} = 'legacy_unknown' AND ${table.quickModelVersionId} IS NULL AND ${table.deepModelVersionId} IS NULL) OR (${table.configurationState} = 'versioned' AND ${table.quickModelVersionId} IS NOT NULL AND ${table.deepModelVersionId} IS NOT NULL)`),
     check('analysis_jobs_charged_credits_nonnegative', sql`${table.chargedCredits} IS NULL OR ${table.chargedCredits} >= 0`),
+    index('analysis_jobs_failed_retry_idx').on(sql`coalesce(${table.completedAt}, ${table.updatedAt})`).where(sql`${table.status} = 'failed' and ${table.hiddenAt} is null`),
     index('analysis_jobs_status_created_at_idx').on(table.status, table.createdAt),
     index('analysis_jobs_worker_lease_idx').on(table.status, table.workerLeaseUntil, table.createdAt),
     index('analysis_jobs_user_created_at_idx').on(table.userId, table.createdAt),
@@ -815,3 +821,9 @@ export const analysisJobResumptions = pgTable('analysis_job_resumptions', {
   check('analysis_resumptions_initiator_valid', sql`${t.initiator} IN ('user','automatic','admin','legacy_unknown')`),
   check('analysis_resumptions_state_valid', sql`(${t.configurationState} = 'legacy_unknown' AND ${t.nextQuickVersionId} IS NULL AND ${t.nextDeepVersionId} IS NULL) OR (${t.configurationState} = 'versioned' AND ${t.nextQuickVersionId} IS NOT NULL AND ${t.nextDeepVersionId} IS NOT NULL)`),
   index('analysis_resumptions_job_created_idx').on(t.jobId,t.createdAt)]);
+
+// Persistent clock shared by analysis workers; advanced with the retry transaction.
+export const analysisRetrySchedule = pgTable('analysis_retry_schedule', {
+  key: text('key').primaryKey(),
+  nextRunAt: timestamp('next_run_at', {withTimezone:true}).notNull(),
+});

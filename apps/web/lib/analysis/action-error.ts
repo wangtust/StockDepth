@@ -5,13 +5,14 @@ export class AnalysisActionError extends Error {
 }
 
 // Match known business errors; never expose arbitrary API bodies or tracebacks.
-export function presentActionError(error: unknown, action: 'queue' | 'delete' | 'continue'): PresentedError {
+export function presentActionError(error: unknown, action: 'queue' | 'delete' | 'continue' | 'visibility'): PresentedError {
   const status = error instanceof AnalysisActionError ? error.status : undefined;
   const evidence = error instanceof Error ? error.message : '';
-  const title = {queue:'Could not queue analysis',delete:'Could not delete analysis',continue:'Could not continue analysis'}[action];
+  const title = {visibility:'Could not update visibility',queue:'Could not queue analysis',delete:'Could not delete analysis',continue:'Could not continue analysis'}[action];
   let description = status ? `The server rejected this operation (HTTP ${status}).` : 'The operation could not be confirmed.';
   let nextStep = 'Refresh the job list to check its current state before trying again.';
   if (status === 401) { description = 'Your session has expired.'; nextStep = 'Sign in again before submitting another operation.'; }
+  else if (status === 403 && action === 'visibility' && /Invalid origin/i.test(evidence)) { description = 'The request website address could not be verified.'; nextStep = 'Reload this page and try again. If it persists, check the website address configuration.'; }
   else if (status === 403) { description = 'Your account does not have permission for this operation.'; nextStep = 'Check your account permissions.'; }
   else if (status === 402) { description = 'There are not enough analysis credits for the selected depth.'; nextStep = 'Choose a lower depth or add credits.'; }
   else if (status === 400 && /模型|model|Quick|Deep/i.test(evidence)) { description = 'The selected Quick or Deep model is unavailable or does not support this role.'; nextStep = 'Refresh the model list and choose available Quick and Deep models.'; }

@@ -52,6 +52,7 @@ export async function GET(
       quickModelVersionId: analysisJobs.quickModelVersionId, deepModelVersionId: analysisJobs.deepModelVersionId,
       configurationState: analysisJobs.configurationState, chargedCredits: analysisJobs.chargedCredits,
       externalStatus: analysisJobs.externalStatus, errorMessage: analysisJobs.errorMessage,
+      visibility: analysisJobs.visibility, publicId: analysisJobs.publicId,
       hiddenAt: analysisJobs.hiddenAt,
       startedAt: analysisJobs.startedAt, completedAt: analysisJobs.completedAt,
       updatedAt: analysisJobs.updatedAt, inputTokens: analysisJobs.inputTokens,
@@ -99,7 +100,7 @@ export async function DELETE(
     return NextResponse.json({ error: 'Not found' }, { status: 404 });
   }
   const [job] = await db.update(analysisJobs)
-    .set({ hiddenAt: sql`coalesce(${analysisJobs.hiddenAt}, now())` })
+    .set({ hiddenAt: sql`coalesce(${analysisJobs.hiddenAt}, now())`, visibility:'private', publishedAt:null })
     .where(and(eq(analysisJobs.id, id), eq(analysisJobs.userId, user.id)))
     .returning({ id: analysisJobs.id });
   if (!job) return NextResponse.json({ error: 'Not found' }, { status: 404 });

@@ -1,0 +1,18 @@
+[Unit]
+Description=StockDepth analysis worker
+After=network.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+WorkingDirectory=%h/StockDepth
+ExecStart=%h/StockDepth/bin/stockdepth run analysis
+Restart=always
+RestartSec=10
+StandardOutput=append:%h/StockDepth/var/analysis.log
+StandardError=append:%h/StockDepth/var/analysis.log
+# Runners belong to the API service; restarting this worker only resumes monitoring.
+TimeoutStopSec=30
+
+[Install]
+WantedBy=default.target

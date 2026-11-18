@@ -32,7 +32,7 @@ def live(record):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('action', choices=['start', 'stop', 'status', 'restart', 'build'])
+    parser.add_argument('action', choices=['start', 'stop', 'status', 'restart', 'build', 'run'])
     parser.add_argument('services', nargs='*')
     args = parser.parse_args()
     names = args.services or ['api', 'web', 'analysis', 'market']
@@ -46,6 +46,18 @@ def main():
     env['PATH'] = str(RUNTIME) + ':' + env.get('PATH', '')
     env['PYTHONPATH'] = str(ROOT / 'apps/api')
     env['PYTHONUNBUFFERED'] = '1'
+    if args.action == 'run':
+        if len(names) != 1:
+            parser.error('run requires exactly one service')
+        name = names[0]
+        if live(records.get(name, {})):
+            raise SystemExit(f'{name}: already running')
+        cwd, command = SERVICES[name]
+        pid = os.getpid()
+        records[name] = {'pid': pid, 'start': Path(f'/proc/{pid}/stat').read_text().split()[21]}
+        STATE.write_text(json.dumps(records, indent=2))
+        os.chdir(cwd)
+        os.execvpe(command[0], command, env)
     if args.action == 'build':
         raise SystemExit(subprocess.run([str(RUNTIME / 'pnpm'), 'build'], cwd=ROOT / 'apps/web', env=env).returncode)
     if args.action in ('start', 'restart') and 'web' in names:

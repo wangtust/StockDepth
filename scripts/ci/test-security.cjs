@@ -8,6 +8,7 @@ const suites = [
   ['scripts/tests/initialize-admin.cjs', false],
   ['scripts/tests/ci-auth.cjs', false],
   ['scripts/tests/worker-request.ts', true],
+  ['scripts/tests/worker-resilience.ts', true],
 ];
 const results = [];
 (async () => {

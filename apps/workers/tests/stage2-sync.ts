@@ -6,15 +6,22 @@ import { db, client } from '@/lib/db/drizzle';
 import { analysisJobs, analysisReports, analysisModelCalls, users } from '@/lib/db/schema';
 import { claimAnalysis, LostOwnershipError } from '../src/analysis-ownership';
 import { createServer } from 'node:http';
+import { createModelFixture } from '../../../scripts/tests/model-fixture';
 async function main() {
  let polls = 0, bodies = 0, scenario = 'complete';
  const server = createServer((req, res) => {
+   if (req.method === 'POST') {
+     assert(['resumed', 'existing'].includes(scenario), 'Recovery must not start new model runs');
+     res.setHeader('Content-Type', 'application/json');
+     req.resume(); res.end(JSON.stringify({status:scenario === 'existing' ? 'already-running' : 'started'})); return;
+   }
    const light = req.url?.startsWith('/api/run/status'); if (light) polls++; else bodies++;
    const version = polls >= 3 ? 'v2' : 'v1';
-   const status = scenario === 'partial' ? 'partial' : polls >= 4 ? scenario : 'running';
+   assert.equal(req.method, 'GET', 'Recovery must not start new model runs');
+   const status = scenario === 'recovered' ? 'complete' : scenario === 'partial' ? 'partial' : polls >= 4 ? (scenario === 'resumed' ? 'complete' : scenario) : 'running';
    res.setHeader('Content-Type', 'application/json');
-   res.end(JSON.stringify({ status, report_version: version, runner_log: status === 'failed' ? 'mock runner error' : '',
-     reports: light ? [{ key: 'decision', title: 'Decision', version }] : [{ key: 'decision', title: 'Decision', content: version }],
+   res.end(JSON.stringify({ status, report_version: version, runner_log: status === 'failed' ? 'mock\0 runner error' : '',
+     reports: light ? [{ key: 'decision', title: 'Decision', version }] : [{ key: 'decision', title: 'Decision', content: version + '\0' }],
      usage: { calls: [], history_complete: polls >= 2 } }));
  });
  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
@@ -30,6 +37,13 @@ async function main() {
  await db.insert(analysisJobs).values({ userId: user.id, runId: 'stage2-fixture', ticker: 'MOCK', tradeDate: '2026-10-13', analysts: '[]' });
  const job = await claimAnalysis({ systemConcurrency: 2, userConcurrency: 2 }); assert(job);
  const reports = [{ key: 'market', title: 'Market', content: 'a'.repeat(100000) }, { key: 'news', title: 'News', content: 'b'.repeat(100000) }];
+ await saveReports(job, reports);
+ const dirtyReports = [{ ...reports[0], title: 'Market\0', content: '中文\0 🚀' }, reports[1]];
+ await saveReports(job, dirtyReports);
+ const sanitized = await db.select().from(analysisReports);
+ assert.equal(sanitized.find(r => r.reportKey === 'market')!.content, '中文 🚀');
+ await saveReports(job, dirtyReports);
+ assert.deepEqual(await db.select().from(analysisReports), sanitized, 'Sanitized reports must not churn');
  await saveReports(job, reports);
  const before = await db.select().from(analysisReports);
  await saveReports(job, reports);
@@ -80,6 +94,34 @@ async function main() {
      const [report] = await db.select().from(analysisReports).where(eq(analysisReports.jobId, fixture.id)); assert.equal(report.content, 'v2'); }
    await db.update(analysisJobs).set({ status: 'complete', workerOwner: null, workerLeaseUntil: null }).where(eq(analysisJobs.id, fixture.id));
  }
+ // A finished runner must synchronize even if its model was retired and its
+ // original start predates the hard timeout. No paid restart is needed.
+ scenario = 'recovered'; polls = 0; bodies = 0;
+ const blocked = await createModelFixture(db, {name:'Retired recovery model',provider:'fixture',modelName:'mock',apiKey:'synthetic',unavailableReason:'quota_exhausted'});
+ const [finished] = await db.insert(analysisJobs).values({userId:user.id,runId:'finished-before-crash',ticker:'MOCK',tradeDate:'2026-10-13',analysts:'[]',status:'running',externalStatus:'running',startedAt:new Date(Date.now()-10*86400000),configurationState:'versioned',quickModelVersionId:blocked.currentVersionId,deepModelVersionId:blocked.currentVersionId}).returning();
+ const ownedFinished = await claimAnalysis({systemConcurrency:2,userConcurrency:2}, true);
+ assert.equal(ownedFinished?.id, finished.id);
+ await processJob(ownedFinished!, {startRun:false});
+ const [reconciled] = await db.select().from(analysisJobs).where(eq(analysisJobs.id, finished.id));
+ assert.equal(reconciled.status, 'complete');
+ assert.equal(polls, 1); assert.equal(bodies, 1);
+ assert.equal((await db.select().from(billingAccounts))[0].analysisCredits, 100);
+ scenario = 'resumed'; polls = 0; bodies = 0;
+ const activeModel = await createModelFixture(db, {name:'Resume model',provider:'fixture',modelName:'mock',apiKey:'synthetic'});
+ const [waiting] = await db.insert(analysisJobs).values({userId:user.id,runId:'long-queued-resumption',ticker:'MOCK',tradeDate:'2026-10-13',analysts:'[]',startedAt:new Date(Date.now()-10*86400000),configurationState:'versioned',quickModelVersionId:activeModel.currentVersionId,deepModelVersionId:activeModel.currentVersionId}).returning();
+ const admitted = await claimAnalysis({systemConcurrency:2,userConcurrency:2}); assert.equal(admitted?.id,waiting.id);
+ const resumedAt = Date.now();
+ await processJob(admitted!, {startRun:true});
+ const [resumed] = await db.select().from(analysisJobs).where(eq(analysisJobs.id,waiting.id));
+ assert.equal(resumed.status,'complete');
+ assert(resumed.startedAt!.getTime() >= resumedAt, 'New attempt budget begins at actual runner launch');
+ assert.equal(polls,4);
+ scenario = 'existing'; polls = 0; bodies = 0;
+ const oldStart = new Date(Date.now()-10*86400000);
+ const [existing] = await db.insert(analysisJobs).values({userId:user.id,runId:'already-running-deadline',ticker:'MOCK',tradeDate:'2026-10-13',analysts:'[]',startedAt:oldStart,configurationState:'versioned',quickModelVersionId:activeModel.currentVersionId,deepModelVersionId:activeModel.currentVersionId}).returning();
+ const alreadyRunning = await claimAnalysis({systemConcurrency:2,userConcurrency:2}); assert.equal(alreadyRunning?.id,existing.id);
+ await assert.rejects(processJob(alreadyRunning!, {startRun:true}), /hard timed out/);
+ assert.equal((await db.select().from(analysisJobs).where(eq(analysisJobs.id,existing.id)))[0].startedAt?.getTime(), oldStart.getTime(), 'An existing runner must retain its original hard deadline');
  console.log('processJob isolated Mock: complete/failed/partial recovery paths, 4 status/2 body requests, final reports, lease release passed');
  console.log('isolated DB: unchanged row, one row update, removal/addition, recovered reconciliation, usage completeness, Decimal/identity, lease fencing, credits preserved passed');
  } finally { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); }

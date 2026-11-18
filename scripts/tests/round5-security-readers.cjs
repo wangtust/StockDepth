@@ -8,7 +8,7 @@ Object.assign(process.env,{STOCKDEPTH_MODEL_KEY_ID:'fixture',STOCKDEPTH_MODEL_KE
 const plaintext='synthetic-reader-secret';
 let rows=[{id:1,apiKey:keys.encryptModelKey(plaintext),isActive:true,retiredAt:null,modelName:'mock'}];
 const query={from(){return this},where(){return this},orderBy(){return this},limit(){return Promise.resolve(rows)},then(resolve){return Promise.resolve(rows).then(resolve)}};
-const db={select(){return query},update(){return {set(){return {where:async()=>{}}}}}};
+const db={select(){return query},update(){return {set(){return {where(){return {returning:async()=>[{id:1}]}}}}}}};
 const operators={and(){},asc(){},desc(){},eq(){},isNull(){},sql(){}};
 const schema={llmModelConfigs:{},analysisJobs:{}};
 const getters=compile(fs.readFileSync(root+'/apps/web/lib/analysis/model-configs-server.ts','utf8'),{'server-only':{},'drizzle-orm':operators,'@/lib/db/drizzle':{db},'@/lib/db/schema':schema,'@/lib/security/model-key':keys,'./model-versions':{loadModelConfigs:async()=>rows}});

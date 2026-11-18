@@ -1,4 +1,5 @@
 import { fetchWithBackoff } from './request';
+import { postgresText } from './worker-resilience';
 export type Report = { key: string; title: string; relative_path?: string; mtime?: number; size?: number; content: string };
 export type Run<T = unknown> = { status: string; reports?: Report[]; report_version?: string; runner_log?: string; usage?: T };
 // Per monitored run; never share versions across jobs or API restarts.
@@ -43,7 +44,7 @@ export class RunPoller<T> {
 }
 
 export function reportValues(report: Report) {
-  return { reportKey: report.key, title: report.title, relativePath: report.relative_path || null, content: report.content || '' };
+  return { reportKey: postgresText(report.key), title: postgresText(report.title), relativePath: report.relative_path ? postgresText(report.relative_path) : null, content: postgresText(report.content || '') };
 }
 export function reportMatches(row: ReturnType<typeof reportValues>, report: Report) {
   const values = reportValues(report);

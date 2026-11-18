@@ -1,5 +1,6 @@
 import { readModelVersion } from '@/lib/analysis/model-versions';
 import '../env';
+import { postgresText, runIsolatedTask, workerErrorMessage } from './worker-resilience';
 import { retryRecentFailedAnalysisJobs } from './analysis-retry';
 import { extractDecision } from '@/lib/analysis/decision-extraction';
 import { resumeAnalysisJob } from '@/lib/analysis/resume-job';
@@ -215,14 +216,21 @@ async function startStockDepth(job: ClaimedJob) {
   }
   if (payload.pid) await resourceMonitor.track(payload.pid);
 
-  await db
+  // A queued resumption may have waited for days. Start its execution budget
+  // when the API actually launches a runner, and persist it across worker restarts.
+  // An already-running response must retain the existing hard deadline.
+  const startedAt = payload.status === 'started' ? new Date() : job.startedAt;
+  const [updated] = await db
     .update(analysisJobs)
     .set({
       externalStatus: payload.status,
       externalPid: payload.pid || null,
+      startedAt,
       updatedAt: new Date()
     })
-    .where(ownedAnalysis(job));
+    .where(ownedAnalysis(job)).returning({ id: analysisJobs.id });
+  if (!updated) throw new LostOwnershipError();
+  job.startedAt = startedAt;
 }
 
 export async function saveReports(job: ClaimedJob, reports: StockDepthReport[]) {
@@ -261,15 +269,16 @@ export async function syncUsage(job: ClaimedJob, run: StockDepthRun, previousCal
     await assertAnalysisOwner(tx, job);
     for (const call of run.usage!.calls) {
       if (previousCalls.get(call.call_id) === JSON.stringify(call)) continue;
+      const currency = (call.pricing_snapshot as { currency?: string } | null)?.currency;
       const values = {
-        jobId: job.id, callId: call.call_id, agent: call.agent, model: call.model,
+        jobId: job.id, callId: postgresText(call.call_id), agent: postgresText(call.agent), model: postgresText(call.model),
         modelVersionId: call.model_version_id ?? null,
-        costCurrency: (call.pricing_snapshot as {currency?:string}|null)?.currency ?? null,
-        role: call.role || 'legacy', modelConfigId: call.model_config_id ?? null, provider: call.provider ?? null,
+        costCurrency: currency == null ? null : postgresText(currency),
+        role: postgresText(call.role || 'legacy'), modelConfigId: call.model_config_id ?? null, provider: call.provider == null ? null : postgresText(call.provider),
         startedAt: new Date(call.started_at), endedAt: call.ended_at ? new Date(call.ended_at) : null,
-        status: call.status, inputTokens: call.input_tokens, outputTokens: call.output_tokens,
+        status: postgresText(call.status), inputTokens: call.input_tokens, outputTokens: call.output_tokens,
         totalTokens: call.total_tokens, usageAvailable: call.usage_available,
-        isRetry: call.is_retry, requestKind: call.request_kind,
+        isRetry: call.is_retry, requestKind: postgresText(call.request_kind || 'standard'),
         cachedInputTokens: call.cached_input_tokens ?? null,
         rawUsage: call.raw_usage ? JSON.stringify(call.raw_usage) : null,
         pricingSnapshot: call.pricing_snapshot ? JSON.stringify(call.pricing_snapshot) : null,
@@ -323,7 +332,7 @@ async function finishJob(job: ClaimedJob, status: 'complete' | 'failed', errorMe
     .update(analysisJobs)
     .set({
       status,
-      errorMessage: errorMessage || null,
+      errorMessage: errorMessage ? postgresText(errorMessage).slice(-4000) : null,
       completedAt: new Date(),
       workerOwner: null, workerLeaseUntil: null,
       updatedAt: new Date()
@@ -436,8 +445,6 @@ export async function processJob(job: ClaimedJob, options: { startRun?: boolean 
       lastUsageSignature = usageSignature;
     }
 
-    if (await retryUnavailableModels(job)) return;
-
     const signature = progressSignature(run);
     if (signature !== lastSignature) {
       lastSignature = signature;
@@ -463,6 +470,10 @@ export async function processJob(job: ClaimedJob, options: { startRun?: boolean 
       console.log(`Failed analysis job #${job.id}`);
       return;
     }
+
+    // Terminal results are already paid for. Model availability changes must
+    // never queue a new attempt before existing results have been reconciled.
+    if (await retryUnavailableModels(job)) return;
 
     const elapsedMs = Date.now() - startedAt;
     const stalledMs = Date.now() - lastProgressAt;
@@ -510,21 +521,26 @@ async function runClaimedJob(job: ClaimedJob, options: { startRun?: boolean } = 
     try { await renewAnalysis(job); } catch { lost = true; }
     finally { renewing = false; }
   }, Math.floor(analysisLeaseMs / 3));
-  try {
-    if (lost) throw new LostOwnershipError();
-    await processJob(job, options);
-  } catch (error) {
-    if (lost || error instanceof LostOwnershipError) {
-      console.log(`Stopped monitoring analysis job #${job.id}: ownership changed`);
-    } else {
-      const message = error instanceof Error ? error.message : String(error);
-      await finishJob(job, 'failed', message);
-      console.error(`Analysis job #${job.id} failed: ${message}`);
-    }
-  } finally {
-    clearInterval(heartbeat);
-    await db.update(analysisJobs).set({ workerOwner: null, workerLeaseUntil: null }).where(ownedAnalysis(job));
-  }
+  await runIsolatedTask({
+    run: async () => {
+      if (lost) throw new LostOwnershipError();
+      await processJob(job, options);
+    },
+    onError: async (error) => {
+      if (lost || error instanceof LostOwnershipError) {
+        console.log(`Stopped monitoring analysis job #${job.id}: ownership changed`);
+      } else {
+        const message = workerErrorMessage(error);
+        await finishJob(job, 'failed', message);
+        console.error(`Analysis job #${job.id} failed: ${message}`);
+      }
+    },
+    cleanup: async () => {
+      clearInterval(heartbeat);
+      await db.update(analysisJobs).set({ workerOwner: null, workerLeaseUntil: null }).where(ownedAnalysis(job));
+    },
+    log: (stage, error) => console.error(`Analysis job #${job.id} ${stage} failed: ${workerErrorMessage(error)}`),
+  });
 }
 
 async function main() {
@@ -537,7 +553,9 @@ async function main() {
   let nextRetryCheckAt = 0;
 
   function trackJob(job: ClaimedJob, options: { startRun?: boolean } = {}) {
-    if (job.externalPid) void resourceMonitor.track(job.externalPid);
+    if (job.externalPid) void resourceMonitor.track(job.externalPid).catch(error => {
+      console.error(`Analysis job #${job.id} resource tracking failed: ${workerErrorMessage(error)}`);
+    });
     const task = runClaimedJob(job, options).finally(() => {
       activeJobs.delete(task);
     });
@@ -545,46 +563,51 @@ async function main() {
   }
 
   while (true) {
-    if (Date.now() >= nextRetryCheckAt) {
-      try {
-        const result = await retryRecentFailedAnalysisJobs();
-        if (result) console.log(JSON.stringify(result));
-      } catch (error) {
-        console.error('Scheduled analysis retry failed:', error instanceof Error ? error.name : 'Error');
+    try {
+      if (Date.now() >= nextRetryCheckAt) {
+        try {
+          const result = await retryRecentFailedAnalysisJobs();
+          if (result) console.log(JSON.stringify(result));
+        } catch (error) {
+          console.error('Scheduled analysis retry failed:', error instanceof Error ? error.name : 'Error');
+        }
+        nextRetryCheckAt = Date.now() + 60000;
       }
-      nextRetryCheckAt = Date.now() + 60000;
-    }
-    const currentConfig = await loadWorkerRuntimeConfig();
-    const memory = await memorySnapshot();
-    if (Date.now() - lastMetricsAt >= 30000) {
-      const [queue] = await db.execute(sql`select count(*)::int as queued,
-        coalesce(extract(epoch from now() at time zone 'UTC' - min(created_at)), 0)::int as oldest_wait_seconds
-        from analysis_jobs where status = 'queued'`);
-      console.log(JSON.stringify({ event: 'worker_metrics', active: activeJobs.size,
-        concurrency: currentConfig.workerConcurrency, userConcurrency: currentConfig.userConcurrency, ...memory, ...queue }));
-      lastMetricsAt = Date.now();
-    }
-    if (memory.availableMb < minAvailableMemoryMb) {
+      const currentConfig = await loadWorkerRuntimeConfig();
+      const memory = await memorySnapshot();
+      if (Date.now() - lastMetricsAt >= 30000) {
+        const [queue] = await db.execute(sql`select count(*)::int as queued,
+          coalesce(extract(epoch from now() at time zone 'UTC' - min(created_at)), 0)::int as oldest_wait_seconds
+          from analysis_jobs where status = 'queued'`);
+        console.log(JSON.stringify({ event: 'worker_metrics', active: activeJobs.size,
+          concurrency: currentConfig.workerConcurrency, userConcurrency: currentConfig.userConcurrency, ...memory, ...queue }));
+        lastMetricsAt = Date.now();
+      }
+      if (memory.availableMb < minAvailableMemoryMb) {
+        await sleep(pollIntervalMs);
+        continue;
+      }
+
+      while (activeJobs.size < currentConfig.workerConcurrency) {
+        const recovered = await claimAnalysis(currentConfig, true);
+        const job = recovered || await claimAnalysis(currentConfig);
+        if (!job) {
+          break;
+        }
+
+        trackJob(job, { startRun: recovered ? shouldRestartRecoveredJob(job) : true });
+      }
+
+      if (activeJobs.size >= currentConfig.workerConcurrency) {
+        await Promise.race([...activeJobs, sleep(pollIntervalMs)]);
+        continue;
+      }
+
       await sleep(pollIntervalMs);
-      continue;
+    } catch (error) {
+      console.error(`Analysis worker polling failed: ${workerErrorMessage(error)}`);
+      await sleep(pollIntervalMs);
     }
-
-    while (activeJobs.size < currentConfig.workerConcurrency) {
-      const recovered = await claimAnalysis(currentConfig, true);
-      const job = recovered || await claimAnalysis(currentConfig);
-      if (!job) {
-        break;
-      }
-
-      trackJob(job, { startRun: recovered ? shouldRestartRecoveredJob(job) : true });
-    }
-
-    if (activeJobs.size >= currentConfig.workerConcurrency) {
-      await Promise.race([...activeJobs, sleep(pollIntervalMs)]);
-      continue;
-    }
-
-    await sleep(pollIntervalMs);
   }
 }
 
